@@ -1,0 +1,21 @@
+.DS_Store
+
+# JavaScript / extension build outputs
+node_modules/
+dist/
+.wxt/
+coverage/
+playwright-report/
+test-results/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Local-only indexes and disposable work
+.codegraph/
+work/tmp/
+work/draft/
+work/generated/
