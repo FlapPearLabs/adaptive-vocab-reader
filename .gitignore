@@ -9,6 +9,10 @@ playwright-report/
 test-results/
 *.log
 
+# Python prototype/runtime artifacts
+__pycache__/
+*.py[cod]
+
 # Local configuration and secrets
 .env
 .env.*
