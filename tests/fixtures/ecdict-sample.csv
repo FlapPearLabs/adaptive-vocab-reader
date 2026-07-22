@@ -1,0 +1,11 @@
+word,phonetic,translation,pos,tag,bnc,frq,exchange
+go,ɡəʊ,去；走,v.,CET4,12,1,p:went/d:gone/i:going/3:goes
+wend,wɛnd,绕行,v.,,13,2,p:went
+alpha,ˈælfə,阿尔法；开始,n.,,14,3,
+beta,ˈbiːtə,贝塔；测试版,n.,,4,,
+badphonetic,,缺少音标,n.,,5,4,
+badpos,bæd,缺少词性,, ,6,5,
+badtranslation,bæd,,n.,,7,6,
+two words,tuː wɜːdz,短语,n.,,8,7,
+Upper,ˈʌpə,首字母大写,n.,,9,8,
+toolong,tuː lɒŋ,这是一个超过限制的中文释义用于验证构建器必须把过长且不适合作为短提示的内容排除在核心词典之外,n.,,10,9,

@@ -23,3 +23,8 @@ __pycache__/
 work/tmp/
 work/draft/
 work/generated/
+
+# Reproducible ECDICT input snapshots and derived local dogfood packages
+data/raw/
+data/derived/
+!data/README.md

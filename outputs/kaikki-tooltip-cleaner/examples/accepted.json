@@ -1,0 +1,14 @@
+[
+  {"expression": "abandon", "pos": "v", "short_zh": "放弃；遗弃"},
+  {"expression": "appear", "pos": "v", "short_zh": "出现；显得；好像"},
+  {"expression": "approach", "pos": "v", "short_zh": "接近；走近"},
+  {"expression": "approach", "pos": "n", "short_zh": "接近；通道；方法"},
+  {"expression": "mean", "pos": "v", "short_zh": "意味"},
+  {"expression": "mean", "pos": "adj", "short_zh": "卑鄙的"},
+  {"expression": "set", "pos": "n", "short_zh": "组；套；集合"},
+  {"expression": "case", "pos": "n", "short_zh": "事件；案件；箱子"},
+  {"expression": "match", "pos": "n", "short_zh": "比赛；火柴"},
+  {"expression": "runner", "pos": "n", "short_zh": "跑者；信差；运动鞋"},
+  {"expression": "shed light on", "pos": "v", "short_zh": "阐明"},
+  {"expression": "out of order", "pos": "other", "short_zh": "故障"}
+]

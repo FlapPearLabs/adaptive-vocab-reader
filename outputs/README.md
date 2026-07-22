@@ -1,32 +1,16 @@
 # 浏览器词汇学习插件 V0.1 文档索引
 
-状态：前两轮讨论已完成复用审计；本轮以可用 `grilling` 与 `domain-modeling` 完成等价收口（`/grill-with-docs` 未安装，未被伪造为已执行）。用户已确认 V0.1 先走路线 B（高频可审计核心包＋受限本地模型兜底），广覆盖路线 A 后续渐进扩展。16 例本机模型冒烟原型已完成并暴露了多义词与合同校验风险，但没有统计证明力；当前下一门是先冻结 Codex→Hermes→Reasonix Harness，再完成总计 500 条的清洗工厂 bootstrap（前 100 条是其中的合同 smoke，每 100 条反思并沉淀候选 Skill），之后重新显式执行 `/to-spec`。当前尚未授权生产实现、创建远端 Issue/PR、部署或发布。
+当前项目只有以下现役文档：
 
-## 已收口、待词典 PoC 与 `/to-spec` 定稿的文档
+1. [产品规则](../RULES.md)：唯一的已确认需求来源。
+2. [范围重置与实施目标](./2026-07-22-V0.1-范围重置与实施目标.md)：V0.1 目标、非目标与垂直切片验收。
+3. [ECDICT 高频核心包可行性核验](../work/research/2026-07-22-ecdict-高频核心包可行性核验.md)：数据字段、许可证边界、可重复筛选与 UNKNOWN。
+4. [页面提示密度与滚动研究](../work/research/2026-07-17-reading-context-window-research.md)：历史研究中恢复的页面体验证据；仅供未来单独 PoC 参考，不增加当前范围。
+5. [词汇测试与状态更新研究摘录](../work/research/2026-07-22-词汇测试与状态更新研究摘录.md)：保留频率只能作冷启动、明确反馈优先与不伪装 IRT/CAT 的证据。
+6. [掌握预测与主动校准规格](./2026-07-22-V0.1-掌握预测与主动校准规格.md)：V0.1 的状态、预测、高置信不提示、审计与测试验收规格。
+7. [1,000 词垂直切片实施规格](./2026-07-22-V0.1-1000词垂直切片实施规格.md)：已完成的本地 `/to-spec`；已收敛范围、词典、算法、持久化、浏览器验收与最高测试 seam，是后续 tickets 的唯一实施依据。
+8. [个人词汇掌握预测与主动测试算法研究](../work/research/2026-07-22-个人词汇掌握预测与主动测试算法研究.md)：算法候选、数据前提和研究边界。
+9. [Beta/PAV 策略原型结果](../work/prototypes/beta_pav_policy_prototype/RESULTS-2026-07-22.md)：可丢弃原型的阈值、PAV 和状态机证据；旧日测配比已被校准轮定位取代。
+10. [kaikki-tooltip-cleaner Skill](./kaikki-tooltip-cleaner/SKILL.md)：独立保留的 Skill 资产；不属于当前 V0.1 流程。
 
-1. [V0.1 产品规格](./v0.1-产品规格.md)：定义目标用户、产品行为、范围、隐私边界、数据规则与编号验收标准。
-2. [V0.1 开发计划](./v0.1-开发计划.md)：定义路线 B PoC（P-1）、工程准备门、P0–P8 阶段、依赖、测试 seam、退出门和风险控制。
-3. [V0.1 验收与测试计划](./v0.1-验收与测试计划.md)：定义行为矩阵、词典数据门禁、个性化离线评估、DOM/性能、Provider 与存储验证。
-4. [强提示动态预算的阅读上下文研究](../work/research/2026-07-17-reading-context-window-research.md)：保留固定 250 词缺乏依据的研究证据、局限和三条件 dogfood 设计；它解释规则，不替代 `RULES.md`。
-5. [词典路线对比研究](../work/research/2026-07-17-词典路线-核心包与本地模型兜底对比研究.md)：记录路线 A/B 的一手证据、参数研究、B 路线 PoC 设计与限制；它不替代 `RULES.md`。
-6. [路线 B 本地模型冒烟结果](../work/prototypes/b_route_model_eval/RESULTS-2026-07-17.md)：记录 16 例本机 LM Studio 冒烟、失败反例与缓存局限；它只批准进入受控扩大 PoC，不证明模型或路线已经达标。
-
-仓库根目录的 `RULES.md` 保存用户已确认规则与待确认事项，`CONTEXT.md` 保存领域语言；`docs/adr/0001-reading-assistance-coordinator.md` 记录拟议的最高测试 seam，`docs/adr/0002-expression-sense-and-evidence-graph.md` 记录已接受的表达义项边界。`work/research/` 是设计证据，不是规范本身。
-
-发生冲突时，按以下顺序解释：用户最新明确指示 → `RULES.md` 中的已确认项 → 产品规格 → 开发计划 → 验收与测试计划。ADR 只约束工程结构，不得覆盖产品规则；研究材料只用于解释决策。
-
-## 复读审计证据
-
-[两轮 Grill 决策追溯](./两轮Grill-决策追溯.md) 记录每个短答、质疑、修订和被取代方案如何映射到当前文档。它用于证明讨论没有被错配，不是另一份产品规则登记册。
-
-## 已废弃文档
-
-`v0.1-产品规格与开发计划.md` 是早期讨论草案，仅保留历史追溯。它包含已经被两轮 Grill 修正的范围、题量、缓存和本地模型结论，禁止作为实现或验收依据。
-
-## 进入实现前仍需通过的门
-
-- 以真实词典快照完成数据许可、覆盖率、重复、冲突和丢弃原因 PoC。
-- 冻结精确技术栈、扩展权限、核心 Interface、数据库版本与迁移策略。
-- 用原型或 fixture 校准词形/MWE/粗义项、提示预算、保温抽检、撤销语义和本地模型超时等参数。
-- 项目级 Skill setup 已完成：GitHub Issues、默认 triage 标签和 single-context 已写入配置；本地 Git 与私有 `origin` 已配置。执行 `/to-tickets` 前仍须创建远端 triage 标签并再次确认 Issue 发布范围。
-- 获得用户明确实现授权后，才可显式进入 `/implement`；实现优先走 TDD，并按验收计划提供真实浏览器与本地 Provider 证据。
+项目尚未实现扩展，也未获实现、提交、发布或部署授权。已完成可丢弃算法原型、本地 `/to-spec`，并在 GitHub 发布可执行 tickets：[ #1 最小阅读闭环](https://github.com/panglihaoshuai/adaptive-vocab-reader/issues/1)、[#2 首测](https://github.com/panglihaoshuai/adaptive-vocab-reader/issues/2)、[#3 每日校准](https://github.com/panglihaoshuai/adaptive-vocab-reader/issues/3)、[#4 页面适配](https://github.com/panglihaoshuai/adaptive-vocab-reader/issues/4)、[#5 dogfood 验收](https://github.com/panglihaoshuai/adaptive-vocab-reader/issues/5)，并写入 GitHub 原生 blocker 关系。下一步是获得明确 `/implement` 授权后，从唯一无 blocker 的 #1 开始。
