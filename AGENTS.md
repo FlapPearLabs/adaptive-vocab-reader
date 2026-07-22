@@ -6,7 +6,7 @@
 
 1. 定位项目根目录，不得仅凭当前工作目录猜测。
 2. 完整阅读本文件与根目录 `RULES.md`。
-3. 若存在 `CLAUDE.md`、`CONTEXT.md`、`CONTEXT-MAP.md` 或相关 `docs/adr/`，完整阅读与当前任务相关的内容。
+3. 若存在 `CLAUDE.md`、`CONTEXT.md`、`CONTEXT-MAP.md`、相关 `docs/specs/` 或相关 `docs/adr/`，完整阅读与当前任务相关的内容。GitHub Issue 只作施工索引，不能替代施工规格。
 4. 若存在 `.codegraph/`，需要理解或定位代码时先使用 CodeGraph；不存在时不要擅自创建索引。
 5. 检查现有文件和工作区状态，保护用户已有改动；未经授权不得 reset、restore、clean、stash、切分支或覆盖文件。
 6. 先确定任务属于讨论、研究、规格、实现、诊断、审查、CI/CD 还是发布，再显式选择所需 Skill。
@@ -78,7 +78,7 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 2. 已确认决定应写入 `RULES.md`；尚未确认的建议必须标记为“待确认”。
 3. `CONTEXT.md` 只记录领域词汇及其定义，不承载实现细节。
 4. ADR 只用于难以撤销、缺少背景会令人困惑、且确实在多个方案间作出取舍的决定。
-5. 当前产品规则以根目录 `RULES.md` 为唯一来源；`outputs/README.md` 只索引现役范围目标与 ECDICT 核验。已删除的旧规格、模型和 Kaikki 路线不得复建或作为实现依据。
+5. 当前产品规则以根目录 `RULES.md` 为唯一来源；当前施工规格位于 `docs/specs/`，其索引与研究材料见 `outputs/README.md`。已删除的旧规格、模型和 Kaikki 路线不得复建或作为实现依据。
 6. 单会话、小范围任务可以不拆 tickets，但必须先明确验收标准、修改范围和测试 seam。
 7. 多会话、多人或可独立并行的任务，先 `/to-spec`，再在 tracker 与写入授权明确后 `/to-tickets`。
 
