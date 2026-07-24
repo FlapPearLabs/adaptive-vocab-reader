@@ -8,7 +8,7 @@
 // 不得加载完整词典、参与单词查询或 DOM 操作。
 // ============================================================
 
-import type { VocabSnapshot } from '../shared/types';
+import type { VocabSnapshot, WordState } from '../shared/types';
 import { createEmptySnapshot, mergeStateChange, getWords, generateInstallSeed } from './storage';
 
 const STORAGE_KEY = 'avr_vocab_snapshot';
@@ -44,14 +44,15 @@ async function persistSnapshot(snapshot: VocabSnapshot): Promise<void> {
 }
 
 /**
- * 广播状态更新到所有标签页
+ * 广播状态更新到所有标签页。
+ * 携带变更的 word 和 newStatus，让内容脚本只增量更新该词而非全页重扫。
  */
-async function broadcastState(snapshot: VocabSnapshot): Promise<void> {
+async function broadcastState(snapshot: VocabSnapshot, changedWord: string, newStatus: WordState['status']): Promise<void> {
   const words = getWords(snapshot);
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (tab.id) {
-      chrome.tabs.sendMessage(tab.id, { type: 'STATE_UPDATED', words }).catch(() => {
+      chrome.tabs.sendMessage(tab.id, { type: 'STATE_UPDATED', words, word: changedWord, newStatus }).catch(() => {
         // 标签页可能尚未注入内容脚本，忽略
       });
     }
@@ -79,7 +80,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const { word, newStatus } = message;
         currentSnapshot = mergeStateChange(currentSnapshot, word, newStatus);
         await persistSnapshot(currentSnapshot);
-        await broadcastState(currentSnapshot);
+        await broadcastState(currentSnapshot, word, newStatus);
 
         // 返回确认
         sendResponse({ success: true });

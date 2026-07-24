@@ -3,13 +3,17 @@
 // ============================================================
 // 负责页面扫描、词典查询、策略调用、DOM 标注和交互
 // 不直接读写 chrome.storage.local —— 通过消息与 Service Worker 通信
+//
+// 核心规则（规格第 4 节）：
+// - 状态变更后只更新受影响的命中词，不做全页重扫
+// - 增量处理动态插入的正文，避免重复扫描已处理节点
 // ============================================================
 
 import type { DictCore, FormsMap, FrequencyBands, WordState, DisplayResult } from '../shared/types';
 import { createVocabStrategy } from '../strategy/index';
 import { createDictionary, Dictionary } from './dictionary';
 import { extractWordsFromText, isContentNode } from './scanner';
-import { initAnnotator, annotateTextNode } from './annotator';
+import { initAnnotator, annotateTextNode, updateWordDisplay, type WordAnnotation } from './annotator';
 
 // ============================================================
 // 全局状态
@@ -35,7 +39,7 @@ async function loadDictionary(): Promise<Dictionary> {
   const rawCore: Record<string, [string, string, string]> = JSON.parse(coreJSON);
   const core: DictCore = {};
   for (const [word, arr] of Object.entries(rawCore)) {
-    core[word] = { phonetic: arr[0], pos: arr[1], translation: arr[2] };
+    core[word] = { phonetic: arr[0]!, pos: arr[1]!, translation: arr[2]! };
   }
   const forms: FormsMap = JSON.parse(formsJSON);
   const bands: FrequencyBands = JSON.parse(bandsJSON);
@@ -82,8 +86,8 @@ function processTextNode(textNode: Text): void {
 
   const strategy = createVocabStrategy();
 
-  // 查找词典并获取展示决策
-  const displayResults: DisplayResult[] = [];
+  // 查找词典并构造标注（使用词在原文中的精确位置）
+  const annotations: WordAnnotation[] = [];
   for (const occ of occurrences) {
     const lookup = dictionary.lookup(occ.word);
     if (!lookup) continue;
@@ -103,61 +107,65 @@ function processTextNode(textNode: Text): void {
     );
 
     if (result.decision !== 'none') {
-      displayResults.push(result);
+      annotations.push({
+        result,
+        startIndex: occ.startIndex,
+        endIndex: occ.endIndex,
+      });
     }
   }
 
-  // 应用标注
-  if (displayResults.length > 0) {
-    annotateTextNode(textNode, displayResults, handleUserAction);
+  // 应用标注（使用精确位置，保留原文大小写）
+  if (annotations.length > 0) {
+    annotateTextNode(textNode, annotations, handleUserAction);
   }
 
   processedNodes.add(textNode);
 }
 
+/**
+ * 用户在页面上标记会/不会。
+ * 只更新该词的显示——不做全页重扫。
+ */
 function handleUserAction(word: string, newStatus: WordState['status']): void {
-  // 只处理 known/learning（忽略 unknown）
   if (newStatus === 'unknown') return;
-  const strategy = createVocabStrategy();
-  let change;
 
-  if (newStatus === 'known') {
-    change = strategy.markKnown(word);
-  } else {
-    change = strategy.markLearning(word);
-  }
+  const strategy = createVocabStrategy();
+  const change = newStatus === 'known' ? strategy.markKnown(word) : strategy.markLearning(word);
 
   // 立即更新本地状态
   vocabState[word] = { status: change.newStatus, source: 'manual', updatedAt: Date.now() };
 
-  // 发送到 Service Worker 持久化
-  saveStateChange(word, change.newStatus);
+  // 增量更新该词在当前页面的已有标注
+  applyWordDisplay(word);
 
-  // 重新扫描当前页面（更新显示）
-  reapplyAnnotations();
+  // 发送到 Service Worker 持久化并广播
+  saveStateChange(word, change.newStatus);
 }
 
-function reapplyAnnotations(): void {
-  // 清除已处理标记，重新扫描
-  processedNodes = new WeakSet();
-  pageOccurrenceCounts = new Map();
+/**
+ * 根据当前状态计算某词的展示决策，并增量更新其已有 span。
+ * 只更新 data-word 匹配的 span，不重扫页面。
+ */
+function applyWordDisplay(word: string): void {
+  if (!dictionary) return;
+  const lookup = dictionary.lookup(word);
+  if (!lookup) return;
 
-  // 查找并移除已有标注
-  const existingSpans = document.querySelectorAll('.avr-word');
-  existingSpans.forEach((span) => {
-    const parent = span.parentNode;
-    if (!parent) return;
-    const text = span.textContent || '';
-    parent.replaceChild(document.createTextNode(text), span);
-    parent.normalize();
-  });
+  const strategy = createVocabStrategy();
+  const state = vocabState[word];
+  const result = strategy.getDisplayDecision(
+    {
+      word: lookup.word,
+      surfaceForm: word,
+      entry: lookup.entry,
+      band: lookup.band,
+      occurrenceCount: 1, // 增量更新不依赖出现次数
+    },
+    state,
+  );
 
-  // 移除 tooltip
-  const tooltip = document.querySelector('.avr-tooltip');
-  if (tooltip) tooltip.remove();
-
-  // 重新扫描
-  scanDocument(document.body);
+  updateWordDisplay(lookup.word, result.decision, result.translation, result.showInlineTranslation);
 }
 
 // ============================================================
@@ -214,7 +222,7 @@ async function main(): Promise<void> {
   // 扫描页面
   scanDocument(document.body);
 
-  // 监听动态内容
+  // 监听动态内容（增量处理，不重复扫描已处理节点）
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
@@ -234,11 +242,18 @@ async function main(): Promise<void> {
   });
 }
 
-// 监听来自 Service Worker 的状态更新
+// 监听来自 Service Worker 的状态更新（其他标签页的变更广播）
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'STATE_UPDATED') {
-    vocabState = message.words;
-    reapplyAnnotations();
+    const { word, newStatus } = message;
+    if (word && newStatus) {
+      // 更新本地状态并增量更新该词显示
+      vocabState[word] = { status: newStatus, source: 'manual', updatedAt: Date.now() };
+      applyWordDisplay(word);
+    } else if (message.words) {
+      // 兼容旧格式（全量状态）：只更新内存，不重扫
+      vocabState = message.words;
+    }
   }
 });
 

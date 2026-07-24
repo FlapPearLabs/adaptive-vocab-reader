@@ -78,4 +78,44 @@ describe('storage', () => {
       expect(s1).not.toBe(s2);
     });
   });
+
+  // ============================================================
+  // 隐私边界（规格 5：不得保存 URL、域名、正文、句子、浏览历史）
+  // ============================================================
+  describe('隐私边界', () => {
+    it('快照序列化后不含 URL、域名、正文、句子等敏感字段', () => {
+      const snapshot = createEmptySnapshot('seed-abc', 'dict-v1');
+      const updated = mergeStateChange(snapshot, 'challenge', 'learning');
+      const json = JSON.stringify(updated);
+
+      // 不得出现这些键
+      const forbiddenKeys = ['url', 'domain', 'host', 'title', 'sentence', 'context', 'page', 'pageText', 'history', 'tab'];
+      for (const key of forbiddenKeys) {
+        expect(json).not.toContain(`"${key}"`);
+      }
+    });
+
+    it('WordState 不含上下文、句子或页面信息', () => {
+      const snapshot = createEmptySnapshot('seed', 'dict-v1');
+      const updated = mergeStateChange(snapshot, 'hello', 'known');
+      const state = updated.words['hello']!;
+
+      // WordState 只应有 status、source、updatedAt 三个字段
+      const keys = Object.keys(state);
+      expect(keys.sort()).toEqual(['source', 'status', 'updatedAt']);
+    });
+
+    it('多次状态变更不积累任何页面信息', () => {
+      let snapshot = createEmptySnapshot('seed', 'dict-v1');
+      snapshot = mergeStateChange(snapshot, 'word1', 'known');
+      snapshot = mergeStateChange(snapshot, 'word2', 'learning');
+      snapshot = mergeStateChange(snapshot, 'word1', 'learning');
+
+      const json = JSON.stringify(snapshot);
+      // 只应有这些顶层键
+      const parsed = JSON.parse(json);
+      const topKeys = Object.keys(parsed).sort();
+      expect(topKeys).toEqual(['dictVersion', 'installSeed', 'lastUpdated', 'schemaVersion', 'words']);
+    });
+  });
 });

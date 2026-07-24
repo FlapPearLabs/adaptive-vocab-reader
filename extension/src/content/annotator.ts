@@ -1,10 +1,24 @@
 // ============================================================
 // DOM 标注器 —— 将策略决策应用到页面上
 // ============================================================
+// 核心规则：
+// - annotateTextNode 用词在文本节点中的精确位置切分，保留原文大小写
+// - updateWordDisplay 增量更新已有 span，不做全页重扫
+// ============================================================
 
-import type { DisplayResult } from '../shared/types';
+import type { DisplayResult, DisplayDecision } from '../shared/types';
 
 const EXTENSION_CLASS = 'avr-word';
+
+/** 单个词的标注信息：策略决策 + 在文本节点中的精确位置 */
+export interface WordAnnotation {
+  /** 策略模块的展示决策 */
+  result: DisplayResult;
+  /** 该词原始文本在文本节点中的起始位置 */
+  startIndex: number;
+  /** 该词原始文本在文本节点中的结束位置（不包含） */
+  endIndex: number;
+}
 
 /** CSS 样式注入（仅注入一次） */
 let styleInjected = false;
@@ -179,56 +193,53 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
   });
 }
 
+/** 根据 decision 决定 CSS 类名 */
+function classForDecision(decision: DisplayDecision, showInlineTranslation: boolean): string {
+  if (decision === 'strong') {
+    return showInlineTranslation ? 'avr-strong-first' : 'avr-strong';
+  }
+  return 'avr-light';
+}
+
 /**
  * 对单个文本节点应用标注。
- * 返回创建的 span 元素列表。
+ * 使用每个词在文本中的精确位置（startIndex/endIndex）切分，
+ * 保留原文大小写；不再用 indexOf(surfaceForm) 查找。
  */
 export function annotateTextNode(
   textNode: Text,
-  results: DisplayResult[],
+  annotations: WordAnnotation[],
   onClick: (word: string, newStatus: 'known' | 'learning') => void,
 ): HTMLSpanElement[] {
-  if (results.length === 0) return [];
-
-  // 按词的位置排序
-  const sorted = [...results].sort((a, b) => {
-    // surfaceForm 在 textNode 中的位置（简单查找）
-    const text = textNode.textContent || '';
-    return text.indexOf(a.surfaceForm) - text.indexOf(b.surfaceForm);
-  });
+  if (annotations.length === 0) return [];
 
   const text = textNode.textContent || '';
-  installDelegatedHandlers(onClick);
-  const fragments: (string | { html: string; word: string; translation: string | null; cssClass: string; showInlineTranslation: boolean })[] = [];
+
+  // 只保留需要标注（decision !== 'none'）且位置合法的项，按 startIndex 排序
+  const sorted = annotations
+    .filter((a) => a.result.decision !== 'none' && a.startIndex >= 0 && a.endIndex <= text.length && a.startIndex < a.endIndex)
+    .sort((a, b) => a.startIndex - b.startIndex);
+
+  if (sorted.length === 0) return [];
+
+  type Fragment = string | { result: DisplayResult; rawText: string };
+  const fragments: Fragment[] = [];
   let lastEnd = 0;
 
-  for (const result of sorted) {
-    // 跳过不提示的词
-    if (result.decision === 'none') continue;
-
-    const form = result.surfaceForm;
-    const idx = text.indexOf(form, lastEnd);
-    if (idx === -1) continue; // 词形不在文本中（可能被其他匹配消费）
+  for (const ann of sorted) {
+    // 跳过与前一个重叠的词
+    if (ann.startIndex < lastEnd) continue;
 
     // 添加前面的纯文本
-    if (idx > lastEnd) {
-      fragments.push(text.slice(lastEnd, idx));
+    if (ann.startIndex > lastEnd) {
+      fragments.push(text.slice(lastEnd, ann.startIndex));
     }
 
-    const isStrong = result.decision === 'strong';
-    const cssClass = isStrong
-      ? (result.showInlineTranslation ? 'avr-strong-first' : 'avr-strong')
-      : 'avr-light';
-
     fragments.push({
-      html: form,
-      word: result.word,
-      translation: result.translation,
-      cssClass,
-      showInlineTranslation: result.showInlineTranslation,
+      result: ann.result,
+      rawText: text.slice(ann.startIndex, ann.endIndex),
     });
-
-    lastEnd = idx + form.length;
+    lastEnd = ann.endIndex;
   }
 
   // 添加剩余文本
@@ -236,11 +247,11 @@ export function annotateTextNode(
     fragments.push(text.slice(lastEnd));
   }
 
-  // 如果没有任何标注，返回空
   const hasAnnotations = fragments.some((f) => typeof f !== 'string');
   if (!hasAnnotations) return [];
 
-  // 创建新的 DOM 片段
+  installDelegatedHandlers(onClick);
+
   const spans: HTMLSpanElement[] = [];
   const container = document.createDocumentFragment();
 
@@ -249,22 +260,64 @@ export function annotateTextNode(
       container.appendChild(document.createTextNode(frag));
     } else {
       const span = document.createElement('span');
-      span.className = `${EXTENSION_CLASS} ${frag.cssClass}`;
-      span.textContent = frag.html;
-      if (frag.translation) {
-        span.setAttribute('data-translation', `【${frag.translation}】`);
+      span.className = `${EXTENSION_CLASS} ${classForDecision(frag.result.decision, frag.result.showInlineTranslation)}`;
+      span.textContent = frag.rawText; // 保留原文大小写
+      if (frag.result.translation) {
+        span.setAttribute('data-translation', `【${frag.result.translation}】`);
       }
-      span.setAttribute('data-word', frag.word);
-
+      span.setAttribute('data-word', frag.result.word);
       container.appendChild(span);
       spans.push(span);
     }
   }
 
-  // 替换原文本节点
   textNode.parentNode?.replaceChild(container, textNode);
-
   return spans;
+}
+
+/**
+ * 增量更新某个词在当前页面已有 span 的显示。
+ * 不做全页重扫——只更新 data-word 匹配的 span。
+ *
+ * - decision='none'：把 span 还原为纯文本节点（移除标注）
+ * - decision='strong'：第一个 span 用 strong-first（行内中文），其余用 strong（仅下划线）
+ * - decision='light'：所有 span 用 avr-light（悬停查看）
+ *
+ * 规格：不会词同页首次显示下划线+行内中文，重复仅保留下划线。
+ */
+export function updateWordDisplay(
+  word: string,
+  decision: DisplayDecision,
+  translation: string | null,
+  _showInlineTranslation: boolean,
+): void {
+  const spans = document.querySelectorAll<HTMLSpanElement>(`.${EXTENSION_CLASS}[data-word="${word}"]`);
+
+  if (decision === 'none') {
+    // 还原为纯文本节点
+    spans.forEach((span) => {
+      const text = span.textContent || '';
+      const textNode = document.createTextNode(text);
+      span.parentNode?.replaceChild(textNode, span);
+    });
+    return;
+  }
+
+  spans.forEach((span, index) => {
+    // 清除旧的提示类，保留 avr-word
+    span.classList.remove('avr-strong', 'avr-strong-first', 'avr-light');
+    if (decision === 'strong') {
+      // 同页首次出现显示行内中文，重复仅下划线
+      span.classList.add(index === 0 ? 'avr-strong-first' : 'avr-strong');
+    } else {
+      span.classList.add('avr-light');
+    }
+    if (translation) {
+      span.setAttribute('data-translation', `【${translation}】`);
+    } else {
+      span.removeAttribute('data-translation');
+    }
+  });
 }
 
 /**
@@ -272,4 +325,13 @@ export function annotateTextNode(
  */
 export function initAnnotator(): void {
   injectStyles();
+}
+
+/** 重置全局状态（仅供测试使用） */
+export function resetAnnotatorState(): void {
+  styleInjected = false;
+  tooltipEl = null;
+  actionMenuEl = null;
+  handlersInstalled = false;
+  actionHandler = null;
 }

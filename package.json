@@ -15,6 +15,7 @@
     "@puppeteer/browsers": "3.0.6",
     "@types/chrome": "^0.0.287",
     "esbuild": "^0.23.0",
+    "happy-dom": "^20.11.1",
     "puppeteer-core": "^25.3.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
