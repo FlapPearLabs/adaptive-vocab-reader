@@ -42,6 +42,22 @@ async function build() {
     sourcemap: !isProd ? 'inline' : false,
   });
 
+  // 构建弹窗（首测入口）
+  await esbuild.build({
+    entryPoints: [resolve(SRC_DIR, 'popup.ts')],
+    bundle: true,
+    outfile: resolve(DIST_DIR, 'popup.js'),
+    target: 'es2022',
+    format: 'iife',
+    platform: 'browser',
+    minify: isProd,
+    sourcemap: !isProd ? 'inline' : false,
+  });
+
+  // 复制弹窗静态资源
+  cpSync(resolve(EXT_DIR, 'popup.html'), resolve(DIST_DIR, 'popup.html'));
+  cpSync(resolve(EXT_DIR, 'popup.css'), resolve(DIST_DIR, 'popup.css'));
+
   // 复制 manifest
   const manifest = JSON.parse(readFileSync(resolve(EXT_DIR, 'manifest.json'), 'utf-8'));
   writeFileSync(resolve(DIST_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2));

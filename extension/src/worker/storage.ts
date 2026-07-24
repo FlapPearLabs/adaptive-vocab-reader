@@ -3,9 +3,10 @@
 // ============================================================
 // 所有状态变更只能通过这里的纯函数计算；
 // chrome.storage.local 读写由 Service Worker 的协调器负责。
+// 快照不得包含 URL、域名、页面标题、正文、句子或浏览历史。
 // ============================================================
 
-import type { VocabSnapshot, WordState } from '../shared/types';
+import type { VocabSnapshot, WordState, WordStateSource, AuditMarker, InitialTestState } from '../shared/types';
 import { SCHEMA_VERSION } from '../shared/types';
 
 /**
@@ -17,22 +18,26 @@ export function createEmptySnapshot(installSeed: string, dictVersion: string): V
     dictVersion,
     installSeed,
     words: {},
+    auditMarkers: {},
+    initialTest: null,
     lastUpdated: Date.now(),
   };
 }
 
 /**
- * 合并单词状态变更到快照（返回新对象，不可变）
+ * 合并单词状态变更到快照（返回新对象，不可变）。
+ * @param source 变更来源：'manual' 网页手动标记，'initial' 首测作答
  */
 export function mergeStateChange(
   snapshot: VocabSnapshot,
   word: string,
   newStatus: WordState['status'],
+  source: WordStateSource = 'manual',
 ): VocabSnapshot {
   const newWords = { ...snapshot.words };
   newWords[word] = {
     status: newStatus,
-    source: 'manual',
+    source,
     updatedAt: Date.now(),
   };
 
@@ -44,10 +49,56 @@ export function mergeStateChange(
 }
 
 /**
+ * 写入或更新一个待审计标记（返回新对象，不可变）
+ */
+export function addAuditMarker(snapshot: VocabSnapshot, marker: AuditMarker): VocabSnapshot {
+  const newMarkers = { ...snapshot.auditMarkers };
+  newMarkers[marker.word] = marker;
+  return {
+    ...snapshot,
+    auditMarkers: newMarkers,
+    lastUpdated: Date.now(),
+  };
+}
+
+/**
+ * 清除某个词的待审计标记（返回新对象，不可变）
+ */
+export function clearAuditMarker(snapshot: VocabSnapshot, word: string): VocabSnapshot {
+  if (!snapshot.auditMarkers[word]) return snapshot;
+  const newMarkers = { ...snapshot.auditMarkers };
+  delete newMarkers[word];
+  return {
+    ...snapshot,
+    auditMarkers: newMarkers,
+    lastUpdated: Date.now(),
+  };
+}
+
+/**
+ * 写入首测状态（计划 + 作答进度）
+ */
+export function setInitialTest(snapshot: VocabSnapshot, test: InitialTestState | null): VocabSnapshot {
+  return {
+    ...snapshot,
+    initialTest: test,
+    lastUpdated: Date.now(),
+  };
+}
+
+/**
  * 获取当前所有单词状态（浅拷贝）
  */
 export function getWords(snapshot: VocabSnapshot): Record<string, WordState> {
   return { ...snapshot.words };
+}
+
+/**
+ * 活跃生词表：所有状态为 learning 的规范化单词。
+ * 这是「不会」词在当前页面的强提示来源，不单独存储以节约并避免与状态漂移。
+ */
+export function getActiveWords(snapshot: VocabSnapshot): string[] {
+  return Object.keys(snapshot.words).filter((word) => snapshot.words[word]!.status === 'learning');
 }
 
 /**

@@ -112,10 +112,23 @@ describe('storage', () => {
       snapshot = mergeStateChange(snapshot, 'word1', 'learning');
 
       const json = JSON.stringify(snapshot);
-      // 只应有这些顶层键
+      // 只应有这些顶层键（auditMarkers / initialTest 为领域状态，不含任何页面信息）
       const parsed = JSON.parse(json);
       const topKeys = Object.keys(parsed).sort();
-      expect(topKeys).toEqual(['dictVersion', 'installSeed', 'lastUpdated', 'schemaVersion', 'words']);
+      expect(topKeys).toEqual([
+        'auditMarkers',
+        'dictVersion',
+        'initialTest',
+        'installSeed',
+        'lastUpdated',
+        'schemaVersion',
+        'words',
+      ]);
+      // 关键隐私断言：任何页面信息键都不得出现
+      const forbiddenKeys = ['url', 'domain', 'host', 'title', 'sentence', 'context', 'page', 'pageText', 'history', 'tab'];
+      for (const key of forbiddenKeys) {
+        expect(json).not.toContain(`"${key}"`);
+      }
     });
   });
 });

@@ -3,13 +3,28 @@
 // ============================================================
 // 负责：
 // 1. 初始化/加载持久化快照
-// 2. 接收来自内容脚本的状态变更请求
+// 2. 接收来自内容脚本的状态变更请求（手动标记 / 首测作答）
 // 3. 合并变更、持久化并广播到所有标签页
 // 不得加载完整词典、参与单词查询或 DOM 操作。
 // ============================================================
 
-import type { VocabSnapshot, WordState } from '../shared/types';
-import { createEmptySnapshot, mergeStateChange, getWords, generateInstallSeed } from './storage';
+import type {
+  VocabSnapshot,
+  WordState,
+  WordStatus,
+  InitialTestPlan,
+  InitialTestState,
+  QuizAnswer,
+} from '../shared/types';
+import {
+  createEmptySnapshot,
+  mergeStateChange,
+  getWords,
+  generateInstallSeed,
+  addAuditMarker,
+  setInitialTest,
+} from './storage';
+import { applyAnswer, INITIAL_TEST_LENGTH } from '../strategy/quiz';
 
 const STORAGE_KEY = 'avr_vocab_snapshot';
 // 固定 1,000 词 ECDICT 产物的 dict-core.json SHA-256 前缀；Service Worker 不读取词典。
@@ -60,10 +75,23 @@ async function broadcastState(snapshot: VocabSnapshot, changedWord: string, newS
 }
 
 // ============================================================
+// 消息协议（与内容脚本、弹窗共享的 WorkerMessage 判别联合）
+// ============================================================
+
+type WorkerMessage =
+  | { type: 'GET_STATE' }
+  | { type: 'GET_PROFILE' }
+  | { type: 'STATE_CHANGE'; word: string; newStatus: WordStatus }
+  | { type: 'INITIAL_TEST_START'; plan: InitialTestPlan }
+  | { type: 'GET_INITIAL_TEST' }
+  | { type: 'INITIAL_TEST_ANSWER'; questionIndex: number; answer: QuizAnswer }
+  | { type: 'INITIAL_TEST_RESET' };
+
+// ============================================================
 // 消息处理
 // ============================================================
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: WorkerMessage, _sender, sendResponse) => {
   (async () => {
     if (!currentSnapshot) {
       currentSnapshot = await loadSnapshot();
@@ -71,18 +99,95 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     switch (message.type) {
       case 'GET_STATE': {
-        const words = getWords(currentSnapshot);
-        sendResponse({ words });
+        sendResponse({ words: getWords(currentSnapshot) });
+        break;
+      }
+
+      case 'GET_PROFILE': {
+        sendResponse({
+          installSeed: currentSnapshot.installSeed,
+          dictVersion: currentSnapshot.dictVersion,
+        });
         break;
       }
 
       case 'STATE_CHANGE': {
         const { word, newStatus } = message;
-        currentSnapshot = mergeStateChange(currentSnapshot, word, newStatus);
+        currentSnapshot = mergeStateChange(currentSnapshot, word, newStatus, 'manual');
         await persistSnapshot(currentSnapshot);
         await broadcastState(currentSnapshot, word, newStatus);
+        sendResponse({ success: true });
+        break;
+      }
 
-        // 返回确认
+      case 'INITIAL_TEST_START': {
+        const plan = message.plan;
+        if (!plan || plan.questions.length !== INITIAL_TEST_LENGTH) {
+          sendResponse({ error: 'invalid plan' });
+          break;
+        }
+        const test: InitialTestState = {
+          plan,
+          answers: Array.from({ length: plan.questions.length }, () => null),
+          completed: false,
+        };
+        currentSnapshot = setInitialTest(currentSnapshot, test);
+        await persistSnapshot(currentSnapshot);
+        sendResponse({ success: true });
+        break;
+      }
+
+      case 'GET_INITIAL_TEST': {
+        sendResponse({ test: currentSnapshot.initialTest });
+        break;
+      }
+
+      case 'INITIAL_TEST_ANSWER': {
+        const { questionIndex, answer } = message;
+        const test = currentSnapshot.initialTest;
+
+        if (!test || test.completed || test.answers[questionIndex] !== null) {
+          sendResponse({ error: 'cannot answer' });
+          break;
+        }
+
+        const current = currentSnapshot.words[test.plan.questions[questionIndex]!.word];
+        const result = applyAnswer(test.plan, questionIndex, answer, current, currentSnapshot.schemaVersion);
+
+        if (result.kind === 'priority-preserved' || result.change === null) {
+          // 页面手动状态优先：不做任何状态变更，仅记录作答
+          const answers = test.answers.slice();
+          answers[questionIndex] = answer;
+          currentSnapshot = setInitialTest(currentSnapshot, {
+            plan: test.plan,
+            answers,
+            completed: answers.every((a) => a !== null),
+          });
+          await persistSnapshot(currentSnapshot);
+          sendResponse({ result });
+          break;
+        }
+
+        // 应用状态变更
+        currentSnapshot = mergeStateChange(currentSnapshot, result.change.word, result.change.newStatus, 'initial');
+        if (result.audit) {
+          currentSnapshot = addAuditMarker(currentSnapshot, result.audit);
+        }
+
+        // 记录作答并判断是否完成
+        const answers = test.answers.slice();
+        answers[questionIndex] = answer;
+        const completed = answers.every((a) => a !== null);
+        currentSnapshot = setInitialTest(currentSnapshot, { plan: test.plan, answers, completed });
+        await persistSnapshot(currentSnapshot);
+        await broadcastState(currentSnapshot, result.change.word, result.change.newStatus);
+        sendResponse({ result });
+        break;
+      }
+
+      case 'INITIAL_TEST_RESET': {
+        currentSnapshot = setInitialTest(currentSnapshot, null);
+        await persistSnapshot(currentSnapshot);
         sendResponse({ success: true });
         break;
       }

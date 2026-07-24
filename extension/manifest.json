@@ -22,6 +22,7 @@
     }
   ],
   "action": {
-    "default_title": "词汇阅读助手"
+    "default_title": "词汇阅读助手",
+    "default_popup": "popup.html"
   }
 }

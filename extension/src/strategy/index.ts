@@ -48,11 +48,11 @@ export function createVocabStrategy(): VocabStrategy {
       return base;
     },
 
-    markKnown(word: string): StateChange {
+    markKnown(word: string): StateChange<'manual'> {
       return { word, newStatus: 'known', source: 'manual' };
     },
 
-    markLearning(word: string): StateChange {
+    markLearning(word: string): StateChange<'manual'> {
       return { word, newStatus: 'learning', source: 'manual' };
     },
   };
