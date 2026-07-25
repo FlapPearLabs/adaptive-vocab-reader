@@ -160,8 +160,8 @@ describe('buildInitialTestPlan', () => {
 describe('applyAnswer', () => {
   const manualKnown: WordState = { status: 'known', source: 'manual', updatedAt: 0 };
 
-  it('correct answer → known + pending audit marker', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, undefined, 1);
+  it('correct answer → known + pending audit marker bound to plan.version', () => {
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, undefined);
     expect(result.kind).toBe('correct');
     if (result.kind !== 'correct') return;
     expect(result.change.newStatus).toBe('known');
@@ -170,11 +170,12 @@ describe('applyAnswer', () => {
     expect(result.audit).not.toBeNull();
     expect(result.audit!.word).toBe('apple');
     expect(result.audit!.pending).toBe(true);
-    expect(result.audit!.statusVersion).toBe(1);
+    // 审计标记绑定到首测计划版本，而非 schemaVersion
+    expect(result.audit!.planVersion).toBe(SAMPLE_PLAN.version);
   });
 
   it('wrong answer → learning, no audit', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 1 }, undefined, 1);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 1 }, undefined);
     expect(result.kind).toBe('wrong');
     if (result.kind !== 'wrong') return;
     expect(result.change.newStatus).toBe('learning');
@@ -183,7 +184,7 @@ describe('applyAnswer', () => {
   });
 
   it('unsure answer → learning, no audit', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'unsure' }, undefined, 1);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'unsure' }, undefined);
     expect(result.kind).toBe('unsure');
     if (result.kind !== 'unsure') return;
     expect(result.change.newStatus).toBe('learning');
@@ -191,7 +192,7 @@ describe('applyAnswer', () => {
   });
 
   it('page manual state takes priority over initial test answer', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown, 1);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown);
     expect(result.kind).toBe('priority-preserved');
     expect(result.change).toBeNull();
     expect(result.audit).toBeNull();

@@ -62,12 +62,32 @@ export function addAuditMarker(snapshot: VocabSnapshot, marker: AuditMarker): Vo
 }
 
 /**
- * 清除某个词的待审计标记（返回新对象，不可变）
+ * 清除某个词的待审计标记（返回新对象，不可变）。
+ * 用于页面手动覆盖（手动标记优先于首测正确标记）时清理该词陈旧标记。
  */
 export function clearAuditMarker(snapshot: VocabSnapshot, word: string): VocabSnapshot {
   if (!snapshot.auditMarkers[word]) return snapshot;
   const newMarkers = { ...snapshot.auditMarkers };
   delete newMarkers[word];
+  return {
+    ...snapshot,
+    auditMarkers: newMarkers,
+    lastUpdated: Date.now(),
+  };
+}
+
+/**
+ * 清除绑定到非当前计划版本的待审计标记（返回新对象，不可变）。
+ * 用于首测计划被重做/替换（INITIAL_TEST_START 携带新 plan.version）时，
+ * 使上一轮首测产生的审计标记失效，避免用陈旧计划版本核验。
+ */
+export function clearStaleAuditMarkers(snapshot: VocabSnapshot, currentPlanVersion: string): VocabSnapshot {
+  const stale = Object.values(snapshot.auditMarkers).filter((marker) => marker.planVersion !== currentPlanVersion);
+  if (stale.length === 0) return snapshot;
+  const newMarkers = { ...snapshot.auditMarkers };
+  for (const marker of stale) {
+    delete newMarkers[marker.word];
+  }
   return {
     ...snapshot,
     auditMarkers: newMarkers,

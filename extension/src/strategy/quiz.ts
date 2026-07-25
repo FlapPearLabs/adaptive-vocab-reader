@@ -222,18 +222,19 @@ export function isAnswerCorrect(question: QuizQuestion, answer: QuizAnswer): boo
  * - 答错 / 不确定 → learning（进入活跃生词表）
  * - 页面手动状态优先：若当前状态来自手动标记，则保留手动状态，不产生任何变更
  *
+ * 审计标记绑定到 `plan.version`（首测计划版本），由本函数内部读取，
+ * 调用方无需再传入版本号，避免误用 schemaVersion 作为状态版本。
+ *
  * @param plan 冻结的首测计划
  * @param questionIndex 题号
  * @param answer 用户作答
  * @param current 该词当前状态（可能 undefined = 未知）
- * @param statusVersion 审计标记绑定的状态版本
  */
 export function applyAnswer(
   plan: InitialTestPlan,
   questionIndex: number,
   answer: QuizAnswer,
   current: WordState | undefined,
-  statusVersion: number,
 ): ApplyAnswerResult {
   const question = plan.questions[questionIndex]!;
 
@@ -258,11 +259,11 @@ export function applyAnswer(
     };
   }
 
-  // 答对：创建单次答对待审计标记
+  // 答对：创建单次答对待审计标记，绑定首测计划版本
   const audit: AuditMarker = {
     word: question.word,
     source: 'initial-correct',
-    statusVersion,
+    planVersion: plan.version,
     createdAt: Date.now(),
     pending: true,
   };

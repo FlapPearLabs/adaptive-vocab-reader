@@ -23,6 +23,8 @@ import {
   generateInstallSeed,
   addAuditMarker,
   setInitialTest,
+  clearAuditMarker,
+  clearStaleAuditMarkers,
 } from './storage';
 import { applyAnswer, INITIAL_TEST_LENGTH } from '../strategy/quiz';
 
@@ -114,6 +116,8 @@ chrome.runtime.onMessage.addListener((message: WorkerMessage, _sender, sendRespo
       case 'STATE_CHANGE': {
         const { word, newStatus } = message;
         currentSnapshot = mergeStateChange(currentSnapshot, word, newStatus, 'manual');
+        // 手动覆盖优先于首测正确标记：清理该词可能残留的审计标记
+        currentSnapshot = clearAuditMarker(currentSnapshot, word);
         await persistSnapshot(currentSnapshot);
         await broadcastState(currentSnapshot, word, newStatus);
         sendResponse({ success: true });
@@ -126,6 +130,8 @@ chrome.runtime.onMessage.addListener((message: WorkerMessage, _sender, sendRespo
           sendResponse({ error: 'invalid plan' });
           break;
         }
+        // 新计划版本：清除上一轮首测产生的陈旧审计标记
+        currentSnapshot = clearStaleAuditMarkers(currentSnapshot, plan.version);
         const test: InitialTestState = {
           plan,
           answers: Array.from({ length: plan.questions.length }, () => null),
@@ -152,7 +158,7 @@ chrome.runtime.onMessage.addListener((message: WorkerMessage, _sender, sendRespo
         }
 
         const current = currentSnapshot.words[test.plan.questions[questionIndex]!.word];
-        const result = applyAnswer(test.plan, questionIndex, answer, current, currentSnapshot.schemaVersion);
+        const result = applyAnswer(test.plan, questionIndex, answer, current);
 
         if (result.kind === 'priority-preserved' || result.change === null) {
           // 页面手动状态优先：不做任何状态变更，仅记录作答

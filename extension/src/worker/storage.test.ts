@@ -6,6 +6,9 @@ import {
   mergeStateChange,
   getWords,
   generateInstallSeed,
+  addAuditMarker,
+  clearAuditMarker,
+  clearStaleAuditMarkers,
 } from './storage';
 
 describe('storage', () => {
@@ -129,6 +132,77 @@ describe('storage', () => {
       for (const key of forbiddenKeys) {
         expect(json).not.toContain(`"${key}"`);
       }
+    });
+  });
+
+  // ============================================================
+  // 审计标记生命周期（#3 钩子：手动覆盖 / 计划版本变更时清理）
+  // ============================================================
+  describe('审计标记生命周期', () => {
+    function withMarkers(): VocabSnapshot {
+      let snapshot = createEmptySnapshot('seed', 'dict-v1');
+      snapshot = addAuditMarker(snapshot, {
+        word: 'apple',
+        source: 'initial-correct',
+        planVersion: 'plan-v1',
+        createdAt: 1,
+        pending: true,
+      });
+      snapshot = addAuditMarker(snapshot, {
+        word: 'banana',
+        source: 'initial-correct',
+        planVersion: 'plan-v1',
+        createdAt: 2,
+        pending: true,
+      });
+      return snapshot;
+    }
+
+    it('clearAuditMarker 仅清除指定词且不改其他标记', () => {
+      const snapshot = withMarkers();
+      const cleaned = clearAuditMarker(snapshot, 'apple');
+      expect(cleaned.auditMarkers['apple']).toBeUndefined();
+      expect(cleaned.auditMarkers['banana']).toBeDefined();
+      expect(cleaned.auditMarkers['banana']!.planVersion).toBe('plan-v1');
+      // 不可变：原快照不受影响
+      expect(snapshot.auditMarkers['apple']).toBeDefined();
+    });
+
+    it('clearAuditMarker 对不存在的标记返回原快照引用', () => {
+      const snapshot = withMarkers();
+      const cleaned = clearAuditMarker(snapshot, 'missing');
+      expect(cleaned).toBe(snapshot);
+    });
+
+    it('clearStaleAuditMarkers 只清除绑定到旧计划版本的标记', () => {
+      let snapshot = withMarkers();
+      // banana 改用新计划版本
+      snapshot = addAuditMarker(snapshot, {
+        word: 'banana',
+        source: 'initial-correct',
+        planVersion: 'plan-v2',
+        createdAt: 3,
+        pending: true,
+      });
+      const cleaned = clearStaleAuditMarkers(snapshot, 'plan-v2');
+      expect(cleaned.auditMarkers['apple']).toBeUndefined(); // 旧版本 → 清除
+      expect(cleaned.auditMarkers['banana']).toBeDefined(); // 新版本 → 保留
+      expect(cleaned.auditMarkers['banana']!.planVersion).toBe('plan-v2');
+    });
+
+    it('clearStaleAuditMarkers 无陈旧标记时返回原快照引用', () => {
+      const snapshot = withMarkers();
+      const cleaned = clearStaleAuditMarkers(snapshot, 'plan-v1');
+      expect(cleaned).toBe(snapshot);
+    });
+
+    it('手动覆盖后应立即清除该词的审计标记（与 worker 行为一致）', () => {
+      let snapshot = withMarkers();
+      // 模拟 STATE_CHANGE 手动标记 known
+      snapshot = mergeStateChange(snapshot, 'apple', 'known', 'manual');
+      snapshot = clearAuditMarker(snapshot, 'apple');
+      expect(snapshot.words['apple']!.source).toBe('manual');
+      expect(snapshot.auditMarkers['apple']).toBeUndefined();
     });
   });
 });

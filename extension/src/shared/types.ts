@@ -95,8 +95,12 @@ export interface InitialTestState {
 export interface AuditMarker {
   readonly word: string;
   readonly source: 'initial-correct';
-  /** 状态版本（与快照版本绑定；版本变化时清除陈旧标记） */
-  readonly statusVersion: number;
+  /**
+   * 生成该标记的首测计划版本（InitialTestPlan.version）。
+   * 与计划版本绑定而非 schemaVersion：计划重做/版本变化时清除陈旧标记；
+   * #3 引入画像版本后将作为并行维度，不在此字段复用 schemaVersion。
+   */
+  readonly planVersion: string;
   readonly createdAt: number;
   readonly pending: boolean;
 }

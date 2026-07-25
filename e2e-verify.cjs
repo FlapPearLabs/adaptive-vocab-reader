@@ -69,7 +69,7 @@ async function launchChrome(userDataDir, chromeForTesting) {
     chrome.on('exit', (code) => reject(new Error(`Chrome 提前退出：${code}`)));
   });
 
-  const browser = await puppeteer.connect({ browserWSEndpoint: devtools });
+  const browser = await puppeteer.connect({ browserWSEndpoint: devtools, protocolTimeout: 240_000 });
   return { chrome, browser };
 }
 
@@ -270,8 +270,46 @@ async function main() {
     if (perBand.size !== 10) throw new Error(`首测频段数不为 10，实际 ${perBand.size}`);
     for (let b = 0; b < 10; b++) if (perBand.get(b) !== 5) throw new Error(`频段 ${b} 题数不为 5，实际 ${perBand.get(b)}`);
 
-    // 逐题作答：前 25 题答对，后 25 题答错
-    for (let i = 0; i < plan.questions.length; i++) {
+    // 多标签页同步验证：两个已开内容页都应经广播增量更新（降低 #1 残余风险）
+    const planWordsHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><p>${plan.questions.map((q) => q.word).join(' ')}</p></body></html>`;
+    fs.writeFileSync(path.join(tempDir, 'plan-words.html'), planWordsHtml);
+
+    const pageA = await browser2.newPage();
+    pageA.on('pageerror', (e) => pageLogs.push(`pageA error: ${e.message}`));
+    await pageA.goto(`https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
+    await pageA.waitForSelector('.avr-word', { timeout: 10_000 });
+    const pageB = await browser2.newPage();
+    pageB.on('pageerror', (e) => pageLogs.push(`pageB error: ${e.message}`));
+    await pageB.goto(`https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
+    await pageB.waitForSelector('.avr-word', { timeout: 10_000 });
+
+    const word0 = plan.questions[0].word;
+    const countWord = (page) => page.evaluate((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length, word0);
+    const beforeA = await countWord(pageA);
+    const beforeB = await countWord(pageB);
+    if (beforeA === 0 || beforeB === 0) throw new Error(`多标签前置失败：页面未标注 ${word0}（A=${beforeA}, B=${beforeB}）`);
+
+    // 在弹窗作答第 0 题（答对 → known → 无标注），验证两页均收到 STATE_UPDATED
+    const card0 = (await popup.$$('.question'))[0];
+    const option0 = await card0.$$('.option:not(.unsure)');
+    await option0[plan.questions[0].correctOptionIndex].click();
+    await wait(200);
+    await pageA.waitForFunction(
+      (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
+      { timeout: 10_000 }, word0,
+    );
+    await pageB.waitForFunction(
+      (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
+      { timeout: 8_000 }, word0,
+    );
+    const afterA = await countWord(pageA);
+    const afterB = await countWord(pageB);
+    if (afterA !== 0 || afterB !== 0) throw new Error(`多标签页未同步更新：${word0}（A=${afterA}, B=${afterB}）`);
+    await pageA.close();
+    await pageB.close();
+
+    // 逐题作答剩余 49 题：第 1–24 题答对，第 25–49 题答错（第 0 题已在上一步答对）
+    for (let i = 1; i < plan.questions.length; i++) {
       const q = plan.questions[i];
       const correctIdx = q.correctOptionIndex;
       const targetIdx = i < 25 ? correctIdx : (correctIdx === 0 ? 1 : 0);
@@ -294,10 +332,7 @@ async function main() {
     const serialized2 = JSON.stringify(afterTest);
     if (/localhost|comment-section|sentence/.test(serialized2)) throw new Error('首测快照包含页面信息');
 
-    // 页面更新验证：构造仅含计划词的阅读页
-    const planWordsHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><p>${plan.questions.map((q) => q.word).join(' ')}</p></body></html>`;
-    fs.writeFileSync(path.join(tempDir, 'plan-words.html'), planWordsHtml);
-
+    // 页面更新验证：复用上面已写入的 plan-words.html（仅含计划词的阅读页）
     const page2 = await browser2.newPage();
     page2.on('pageerror', (e) => pageLogs.push(`page2 error: ${e.message}`));
     await page2.goto(`https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
@@ -328,7 +363,7 @@ async function main() {
     const summaryText = await popup2.$eval('.summary', (el) => el.textContent || '');
     if (!/首测完成/.test(summaryText)) throw new Error(`重开弹窗未恢复已完成状态：${summaryText}`);
 
-    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit=${auditCount}, plan_frozen=true, page_updated=true, reopen_recovered=true`);
+    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true`);
   } finally {
     if (browser2) await browser2.close();
     await killChrome(chrome2);

@@ -19,6 +19,9 @@ from typing import Any
 
 
 MAX_TRANSLATION_LENGTH = 40
+# 与运行时首测候选规则对齐：每题需 1 正确 + 3 干扰项 = 4 个互异中文选项，
+# 故一个词合格当且仅当全局存在 >= 3 个与其自身翻译不同的其他翻译。
+DISTRACTOR_COUNT = 3
 WORD_PATTERN = re.compile(r"[a-z]+$")
 FORM_SEPARATOR = re.compile(r"[,;]")
 POS_TOKEN = r"(?:abbr|adj|adv|art|aux|conj|det|interj|int|n|num|ord|phr|pl|prep|pron|s|v|vi|vt|a|ad)\."
@@ -233,6 +236,17 @@ def build_core(
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (core_path, forms_path, bands_path)
     }
+
+    # 首测候选资格统计（与运行时 strategy/quiz.ts eligibleCandidates 同一规则）：
+    # 一个词能成为首测题，当且仅当全局存在 >= DISTRACTOR_COUNT 个与其自身翻译不同的其他翻译。
+    distinct_translations = {item["translation"] for item in selected}
+    distinct_translation_count = len(distinct_translations)
+    quiz_ineligible_words = [
+        item["word"]
+        for item in selected
+        if sum(1 for t in distinct_translations if t != item["translation"]) < DISTRACTOR_COUNT
+    ]
+
     report = {
         "schema_version": 1,
         "source": {
@@ -253,6 +267,12 @@ def build_core(
         "selection_order": [item["word"] for item in selected],
         "rejections": dict(sorted(rejections.items())),
         "form_collisions": collisions,
+        "quiz_eligibility": {
+            "distractor_count": DISTRACTOR_COUNT,
+            "distinct_translation_count": distinct_translation_count,
+            "ineligible_count": len(quiz_ineligible_words),
+            "ineligible_words": quiz_ineligible_words,
+        },
         "artifacts": artifacts,
         "license": "ECDICT repository LICENSE is MIT; Chinese-definition redistribution chain remains UNKNOWN; dogfood only.",
     }

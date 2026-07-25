@@ -127,6 +127,46 @@ class EcdictCoreBuildTests(unittest.TestCase):
 
         self.assertEqual(forms, {"came": "come", "coming": "come", "comes": "come"})
 
+    def test_reports_quiz_eligibility_with_sufficient_distinct_translations(self):
+        builder = load_builder_module()
+        csv_bytes = (
+            b"word,phonetic,translation,pos,tag,bnc,frq,exchange\n"
+            b"a,\xe9\x94\x80,ta,n.,,1,1,\n"
+            b"b,\xe9\x94\x81,tb,n.,,2,2,\n"
+            b"c,\xe9\x94\x82,tc,n.,,3,3,\n"
+            b"d,\xe9\x94\x83,td,n.,,4,4,\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            input_path = root / "quiz-ok.csv"
+            input_path.write_bytes(csv_bytes)
+            report = builder.build_core(input_path, root / "out", limit=4)
+
+        eligibility = report["quiz_eligibility"]
+        self.assertEqual(eligibility["distractor_count"], 3)
+        self.assertEqual(eligibility["distinct_translation_count"], 4)
+        self.assertEqual(eligibility["ineligible_count"], 0)
+        self.assertEqual(eligibility["ineligible_words"], [])
+
+    def test_reports_all_words_ineligible_when_too_few_distinct_translations(self):
+        builder = load_builder_module()
+        csv_bytes = (
+            b"word,phonetic,translation,pos,tag,bnc,frq,exchange\n"
+            b"a,\xe9\x94\x80,ta,n.,,1,1,\n"
+            b"b,\xe9\x94\x81,tb,n.,,2,2,\n"
+            b"c,\xe9\x94\x82,tc,n.,,3,3,\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            input_path = root / "quiz-bad.csv"
+            input_path.write_bytes(csv_bytes)
+            report = builder.build_core(input_path, root / "out", limit=3)
+
+        eligibility = report["quiz_eligibility"]
+        self.assertEqual(eligibility["distinct_translation_count"], 3)
+        self.assertEqual(eligibility["ineligible_count"], 3)
+        self.assertEqual(eligibility["ineligible_words"], ["a", "b", "c"])
+
 
 if __name__ == "__main__":
     unittest.main()
