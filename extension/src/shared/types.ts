@@ -8,8 +8,8 @@ export type WordStatus = 'known' | 'learning' | 'unknown';
 /** 页面展示决策 */
 export type DisplayDecision = 'strong' | 'light' | 'none';
 
-/** 状态变更来源：手动标记 或 首测作答 */
-export type WordStateSource = 'manual' | 'initial';
+/** 状态变更来源：手动标记 / 首测作答 / 审计作答 / 活跃生词状态核验 */
+export type WordStateSource = 'manual' | 'initial' | 'audit' | 'active-verify';
 
 /** 词典条目 */
 export interface DictEntry {
@@ -106,6 +106,60 @@ export interface AuditMarker {
 }
 
 // ============================================================
+// 审计（Spec B §8：单次答对审计标记的生命周期）
+// ============================================================
+
+/** 审计候选池：单次初测答对词 / 高置信不提示未知词 */
+export type AuditBucket = 'initial-correct' | 'high-confidence';
+
+/** 一个审计候选（含来源桶与词频段，供确定性选择使用） */
+export interface AuditCandidate {
+  readonly word: string;
+  readonly bucket: AuditBucket;
+  readonly band: number;
+}
+
+/** 冻结审计计划中的单个候选（与冻结审计题一一对应） */
+export interface AuditPlanCandidate {
+  readonly word: string;
+  readonly bucket: AuditBucket;
+  readonly band: number;
+}
+
+/** 审计结果：答对（已验证）/ 答错或不确定（失败） */
+export type AuditOutcome = 'verified' | 'failed';
+
+/**
+ * 冻结的审计计划（Spec B §8 + §6「作答前冻结」）。
+ * 由策略模块一次性产出并持久化到快照；作答时 worker 依此冻结计划验证请求，
+ * 不信任客户端传入的 planVersion/bucket/候选资格。
+ */
+export interface AuditPlan {
+  /** 审计计划版本 = hash(seed + planVersion + candidates)，确定性 */
+  readonly version: string;
+  /** 被审计的首测计划版本（InitialTestPlan.version） */
+  readonly planVersion: string;
+  /** 安装随机种子 */
+  readonly seed: string;
+  /** 冻结的审计候选（与 questions/settled 一一对应） */
+  readonly candidates: readonly AuditPlanCandidate[];
+  /** 冻结的审计题（与 candidates 一一对应；含正确选项下标） */
+  readonly questions: readonly QuizQuestion[];
+  /** 每个候选的结算结果；null=未结算，'verified'/'failed'=已结算。结算后不可重复结算。 */
+  readonly results: readonly (AuditOutcome | null)[];
+  readonly createdAt: number;
+}
+
+/** 一条审计事件记录（结算后仅保留最小状态证据与最近审计结果） */
+export interface AuditEvent {
+  readonly word: string;
+  readonly outcome: AuditOutcome;
+  readonly bucket: AuditBucket;
+  readonly planVersion: string;
+  readonly at: number;
+}
+
+// ============================================================
 // 状态变更（泛型 source —— Matt Pocock 风格：用类型参数约束来源）
 // ============================================================
 
@@ -161,6 +215,10 @@ export interface VocabSnapshot {
   words: Record<string, WordState>;
   /** 单次答对待审计标记（仅首测正确词与高置信不提示未知词） */
   auditMarkers: Record<string, AuditMarker>;
+  /** 审计事件日志（答对/答错或不确定的最小状态证据，供漏提示率计算） */
+  auditLog: AuditEvent[];
+  /** 冻结的审计计划（作答前冻结，worker 据此验证审计作答）；null 表示无活跃审计 */
+  auditPlan: AuditPlan | null;
   /** 首测冻结计划与作答进度；null 表示尚未开始 */
   initialTest: InitialTestState | null;
   /** 最后更新时间戳 */
@@ -215,6 +273,78 @@ export interface VocabStrategy {
    * @param word 规范化单词
    */
   markLearning(word: string): StateChange<'manual'>;
+
+  // ============================================================
+  // 首测：冻结计划 + 结算单题（领域动作，非旧函数浅转发）
+  // ============================================================
+
+  /** 冻结首测计划：十频段各五题、选项顺序与计划版本在调用时冻结。 */
+  freezeInitialTestPlan(input: FreezeInitialTestInput): InitialTestPlan;
+
+  /** 结算一道冻结的首测题：返回原子状态变更（含审计标记），调用方持久化。 */
+  settleInitialTestAnswer(input: SettleInitialTestInput): ApplyAnswerResult;
+
+  // ============================================================
+  // 审计：冻结计划 + 结算单题（Spec B §8 + §6 作答前冻结）
+  // ============================================================
+
+  /** 冻结审计计划：从候选池确定性地选最多 count 题，含冻结审计题与结算位。 */
+  freezeAuditPlan(input: FreezeAuditPlanInput): AuditPlan;
+
+  /** 结算一道冻结的审计题：返回新计划（结算位翻转）+ 原子状态变更 + 审计事件。 */
+  settleAuditAnswer(input: SettleAuditAnswerInput): SettleAuditResult;
 }
+
+/** 冻结首测计划输入：受控词典视图 + 安装种子 */
+export interface FreezeInitialTestInput {
+  readonly core: DictCore;
+  readonly forms: FormsMap;
+  readonly bands: FrequencyBands;
+  readonly seed: string;
+  readonly dictVersion: string;
+}
+
+/** 结算冻结首测题输入：冻结计划 + 题号 + 作答 + 该词当前状态 */
+export interface SettleInitialTestInput {
+  readonly plan: InitialTestPlan;
+  readonly questionIndex: number;
+  readonly answer: QuizAnswer;
+  readonly current: WordState | undefined;
+}
+
+/** 冻结审计计划输入：候选所需快照片段 + 受控词典视图 + 种子 */
+export interface FreezeAuditPlanInput {
+  readonly markers: Record<string, AuditMarker>;
+  readonly words: Record<string, WordState>;
+  readonly core: DictCore;
+  readonly bands: FrequencyBands;
+  readonly seed: string;
+  readonly planVersion: string;
+  readonly count: number;
+  /** 当前高置信不提示的未知词（池 B 候选）；V0.1 高置信机制未建时传空 */
+  readonly highConfidenceWords?: readonly string[];
+  /** 审计轮次，用于改变段内抽取顺序（默认 0） */
+  readonly round?: number;
+}
+
+/** 结算冻结审计题输入：冻结计划 + 候选下标 + 作答 + 该词当前状态 */
+export interface SettleAuditAnswerInput {
+  readonly plan: AuditPlan;
+  readonly index: number;
+  readonly answer: QuizAnswer;
+  readonly current: WordState | undefined;
+}
+
+/** 结算审计题结果：新冻结计划（结算位翻转）+ 原子状态变更 + 审计事件 */
+export interface SettleAuditResult {
+  readonly kind: AuditOutcome;
+  readonly plan: AuditPlan;
+  readonly change: StateChange<'audit'>;
+  readonly clearedWord: string;
+  readonly event: AuditEvent;
+}
+
+/** 固定首测题数（十频段 × 五题） */
+export const INITIAL_TEST_LENGTH = 50;
 
 export const SCHEMA_VERSION = 1;

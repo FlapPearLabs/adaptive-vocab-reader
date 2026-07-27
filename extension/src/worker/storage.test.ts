@@ -9,6 +9,7 @@ import {
   addAuditMarker,
   clearAuditMarker,
   clearStaleAuditMarkers,
+  recordAuditEvent,
 } from './storage';
 
 describe('storage', () => {
@@ -119,7 +120,9 @@ describe('storage', () => {
       const parsed = JSON.parse(json);
       const topKeys = Object.keys(parsed).sort();
       expect(topKeys).toEqual([
+        'auditLog',
         'auditMarkers',
+        'auditPlan',
         'dictVersion',
         'initialTest',
         'installSeed',
@@ -194,6 +197,16 @@ describe('storage', () => {
       const snapshot = withMarkers();
       const cleaned = clearStaleAuditMarkers(snapshot, 'plan-v1');
       expect(cleaned).toBe(snapshot);
+    });
+
+    it('recordAuditEvent 追加事件且不可变（旧快照不含该事件）', () => {
+      const snapshot = withMarkers();
+      const event = { word: 'apple', outcome: 'verified' as const, bucket: 'initial-correct' as const, planVersion: 'plan-v1', at: 100 };
+      const updated = recordAuditEvent(snapshot, event);
+      expect(updated.auditLog).toHaveLength(1);
+      expect(updated.auditLog[0]).toEqual(event);
+      // 原快照不被修改
+      expect(snapshot.auditLog).toHaveLength(0);
     });
 
     it('手动覆盖后应立即清除该词的审计标记（与 worker 行为一致）', () => {

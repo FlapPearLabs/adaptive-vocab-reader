@@ -289,7 +289,7 @@ export function updateWordDisplay(
   word: string,
   decision: DisplayDecision,
   translation: string | null,
-  _showInlineTranslation: boolean,
+  showInlineTranslation: boolean,
 ): void {
   const spans = document.querySelectorAll<HTMLSpanElement>(`.${EXTENSION_CLASS}[data-word="${word}"]`);
 
@@ -307,8 +307,10 @@ export function updateWordDisplay(
     // 清除旧的提示类，保留 avr-word
     span.classList.remove('avr-strong', 'avr-strong-first', 'avr-light');
     if (decision === 'strong') {
-      // 同页首次出现显示行内中文，重复仅下划线
-      span.classList.add(index === 0 ? 'avr-strong-first' : 'avr-strong');
+      // 消费策略模块已算好的展示决策（showInlineTranslation），不在标注层用 index===0 重算。
+      // index===0 仅用于定位「同页首现的 span 位置」，行内中文的开关由策略的布尔决定。
+      const showInline = index === 0 && showInlineTranslation;
+      span.classList.add(showInline ? 'avr-strong-first' : 'avr-strong');
     } else {
       span.classList.add('avr-light');
     }

@@ -3,9 +3,13 @@
 // ============================================================
 // 负责：
 // 1. 初始化/加载持久化快照
-// 2. 接收来自内容脚本的状态变更请求（手动标记 / 首测作答）
+// 2. 接收来自内容脚本的状态变更请求（手动标记 / 首测作答 / 审计作答）
 // 3. 合并变更、持久化并广播到所有标签页
 // 不得加载完整词典、参与单词查询或 DOM 操作。
+//
+// 策略 seam：本文件只消费 `strategy/index.ts` 的深 Module Interface 输出
+// （冻结计划、原子状态变更），不直接 import `strategy/quiz.ts` 或 `strategy/audit.ts`。
+// 审计作答依持久化冻结审计计划验证，不信任客户端传入的 planVersion/bucket/候选资格。
 // ============================================================
 
 import type {
@@ -15,6 +19,7 @@ import type {
   InitialTestPlan,
   InitialTestState,
   QuizAnswer,
+  AuditPlan,
 } from '../shared/types';
 import {
   createEmptySnapshot,
@@ -23,27 +28,37 @@ import {
   generateInstallSeed,
   addAuditMarker,
   setInitialTest,
+  setAuditPlan,
   clearAuditMarker,
   clearStaleAuditMarkers,
+  recordAuditEvent,
 } from './storage';
-import { applyAnswer, INITIAL_TEST_LENGTH } from '../strategy/quiz';
+import { createVocabStrategy, INITIAL_TEST_LENGTH } from '../strategy/index';
+import { validateAuditAnswerRequest } from './auditValidation';
 
 const STORAGE_KEY = 'avr_vocab_snapshot';
 // 固定 1,000 词 ECDICT 产物的 dict-core.json SHA-256 前缀；Service Worker 不读取词典。
 const DICTIONARY_VERSION = 'ecdict-core-1000-64eb1a402f909f7a';
 
+const strategy = createVocabStrategy();
 let currentSnapshot: VocabSnapshot | null = null;
 
 /**
  * 从 chrome.storage.local 加载快照。
- * 首次安装时创建空快照。
+ * 首次安装时创建空快照；旧快照缺字段时向前迁移。
  */
 async function loadSnapshot(): Promise<VocabSnapshot> {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   const stored = result[STORAGE_KEY];
 
   if (stored && stored.schemaVersion) {
-    return stored as VocabSnapshot;
+    // 向前迁移：兼容旧快照缺 auditLog / auditPlan 的情形
+    return {
+      ...(stored as VocabSnapshot),
+      auditMarkers: (stored as VocabSnapshot).auditMarkers ?? {},
+      auditLog: (stored as VocabSnapshot).auditLog ?? [],
+      auditPlan: (stored as VocabSnapshot).auditPlan ?? null,
+    };
   }
 
   // 首次运行：创建初始快照
@@ -87,7 +102,12 @@ type WorkerMessage =
   | { type: 'INITIAL_TEST_START'; plan: InitialTestPlan }
   | { type: 'GET_INITIAL_TEST' }
   | { type: 'INITIAL_TEST_ANSWER'; questionIndex: number; answer: QuizAnswer }
-  | { type: 'INITIAL_TEST_RESET' };
+  | { type: 'INITIAL_TEST_RESET' }
+  | { type: 'GET_AUDIT_MARKERS' }
+  | { type: 'FREEZE_AUDIT_PLAN'; plan: AuditPlan }
+  | { type: 'GET_AUDIT_PLAN' }
+  | { type: 'AUDIT_ANSWER'; auditPlanVersion: string; index: number; answer: QuizAnswer }
+  | { type: 'CLEAR_AUDIT_PLAN' };
 
 // ============================================================
 // 消息处理
@@ -130,8 +150,9 @@ chrome.runtime.onMessage.addListener((message: WorkerMessage, _sender, sendRespo
           sendResponse({ error: 'invalid plan' });
           break;
         }
-        // 新计划版本：清除上一轮首测产生的陈旧审计标记
+        // 新计划版本：清除上一轮首测产生的陈旧审计标记与陈旧冻结审计计划
         currentSnapshot = clearStaleAuditMarkers(currentSnapshot, plan.version);
+        currentSnapshot = setAuditPlan(currentSnapshot, null);
         const test: InitialTestState = {
           plan,
           answers: Array.from({ length: plan.questions.length }, () => null),
@@ -158,7 +179,12 @@ chrome.runtime.onMessage.addListener((message: WorkerMessage, _sender, sendRespo
         }
 
         const current = currentSnapshot.words[test.plan.questions[questionIndex]!.word];
-        const result = applyAnswer(test.plan, questionIndex, answer, current);
+        const result = strategy.settleInitialTestAnswer({
+          plan: test.plan,
+          questionIndex,
+          answer,
+          current,
+        });
 
         if (result.kind === 'priority-preserved' || result.change === null) {
           // 页面手动状态优先：不做任何状态变更，仅记录作答
@@ -193,6 +219,60 @@ chrome.runtime.onMessage.addListener((message: WorkerMessage, _sender, sendRespo
 
       case 'INITIAL_TEST_RESET': {
         currentSnapshot = setInitialTest(currentSnapshot, null);
+        currentSnapshot = setAuditPlan(currentSnapshot, null);
+        await persistSnapshot(currentSnapshot);
+        sendResponse({ success: true });
+        break;
+      }
+
+      case 'GET_AUDIT_MARKERS': {
+        const planVersion = currentSnapshot.initialTest?.plan?.version ?? '';
+        const pendingAudit = Object.values(currentSnapshot.auditMarkers).filter((m) => m.pending).length;
+        sendResponse({ markers: currentSnapshot.auditMarkers, planVersion, pendingAudit });
+        break;
+      }
+
+      case 'FREEZE_AUDIT_PLAN': {
+        // 弹窗（受信任上下文，持有词典）构建冻结审计计划；worker 仅持久化。
+        // 作答时 worker 据此冻结计划验证，不信任逐题客户端元数据。
+        currentSnapshot = setAuditPlan(currentSnapshot, message.plan);
+        await persistSnapshot(currentSnapshot);
+        sendResponse({ success: true });
+        break;
+      }
+
+      case 'GET_AUDIT_PLAN': {
+        sendResponse({ plan: currentSnapshot.auditPlan });
+        break;
+      }
+
+      case 'AUDIT_ANSWER': {
+        const { auditPlanVersion, index, answer } = message;
+        const plan = currentSnapshot.auditPlan;
+
+        // 服务端权威校验：依持久化冻结审计计划验证请求（不信任客户端元数据）
+        const validation = validateAuditAnswerRequest(plan, auditPlanVersion, index, currentSnapshot.auditMarkers);
+        if (!validation.ok) {
+          sendResponse({ error: validation.error });
+          break;
+        }
+
+        const candidate = plan!.candidates[index]!;
+        const current = currentSnapshot.words[candidate.word];
+        const result = strategy.settleAuditAnswer({ plan: plan!, index, answer, current });
+
+        currentSnapshot = setAuditPlan(currentSnapshot, result.plan);
+        currentSnapshot = mergeStateChange(currentSnapshot, result.change.word, result.change.newStatus, 'audit');
+        currentSnapshot = clearAuditMarker(currentSnapshot, result.clearedWord);
+        currentSnapshot = recordAuditEvent(currentSnapshot, result.event);
+        await persistSnapshot(currentSnapshot);
+        await broadcastState(currentSnapshot, result.change.word, result.change.newStatus);
+        sendResponse({ result });
+        break;
+      }
+
+      case 'CLEAR_AUDIT_PLAN': {
+        currentSnapshot = setAuditPlan(currentSnapshot, null);
         await persistSnapshot(currentSnapshot);
         sendResponse({ success: true });
         break;

@@ -21,6 +21,7 @@ __pycache__/
 
 # Local-only indexes and disposable work
 .codegraph/
+.workbuddy/
 work/tmp/
 work/draft/
 work/generated/

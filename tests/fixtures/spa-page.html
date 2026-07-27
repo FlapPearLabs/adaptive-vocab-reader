@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>V0.1 SPA 动态插入 fixture</title>
+  <style>
+    body { font-family: Georgia, serif; max-width: 720px; margin: 2rem auto; line-height: 1.8; }
+    article { padding: 1rem; }
+    nav { background: #f0f0f0; padding: 0.5rem; margin-bottom: 1rem; }
+    button { margin-right: 0.5rem; padding: 0.4rem 0.8rem; }
+  </style>
+</head>
+<body>
+  <!-- 导航栏（应被跳过，验证动态插入不污染非正文区） -->
+  <nav><a href="/">Home</a><a href="/about">About</a></nav>
+
+  <article>
+    <h1>Initial Article</h1>
+    <p id="intro">We begin a language journey and face a challenge when we travel far.</p>
+
+    <!-- 无限滚动 / 动态加载区 -->
+    <div id="feed"></div>
+
+    <!-- 路由切换区 -->
+    <div id="view"><p>Original view: a difficult question may teach us to grow and remember.</p></div>
+
+    <!-- 非正文区：代码、表单、评论（均应被跳过，不标注） -->
+    <pre><code id="codeblock">const challenge = require('language');</code></pre>
+    <form id="theform"><textarea>journey through language</textarea><input type="text" value="challenge"></form>
+    <div class="comment-section" id="comments"><p>A comment says the language journey is a challenge.</p></div>
+
+    <button id="loadMore" type="button">Load more</button>
+    <button id="swapRoute" type="button">Switch route</button>
+  </article>
+
+  <script>
+    // 动态插入：模拟无限滚动 / SPA 追加正文
+    document.getElementById('loadMore').addEventListener('click', () => {
+      const p = document.createElement('p');
+      p.textContent = 'A new explorer finds an opportunity and learns to be useful every day.';
+      document.getElementById('feed').appendChild(p);
+    });
+    // 路由切换：替换视图内容（innerHTML 重写）
+    document.getElementById('swapRoute').addEventListener('click', () => {
+      document.getElementById('view').innerHTML =
+        '<p>Route changed: a challenge can help you discover wonder and remain patient.</p>';
+    });
+  </script>
+</body>
+</html>

@@ -6,7 +6,7 @@
 // 快照不得包含 URL、域名、页面标题、正文、句子或浏览历史。
 // ============================================================
 
-import type { VocabSnapshot, WordState, WordStateSource, AuditMarker, InitialTestState } from '../shared/types';
+import type { VocabSnapshot, WordState, WordStateSource, AuditMarker, InitialTestState, AuditEvent, AuditPlan } from '../shared/types';
 import { SCHEMA_VERSION } from '../shared/types';
 
 /**
@@ -19,6 +19,8 @@ export function createEmptySnapshot(installSeed: string, dictVersion: string): V
     installSeed,
     words: {},
     auditMarkers: {},
+    auditLog: [],
+    auditPlan: null,
     initialTest: null,
     lastUpdated: Date.now(),
   };
@@ -107,10 +109,34 @@ export function setInitialTest(snapshot: VocabSnapshot, test: InitialTestState |
 }
 
 /**
+ * 写入或清除冻结审计计划（作答前冻结，worker 据此验证审计作答）。
+ */
+export function setAuditPlan(snapshot: VocabSnapshot, plan: AuditPlan | null): VocabSnapshot {
+  return {
+    ...snapshot,
+    auditPlan: plan,
+    lastUpdated: Date.now(),
+  };
+}
+
+/**
  * 获取当前所有单词状态（浅拷贝）
  */
 export function getWords(snapshot: VocabSnapshot): Record<string, WordState> {
   return { ...snapshot.words };
+}
+
+/**
+ * 追加一条审计事件（结算后仅保留最小状态证据与最近审计结果）。
+ * 返回新对象（不可变）；旧快照缺 auditLog 时安全回退为空数组。
+ */
+export function recordAuditEvent(snapshot: VocabSnapshot, event: AuditEvent): VocabSnapshot {
+  const log = snapshot.auditLog ?? [];
+  return {
+    ...snapshot,
+    auditLog: [...log, event],
+    lastUpdated: Date.now(),
+  };
 }
 
 /**

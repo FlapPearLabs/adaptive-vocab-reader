@@ -332,4 +332,37 @@ describe('updateWordDisplay', () => {
     expect(spans[1]!.classList.contains('avr-strong')).toBe(true);
     expect(spans[1]!.classList.contains('avr-strong-first')).toBe(false);
   });
+
+  // ============================================================
+  // 回归：消费策略模块的 showInlineTranslation，不在标注层用 index===0 重算
+  // 对应 code-review HARD#1 —— 最高 seam「只消费不重算」
+  // ============================================================
+
+  it('消费策略 showInlineTranslation：多出现且 false 时任何 span 都不显示行内中文（不依赖 index===0 重算）', () => {
+    // "challenge and challenge" 两次出现
+    const p = document.createElement('p');
+    p.innerHTML = '';
+    const textNode = document.createTextNode('challenge and challenge');
+    p.appendChild(textNode);
+    document.body.appendChild(p);
+
+    // challenge@0..9  challenge@14..23 —— 初始均为轻提示
+    const anns = [
+      makeAnnotation(0, 9, { word: 'challenge', surfaceForm: 'challenge', translation: '挑战', decision: 'light' }),
+      makeAnnotation(14, 23, { word: 'challenge', surfaceForm: 'challenge', translation: '挑战', decision: 'light' }),
+    ];
+    annotateTextNode(textNode, [anns[0]!, anns[1]!], () => {});
+    expect(document.querySelectorAll<HTMLSpanElement>('.avr-word[data-word="challenge"]').length).toBe(2);
+
+    // 策略判定不展示行内中文（showInlineTranslation=false）—— 即便首现也只下划线
+    updateWordDisplay('challenge', 'strong', '挑战', false);
+
+    const spans = document.querySelectorAll<HTMLSpanElement>('.avr-word[data-word="challenge"]');
+    expect(spans.length).toBe(2);
+    // 关键：不靠 index===0 重算「首现→行内中文」；策略说 false，就都不显示行内中文
+    for (const span of spans) {
+      expect(span.classList.contains('avr-strong-first')).toBe(false);
+      expect(span.classList.contains('avr-strong')).toBe(true);
+    }
+  });
 });

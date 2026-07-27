@@ -43,6 +43,28 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * 对 page.goto 加重试：Chrome for Testing 151 经 puppeteer-core connect 后，
+ * 首帧偶尔未就绪会抛「Requesting main frame too early」，短暂等待后重试即可。
+ */
+async function gotoSafe(page, url, opts = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      await page.goto(url, opts);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (err && err.message && err.message.includes('Requesting main frame too early')) {
+        await wait(400);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`goto 多次重试仍失败：${lastErr && lastErr.message}`);
+}
+
 function onceListening(server) {
   return new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve));
 }
@@ -55,6 +77,7 @@ async function launchChrome(userDataDir, chromeForTesting) {
     `--disable-extensions-except=${DIST_DIR}`,
     '--no-first-run', '--no-default-browser-check',
     '--ignore-certificate-errors', '--remote-debugging-port=0', '--enable-logging=stderr', '--v=1',
+    '--headless=new',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
   const devtools = await new Promise((resolve, reject) => {
@@ -137,6 +160,11 @@ async function main() {
         response.end(fs.readFileSync(FIXTURE, 'utf8'));
         return;
       }
+      if (request.url === '/spa-page.html') {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end(fs.readFileSync(path.join(ROOT, 'tests/fixtures/spa-page.html'), 'utf8'));
+        return;
+      }
       if (request.url === '/plan-words.html') {
         const f = path.join(tempDir, 'plan-words.html');
         if (fs.existsSync(f)) {
@@ -161,12 +189,13 @@ async function main() {
   let chrome1;
   try {
     ({ chrome: chrome1, browser: browser1 } = await launchChrome(path.join(tempDir, 'profile-1'), chromeForTesting));
-    const page = await browser1.newPage();
+    // 复用 connect 后已存在的初始页面（其主帧已就绪），规避 Chrome 151 + puppeteer-core 的 newPage 竞态
+    const page = (await browser1.pages())[0] || (await browser1.newPage());
     page.on('console', (message) => pageLogs.push(`${message.type()}: ${message.text()}`));
     page.on('pageerror', (error) => pageLogs.push(`pageerror: ${error.message}`));
     await wait(1_000);
 
-    await page.goto(`https://localhost:${PORT}/`, { waitUntil: 'networkidle0' });
+    await gotoSafe(page, `https://localhost:${PORT}/`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('.avr-word', { timeout: 10_000 });
 
     const initial = await page.evaluate(() => ({
@@ -245,13 +274,19 @@ async function main() {
     const popup = await browser2.newPage();
     popup.on('console', (m) => pageLogs.push(`popup: ${m.type()}: ${m.text()}`));
     popup.on('pageerror', (e) => pageLogs.push(`popup pageerror: ${e.message}`));
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle0' });
+    console.log('[stage2] opening popup...');
+    await gotoSafe(popup, `chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle0' });
+    console.log('[stage2] popup goto done');
     await popup.waitForSelector('button.primary', { timeout: 10_000 });
+    console.log('[stage2] button.primary found');
 
     // 开始测评
     await popup.click('button.primary');
+    console.log('[stage2] clicked primary, waiting .question...');
     await popup.waitForSelector('.question', { timeout: 10_000 });
+    console.log('[stage2] .question found');
     const qCount = await popup.$$eval('.question', (els) => els.length);
+    console.log('[stage2] qCount =', qCount);
     if (qCount !== 50) throw new Error(`弹窗未渲染 50 题，实际 ${qCount}`);
 
     // 读取冻结计划
@@ -259,10 +294,13 @@ async function main() {
       const s = await worker2.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
       return s.initialTest.plan;
     };
+    console.log('[stage2] reading plan...');
     const plan = await readPlan();
+    console.log('[stage2] plan read, questions =', plan.questions.length);
     if (plan.questions.length !== 50) throw new Error(`冻结计划题目数不为 50，实际 ${plan.questions.length}`);
     // 计划冻结：两次读取一致
     const planAgain = await readPlan();
+    console.log('[stage2] plan re-read (freeze check) ok');
     if (JSON.stringify(plan) !== JSON.stringify(planAgain)) throw new Error('首测计划未冻结（两次读取不一致）');
     // 十频段各五题
     const perBand = new Map();
@@ -276,32 +314,45 @@ async function main() {
 
     const pageA = await browser2.newPage();
     pageA.on('pageerror', (e) => pageLogs.push(`pageA error: ${e.message}`));
-    await pageA.goto(`https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
+    console.log('[stage2] loading pageA (plan-words)...');
+    await gotoSafe(pageA, `https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
     await pageA.waitForSelector('.avr-word', { timeout: 10_000 });
+    console.log('[stage2] pageA annotated');
     const pageB = await browser2.newPage();
     pageB.on('pageerror', (e) => pageLogs.push(`pageB error: ${e.message}`));
-    await pageB.goto(`https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
+    console.log('[stage2] loading pageB...');
+    await gotoSafe(pageB, `https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
     await pageB.waitForSelector('.avr-word', { timeout: 10_000 });
+    console.log('[stage2] pageB annotated');
 
     const word0 = plan.questions[0].word;
     const countWord = (page) => page.evaluate((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length, word0);
     const beforeA = await countWord(pageA);
     const beforeB = await countWord(pageB);
+    console.log('[stage2] beforeA/beforeB for', word0, '=', beforeA, beforeB);
     if (beforeA === 0 || beforeB === 0) throw new Error(`多标签前置失败：页面未标注 ${word0}（A=${beforeA}, B=${beforeB}）`);
 
     // 在弹窗作答第 0 题（答对 → known → 无标注），验证两页均收到 STATE_UPDATED
-    const card0 = (await popup.$$('.question'))[0];
-    const option0 = await card0.$$('.option:not(.unsure)');
-    await option0[plan.questions[0].correctOptionIndex].click();
+    // 用 page.evaluate 点击而非 ElementHandle.click，规避 puppeteer-core + Chrome 151
+    // 在扩展弹窗页上 ElementHandle.click 的协议超时不稳定性。
+    console.log('[stage2] clicking option0...');
+    await popup.evaluate((correctIdx) => {
+      const card = document.querySelectorAll('.question')[0];
+      const opts = card.querySelectorAll('.option:not(.unsure)');
+      (opts[correctIdx] || opts[0]).click();
+    }, plan.questions[0].correctOptionIndex);
+    console.log('[stage2] option0 clicked, waiting for sync...');
     await wait(200);
     await pageA.waitForFunction(
       (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
       { timeout: 10_000 }, word0,
     );
+    console.log('[stage2] pageA synced (word0 removed)');
     await pageB.waitForFunction(
       (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
       { timeout: 8_000 }, word0,
     );
+    console.log('[stage2] pageB synced');
     const afterA = await countWord(pageA);
     const afterB = await countWord(pageB);
     if (afterA !== 0 || afterB !== 0) throw new Error(`多标签页未同步更新：${word0}（A=${afterA}, B=${afterB}）`);
@@ -309,15 +360,20 @@ async function main() {
     await pageB.close();
 
     // 逐题作答剩余 49 题：第 1–24 题答对，第 25–49 题答错（第 0 题已在上一步答对）
+    // 用 page.evaluate 点击（同上，规避 ElementHandle.click 协议超时）
+    console.log('[stage2] answering remaining 49...');
     for (let i = 1; i < plan.questions.length; i++) {
       const q = plan.questions[i];
       const correctIdx = q.correctOptionIndex;
       const targetIdx = i < 25 ? correctIdx : (correctIdx === 0 ? 1 : 0);
-      const card = (await popup.$$('.question'))[i];
-      const optionButtons = await card.$$('.option:not(.unsure)');
-      await optionButtons[targetIdx].click();
+      await popup.evaluate((idx, qIdx) => {
+        const card = document.querySelectorAll('.question')[qIdx];
+        const opts = card.querySelectorAll('.option:not(.unsure)');
+        (opts[idx] || opts[0]).click();
+      }, targetIdx, i);
       await wait(40);
     }
+    console.log('[stage2] all 49 answered, waiting .summary...');
     await popup.waitForSelector('.summary', { timeout: 10_000 });
 
     // 校验 worker 快照
@@ -335,7 +391,7 @@ async function main() {
     // 页面更新验证：复用上面已写入的 plan-words.html（仅含计划词的阅读页）
     const page2 = await browser2.newPage();
     page2.on('pageerror', (e) => pageLogs.push(`page2 error: ${e.message}`));
-    await page2.goto(`https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
+    await gotoSafe(page2, `https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
     await page2.waitForSelector('.avr-word', { timeout: 10_000 });
     const pageUpdate = await page2.evaluate(() => {
       const res = {};
@@ -358,7 +414,7 @@ async function main() {
 
     // 重开弹窗：应显示已完成摘要（重启恢复）
     const popup2 = await browser2.newPage();
-    await popup2.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle0' });
+    await gotoSafe(popup2, `chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle0' });
     await popup2.waitForSelector('.summary', { timeout: 10_000 });
     const summaryText = await popup2.$eval('.summary', (el) => el.textContent || '');
     if (!/首测完成/.test(summaryText)) throw new Error(`重开弹窗未恢复已完成状态：${summaryText}`);
@@ -367,6 +423,69 @@ async function main() {
   } finally {
     if (browser2) await browser2.close();
     await killChrome(chrome2);
+  }
+
+  // ============================================================
+  // 阶段三：SPA 动态插入与路由切换（#4 残余风险验证）
+  // ============================================================
+  let browser3;
+  let chrome3;
+  try {
+    ({ chrome: chrome3, browser: browser3 } = await launchChrome(path.join(tempDir, 'profile-3'), chromeForTesting));
+    await wait(1_000);
+    const spa = await browser3.newPage();
+    spa.on('pageerror', (e) => pageLogs.push(`spa error: ${e.message}`));
+    await gotoSafe(spa, `https://localhost:${PORT}/spa-page.html`, { waitUntil: 'networkidle0' });
+
+    // 静态正文初始标注
+    await spa.waitForSelector('#intro .avr-word', { timeout: 10_000 });
+    const introBefore = await spa.$eval('#intro', (el) => el.querySelectorAll('.avr-word').length);
+    if (introBefore === 0) throw new Error('SPA 页面静态正文未标注');
+
+    // 动态插入（无限滚动式追加）
+    await spa.click('#loadMore');
+    await spa.waitForSelector('#feed .avr-word', { timeout: 10_000 });
+    const feedCount = await spa.$eval('#feed', (el) => el.querySelectorAll('.avr-word').length);
+    if (feedCount === 0) throw new Error('动态插入的正文未被增量标注');
+
+    // 路由切换（innerHTML 重写）
+    await spa.click('#swapRoute');
+    await spa.waitForFunction(
+      () => document.querySelectorAll('#view .avr-word').length > 0,
+      { timeout: 10_000 },
+    );
+    const viewCount = await spa.$eval('#view', (el) => el.querySelectorAll('.avr-word').length);
+    if (viewCount === 0) throw new Error('路由切换后的新正文未被重新标注');
+
+    // 增量性：初次正文标注未被清空（未退化成全页重扫/丢失）
+    const introAfter = await spa.$eval('#intro', (el) => el.querySelectorAll('.avr-word').length);
+    if (introAfter !== introBefore) throw new Error(`初次正文标注发生变化（疑似全页重扫）：${introBefore} -> ${introAfter}`);
+
+    // 非正文区（nav）不得被标注
+    const navHit = await spa.$eval('nav', (el) => el.querySelectorAll('.avr-word').length);
+    if (navHit !== 0) throw new Error('SPA 动态插入污染了非正文区（nav）');
+
+    // 非正文区：代码 / 表单 / 评论 也不得被标注（规格 §4 跳过规则，真实浏览器证据）
+    const skipHits = await spa.evaluate(() => ({
+      code: document.querySelectorAll('#codeblock .avr-word').length,
+      form: document.querySelectorAll('#theform .avr-word').length,
+      comment: document.querySelectorAll('#comments .avr-word').length,
+    }));
+    if (skipHits.code !== 0 || skipHits.form !== 0 || skipHits.comment !== 0) {
+      throw new Error(`SPA 扫描了应跳过的非正文区：${JSON.stringify(skipHits)}`);
+    }
+
+    // 性能基线（非持久化，仅 DOM dataset；不含 URL/正文/句子）
+    const perfRaw = await spa.evaluate(() => document.documentElement.dataset.avrPerf);
+    const perf = perfRaw ? JSON.parse(perfRaw) : null;
+    if (!perf || typeof perf.totalScanMs !== 'number' || typeof perf.maxBatchMs !== 'number' || typeof perf.annotatedNodes !== 'number') {
+      throw new Error(`SPA 性能观测未上报：${perfRaw}`);
+    }
+    // 先记录真实基线，不预设阈值（规格：当前不预设性能数值，先记录真实基线）
+    console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, perf_baseline=${JSON.stringify(perf)}`);
+  } finally {
+    if (browser3) await browser3.close();
+    await killChrome(chrome3);
   }
 
   console.log('E2E ALL PASS');

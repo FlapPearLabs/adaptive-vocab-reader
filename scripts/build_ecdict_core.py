@@ -238,13 +238,23 @@ def build_core(
     }
 
     # 首测候选资格统计（与运行时 strategy/quiz.ts eligibleCandidates 同一规则）：
-    # 一个词能成为首测题，当且仅当全局存在 >= DISTRACTOR_COUNT 个与其自身翻译不同的其他翻译。
+    # 一个词能成为首测题，当且仅当同时满足：
+    #   1. 全局存在 >= DISTRACTOR_COUNT 个与其自身翻译不同的其他翻译（四选项互异）；
+    #   2. 该词未被 forms 重定向到另一个主词条（自洽：lookup(w).word === w），
+    #      否则计划键 ≠ 页面 data-word（例如 core 含 could 但 forms[could]=can）。
     distinct_translations = {item["translation"] for item in selected}
     distinct_translation_count = len(distinct_translations)
+    shadowed_core_keys = [
+        item["word"]
+        for item in selected
+        if forms.get(item["word"]) is not None and forms.get(item["word"]) != item["word"]
+    ]
+    shadowed_set = set(shadowed_core_keys)
     quiz_ineligible_words = [
         item["word"]
         for item in selected
-        if sum(1 for t in distinct_translations if t != item["translation"]) < DISTRACTOR_COUNT
+        if (sum(1 for t in distinct_translations if t != item["translation"]) < DISTRACTOR_COUNT)
+        or (item["word"] in shadowed_set)
     ]
 
     report = {
@@ -270,6 +280,8 @@ def build_core(
         "quiz_eligibility": {
             "distractor_count": DISTRACTOR_COUNT,
             "distinct_translation_count": distinct_translation_count,
+            "self_canonical_rule": "exclude core keys shadowed by forms (forms[w] exists and != w); ensures plan key == page data-word",
+            "shadowed_core_keys": shadowed_core_keys,
             "ineligible_count": len(quiz_ineligible_words),
             "ineligible_words": quiz_ineligible_words,
         },

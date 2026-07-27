@@ -5,12 +5,14 @@
 //   同种子 + 同词典快照 → 完全相同的题目、选项顺序与计划版本；
 //   作答前冻结计划，作答中不得因画像变化重算题目。
 //
-// 此为纯函数模块，可在内容脚本、弹窗、Service Worker 与测试中复用，
+// 此为策略包的内部实现模块：弹窗、Service Worker、内容脚本、存储适配器
+// 一律经 `strategy/index.ts` 的深 Module Interface 消费，不得直接 import 本文件。
 // 调用方不得自行重算抽样顺序或选项排列。
 // ============================================================
 
 import type {
   DictCore,
+  FormsMap,
   FrequencyBands,
   QuizAnswer,
   QuizOption,
@@ -79,21 +81,38 @@ function shuffle<T>(input: readonly T[], rng: () => number): T[] {
 }
 
 // ============================================================
-// 候选池：淘汰无法生成四个互异中文选项的词
+// 候选池：淘汰无法生成四个互异中文选项的词，并排除被词形映射遮蔽的主词条
 // ============================================================
 
 /**
- * 计算候选池：仅保留「能生成四个互异中文选项」的词。
- * 一个词合格当且仅当词典中存在至少 3 个与它自身翻译不同的其他翻译
- * （即全局互异翻译数 ≥ 4）。无法满足条件的词不得进入候选池。
+ * 判断一个 core 主词条是否被词形映射「遮蔽」：
+ * 若 `forms[word]` 存在且指向另一个词，则 `dictionary.lookup(word).word` 会返回
+ * 该遮蔽目标、而非 `word` 本身。这会导致「计划键 ≠ 页面 data-word」的不一致
+ * （例如 core 含 `could`，但 `forms[could]=can`，页面把 could 标为 data-word="can"）。
+ *
+ * 规范化契约：canonical key = `lookup(token).word`。首测候选必须是自洽主词条
+ * （`lookup(w).word === w`），保证计划键与页面 data-word 永远一致。
  */
-export function eligibleCandidates(core: DictCore): string[] {
+export function isShadowedCoreKey(word: string, forms: FormsMap): boolean {
+  const target = forms[word];
+  return target !== undefined && target !== word;
+}
+
+/**
+ * 计算候选池：仅保留「能生成四个互异中文选项」且「未被词形映射遮蔽」的自洽主词条。
+ * 一个词合格当且仅当：
+ * 1. 词典中存在至少 3 个与它自身翻译不同的其他翻译（全局互异翻译数 ≥ 4）；
+ * 2. 该词未被 forms 重定向到另一个主词条（自洽：`lookup(w).word === w`）。
+ * 无法满足任一条件的词不得进入候选池。
+ */
+export function eligibleCandidates(core: DictCore, forms: FormsMap): string[] {
   const distinctTranslations = new Set<string>();
   for (const entry of Object.values(core)) {
     distinctTranslations.add(entry.translation);
   }
 
   return Object.keys(core).filter((word) => {
+    if (isShadowedCoreKey(word, forms)) return false;
     const own = core[word]!.translation;
     let others = 0;
     for (const t of distinctTranslations) {
@@ -107,7 +126,7 @@ export function eligibleCandidates(core: DictCore): string[] {
 // 构建单题
 // ============================================================
 
-function buildQuestion(
+export function buildQuestion(
   word: string,
   core: DictCore,
   bands: FrequencyBands,
@@ -155,6 +174,15 @@ function fnv1a(str: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
+/**
+ * 由任意字符串派生一个确定性 32 位无符号整数。
+ * 供审计候选等在「安装种子 + 稳定输入」下做可复现的稳定排序使用。
+ */
+export function hashString(str: string): number {
+  const seedFn = xmur3(str);
+  return seedFn();
+}
+
 // ============================================================
 // 构建冻结的首测计划
 // ============================================================
@@ -166,11 +194,12 @@ function fnv1a(str: string): string {
  */
 export function buildInitialTestPlan(
   core: DictCore,
+  forms: FormsMap,
   bands: FrequencyBands,
   seed: string,
   dictVersion: string,
 ): InitialTestPlan {
-  const eligible = eligibleCandidates(core);
+  const eligible = eligibleCandidates(core, forms);
 
   // 按频段分组
   const byBand: string[][] = Array.from({ length: BAND_COUNT }, () => []);
@@ -269,6 +298,3 @@ export function applyAnswer(
   };
   return { kind: 'correct', change, audit };
 }
-
-/** 一道计划应有的题目总数 */
-export const INITIAL_TEST_LENGTH = TOTAL_QUESTIONS;

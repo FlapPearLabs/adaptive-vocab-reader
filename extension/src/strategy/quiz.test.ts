@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type { DictCore, FrequencyBands, InitialTestPlan, QuizQuestion, WordState } from '../shared/types';
+import type { DictCore, FormsMap, FrequencyBands, InitialTestPlan, QuizQuestion, WordState } from '../shared/types';
+import { INITIAL_TEST_LENGTH } from '../shared/types';
+import { createDictionary } from '../content/dictionary';
 import {
   buildInitialTestPlan,
   applyAnswer,
   eligibleCandidates,
   isAnswerCorrect,
-  INITIAL_TEST_LENGTH,
+  isShadowedCoreKey,
 } from './quiz';
 
 // ============================================================
@@ -73,13 +75,39 @@ describe('eligibleCandidates', () => {
       c: { phonetic: '', pos: 'n.', translation: 't3' },
       d: { phonetic: '', pos: 'n.', translation: 't1' },
     };
-    expect(eligibleCandidates(core)).toEqual([]);
+    expect(eligibleCandidates(core, {})).toEqual([]);
   });
 
   it('admits all words when >=4 distinct translations exist', () => {
     const { core } = makeFixture(2);
-    const eligible = eligibleCandidates(core);
+    const eligible = eligibleCandidates(core, {});
     expect(eligible.length).toBe(Object.keys(core).length);
+  });
+
+  it('excludes core keys shadowed by forms redirect (plan key must equal page data-word)', () => {
+    // core 含 could 与 can 两个主词条；forms 把 could 重定向到 can。
+    // lookup("could").word === "can" !== "could" → could 被遮蔽，不可进入首测候选。
+    const core: DictCore = {
+      can: { phonetic: '', pos: 'v.', translation: '能' },
+      could: { phonetic: '', pos: 'v.', translation: '可以' },
+      book: { phonetic: '', pos: 'n.', translation: '书' },
+      cat: { phonetic: '', pos: 'n.', translation: '猫' },
+      dog: { phonetic: '', pos: 'n.', translation: '狗' },
+    };
+    const forms: FormsMap = { could: 'can', books: 'book' }; // could 被遮蔽
+    const dict = createDictionary(core, forms, {});
+
+    // 自洽契约：每个 eligible 词 w 满足 lookup(w).word === w
+    const eligible = eligibleCandidates(core, forms);
+    for (const w of eligible) {
+      expect(dict.lookup(w)!.word).toBe(w);
+    }
+    // 被遮蔽的 could 必须被排除
+    expect(isShadowedCoreKey('could', forms)).toBe(true);
+    expect(isShadowedCoreKey('can', forms)).toBe(false);
+    expect(eligible).not.toContain('could');
+    // 未被遮蔽的 can 仍可入选
+    expect(eligible).toContain('can');
   });
 });
 
@@ -90,7 +118,7 @@ describe('eligibleCandidates', () => {
 describe('buildInitialTestPlan', () => {
   it('produces exactly 10 bands × 5 questions = 50', () => {
     const { core, bands } = makeFixture(6);
-    const plan = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
+    const plan = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
     expect(plan.questions.length).toBe(INITIAL_TEST_LENGTH);
     expect(INITIAL_TEST_LENGTH).toBe(50);
 
@@ -111,13 +139,13 @@ describe('buildInitialTestPlan', () => {
       c: { phonetic: '', pos: 'n.', translation: 't3' },
     };
     const bands: FrequencyBands = { a: 0, b: 1, c: 2 };
-    const plan = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
+    const plan = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
     expect(plan.questions.length).toBe(0);
   });
 
   it('each question has 4 distinct options with exactly one correct', () => {
     const { core, bands } = makeFixture(6);
-    const plan = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
+    const plan = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
     for (const q of plan.questions) {
       expect(q.options.length).toBe(4);
       expect(q.unsureIndex).toBe(4);
@@ -131,24 +159,24 @@ describe('buildInitialTestPlan', () => {
 
   it('freezes identical plan for identical seed + snapshot', () => {
     const { core, bands } = makeFixture(6);
-    const p1 = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
-    const p2 = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
+    const p1 = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
+    const p2 = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
     expect(JSON.stringify(p1)).toBe(JSON.stringify(p2));
     expect(p1.version).toBe(p2.version);
   });
 
   it('produces a different plan for a different install seed', () => {
     const { core, bands } = makeFixture(6);
-    const p1 = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
-    const p2 = buildInitialTestPlan(core, bands, 'seed-2', 'dict-v1');
+    const p1 = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
+    const p2 = buildInitialTestPlan(core, {}, bands, 'seed-2', 'dict-v1');
     expect(p1.version).not.toBe(p2.version);
     expect(JSON.stringify(p1)).not.toBe(JSON.stringify(p2));
   });
 
   it('does not depend on wall-clock time (deterministic version)', () => {
     const { core, bands } = makeFixture(6);
-    const p1 = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
-    const p2 = buildInitialTestPlan(core, bands, 'seed-1', 'dict-v1');
+    const p1 = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
+    const p2 = buildInitialTestPlan(core, {}, bands, 'seed-1', 'dict-v1');
     expect(p1.version).toBe(p2.version);
   });
 });

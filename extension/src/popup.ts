@@ -1,20 +1,27 @@
 // ============================================================
-// 扩展弹窗 —— 首测（固定 50 题）唯一入口
+// 扩展弹窗 —— 首测（固定 50 题）与审计的唯一入口
 // ============================================================
-// 弹窗是受信任的扩展上下文，可读取静态词典产物；
-// 构建冻结计划后经消息协议交由 Service Worker 持久化与广播。
-// 弹窗不参与任何单词查询之外的策略计算——计划由策略模块产出。
+// 弹窗是受信任的扩展上下文，可读取静态词典产物；它向策略模块请求冻结计划，
+// 经消息协议交由 Service Worker 持久化与广播。弹窗不参与任何单词查询之外的
+// 策略计算——冻结计划与原子状态变更由策略模块产出。弹窗不直连 strategy/quiz.ts
+// 或 strategy/audit.ts，只消费 `strategy/index.ts` 的深 Module Interface。
 // ============================================================
 
 import type {
   DictCore,
+  FormsMap,
   FrequencyBands,
   InitialTestPlan,
   InitialTestState,
   QuizAnswer,
   QuizQuestion,
+  AuditPlan,
+  AuditOutcome,
+  AuditMarker,
+  WordState,
 } from './shared/types';
-import { buildInitialTestPlan } from './strategy/quiz';
+import { createVocabStrategy } from './strategy/index';
+import type { VocabStrategy } from './shared/types';
 
 interface Profile {
   installSeed: string;
@@ -47,9 +54,10 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
 }
 
 /** 加载静态词典产物（与内容脚本相同来源） */
-async function loadDict(): Promise<{ core: DictCore; bands: FrequencyBands }> {
-  const [coreJSON, bandsJSON] = await Promise.all([
+async function loadDict(): Promise<{ core: DictCore; forms: FormsMap; bands: FrequencyBands }> {
+  const [coreJSON, formsJSON, bandsJSON] = await Promise.all([
     fetch(chrome.runtime.getURL('data/dict-core.json')).then((r) => r.text()),
+    fetch(chrome.runtime.getURL('data/forms.json')).then((r) => r.text()),
     fetch(chrome.runtime.getURL('data/frequency-bands.json')).then((r) => r.text()),
   ]);
 
@@ -58,8 +66,9 @@ async function loadDict(): Promise<{ core: DictCore; bands: FrequencyBands }> {
   for (const [word, arr] of Object.entries(rawCore)) {
     core[word] = { phonetic: arr[0]!, pos: arr[1]!, translation: arr[2]! };
   }
+  const forms: FormsMap = JSON.parse(formsJSON);
   const bands: FrequencyBands = JSON.parse(bandsJSON);
-  return { core, bands };
+  return { core, forms, bands };
 }
 
 // ============================================================
@@ -70,16 +79,31 @@ async function main(): Promise<void> {
   const app = document.getElementById('app');
   if (!app) return;
 
-  const [{ core, bands }, profile, initialTest] = await Promise.all([
+  const strategy: VocabStrategy = createVocabStrategy();
+  const [{ core, forms, bands }, profile, initialTest, auditInfo, auditPlanResp] = await Promise.all([
     loadDict(),
     sendMessage<Profile>({ type: 'GET_PROFILE' }),
     sendMessage<{ test: InitialTestState | null }>({ type: 'GET_INITIAL_TEST' }).then((r) => r.test),
+    sendMessage<{ markers: Record<string, unknown>; planVersion: string; pendingAudit: number }>({ type: 'GET_AUDIT_MARKERS' }),
+    sendMessage<{ plan: AuditPlan | null }>({ type: 'GET_AUDIT_PLAN' }),
   ]);
 
   let test: InitialTestState | null = initialTest ?? null;
+  let pendingAudit = auditInfo.pendingAudit ?? 0;
+  // 恢复未完成的冻结审计计划（作答前冻结，刷新/重开弹窗后可继续）
+  let audit: { plan: AuditPlan } | null =
+    auditPlanResp.plan && auditPlanResp.plan.results.some((r) => r === null) ? { plan: auditPlanResp.plan } : null;
 
   function render(): void {
     app!.innerHTML = '';
+    if (audit) {
+      if (audit.plan.results.every((r) => r !== null)) {
+        renderAuditSummary();
+      } else {
+        renderAuditQuestions();
+      }
+      return;
+    }
     if (!test) {
       renderStart();
     } else if (test.completed) {
@@ -88,6 +112,97 @@ async function main(): Promise<void> {
       renderQuestions();
     }
   }
+
+  // ============================================================
+  // 审计：冻结计划 + 结算单题（经策略 Module + worker 服务端验证）
+  // ============================================================
+
+  async function startAudit(): Promise<void> {
+    if (!test?.completed) return;
+    const [{ markers, planVersion }, stateResp] = await Promise.all([
+      sendMessage<{ markers: Record<string, AuditMarker>; planVersion: string }>({ type: 'GET_AUDIT_MARKERS' }),
+      sendMessage<{ words: Record<string, WordState> }>({ type: 'GET_STATE' }),
+    ]);
+
+    // 由策略模块冻结审计计划（候选 + 题目 + 结算位），交 worker 持久化
+    const plan = strategy.freezeAuditPlan({
+      markers,
+      words: stateResp.words,
+      core,
+      bands,
+      seed: profile.installSeed,
+      planVersion,
+      count: 20,
+    });
+    await sendMessage({ type: 'FREEZE_AUDIT_PLAN', plan });
+    audit = { plan };
+    render();
+  }
+
+  function renderAuditQuestions(): void {
+    if (!audit) return;
+    const plan = audit.plan;
+    const answered = plan.results.filter((r) => r !== null).length;
+    const header = el('div', 'test-header');
+    header.append(el('h1', 'title', `审计中 ${answered} / ${plan.questions.length}`));
+    app!.append(header);
+
+    const list = el('div', 'questions');
+    plan.questions.forEach((q, i) => {
+      list.append(renderQuestion(q, i, plan.results[i] !== null, 'audit'));
+    });
+    app!.append(list);
+  }
+
+  async function auditSubmit(index: number, answer: QuizAnswer): Promise<void> {
+    if (!audit) return;
+    const resp = await sendMessage<{ result?: { plan: AuditPlan }; error?: string }>({
+      type: 'AUDIT_ANSWER',
+      auditPlanVersion: audit.plan.version,
+      index,
+      answer,
+    });
+    if (resp.result) {
+      audit = { plan: resp.result.plan };
+    }
+    render();
+  }
+
+  function renderAuditSummary(): void {
+    if (!audit) return;
+    const plan = audit.plan;
+    let verified = 0;
+    let failed = 0;
+    for (const r of plan.results) {
+      if (r === 'verified') verified++;
+      else if (r === 'failed') failed++;
+    }
+    const screen = el('div', 'screen summary');
+    screen.append(el('h1', 'title', '审计完成'));
+    const stats = el('div', 'stat-row');
+    stats.append(
+      statBlock('correct', String(verified), '答对（已验证）'),
+      statBlock('wrong', String(failed), '答错/不确定'),
+    );
+    screen.append(stats);
+    screen.append(
+      el('p', 'desc', '答对的词保持为会并清除待审计标记；答错或不确定的词立即改为不会并进入活跃生词表。'),
+    );
+    const back = el('button', 'primary', '返回') as HTMLButtonElement;
+    back.onclick = async () => {
+      await sendMessage({ type: 'CLEAR_AUDIT_PLAN' });
+      audit = null;
+      const info = await sendMessage<{ pendingAudit: number }>({ type: 'GET_AUDIT_MARKERS' });
+      pendingAudit = info.pendingAudit ?? 0;
+      render();
+    };
+    screen.append(back);
+    app!.append(screen);
+  }
+
+  // ============================================================
+  // 首测：冻结计划 + 结算单题（经策略 Module）
+  // ============================================================
 
   function renderStart(): void {
     const screen = el('div', 'screen');
@@ -102,7 +217,13 @@ async function main(): Promise<void> {
     const btn = el('button', 'primary', '开始测评') as HTMLButtonElement;
     btn.onclick = async () => {
       btn.disabled = true;
-      const plan: InitialTestPlan = buildInitialTestPlan(core, bands, profile.installSeed, profile.dictVersion);
+      const plan: InitialTestPlan = strategy.freezeInitialTestPlan({
+        core,
+        forms,
+        bands,
+        seed: profile.installSeed,
+        dictVersion: profile.dictVersion,
+      });
       await sendMessage({ type: 'INITIAL_TEST_START', plan });
       test = {
         plan,
@@ -124,26 +245,31 @@ async function main(): Promise<void> {
 
     const list = el('div', 'questions');
     test.plan.questions.forEach((q, i) => {
-      list.append(renderQuestion(q, i, test!.answers[i] ?? null));
+      list.append(renderQuestion(q, i, test!.answers[i] !== null, 'initial'));
     });
     app!.append(list);
   }
 
-  function renderQuestion(q: QuizQuestion, index: number, answer: QuizAnswer | null): HTMLElement {
+  function renderQuestion(
+    q: QuizQuestion,
+    index: number,
+    answered: boolean,
+    mode: 'initial' | 'audit' = 'initial',
+  ): HTMLElement {
     const card = el('div', 'question');
-    if (answer) card.classList.add('answered');
+    if (answered) card.classList.add('answered');
     card.append(el('div', 'q-word', q.word));
 
     const opts = el('div', 'options');
     q.options.forEach((opt, oi) => {
       const b = el('button', 'option', opt.translation) as HTMLButtonElement;
-      if (answer) b.disabled = true;
-      b.onclick = () => void submit(index, { kind: 'option', optionIndex: oi });
+      if (answered) b.disabled = true;
+      b.onclick = () => (mode === 'audit' ? void auditSubmit(index, { kind: 'option', optionIndex: oi }) : void submit(index, { kind: 'option', optionIndex: oi }));
       opts.append(b);
     });
     const unsure = el('button', 'option unsure', '不确定') as HTMLButtonElement;
-    if (answer) unsure.disabled = true;
-    unsure.onclick = () => void submit(index, { kind: 'unsure' });
+    if (answered) unsure.disabled = true;
+    unsure.onclick = () => (mode === 'audit' ? void auditSubmit(index, { kind: 'unsure' }) : void submit(index, { kind: 'unsure' }));
     opts.append(unsure);
 
     card.append(opts);
@@ -194,6 +320,14 @@ async function main(): Promise<void> {
       render();
     };
     screen.append(reset);
+
+    // 首测完成后，若存在待审计标记，提供审计入口
+    if (pendingAudit > 0) {
+      const auditBtn = el('button', 'primary', `开始审计（${pendingAudit} 题）`) as HTMLButtonElement;
+      auditBtn.style.marginTop = '12px';
+      auditBtn.onclick = () => void startAudit();
+      screen.append(auditBtn);
+    }
 
     app!.append(screen);
   }
