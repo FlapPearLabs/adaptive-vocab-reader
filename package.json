@@ -1,0 +1,23 @@
+{
+  "name": "adaptive-vocab-reader",
+  "version": "0.1.0",
+  "private": true,
+  "description": "浏览器词汇学习插件 V0.1 垂直切片",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "setup:e2e": "browsers install chrome@stable --path .cache/puppeteer",
+    "test:e2e": "node e2e-verify.cjs"
+  },
+  "devDependencies": {
+    "@puppeteer/browsers": "3.0.6",
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.23.0",
+    "happy-dom": "^20.11.1",
+    "puppeteer-core": "^25.3.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

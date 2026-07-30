@@ -7,6 +7,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+.cache/
 *.log
 
 # Python prototype/runtime artifacts
@@ -20,6 +21,12 @@ __pycache__/
 
 # Local-only indexes and disposable work
 .codegraph/
+.workbuddy/
 work/tmp/
 work/draft/
 work/generated/
+
+# Reproducible ECDICT input snapshots and derived local dogfood packages
+data/raw/
+data/derived/
+!data/README.md
