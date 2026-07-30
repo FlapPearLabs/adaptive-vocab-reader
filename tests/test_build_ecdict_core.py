@@ -167,6 +167,31 @@ class EcdictCoreBuildTests(unittest.TestCase):
         self.assertEqual(eligibility["ineligible_count"], 3)
         self.assertEqual(eligibility["ineligible_words"], ["a", "b", "c"])
 
+    def test_drops_form_keys_that_are_also_core_headwords(self):
+        # 复现真实 collision：could 既是 core 主词条，又是 can 的过去式词形（forms[could]=can）。
+        # 运行时 core 优先查找会直接命中 core[could]，故 forms[could] 在构建时丢弃，
+        # 且 could 作为合法 core 词条保留、不计入首测不合格。
+        builder = load_builder_module()
+        csv_bytes = (
+            b"word,phonetic,translation,pos,tag,bnc,frq,exchange\n"
+            b"can,k,\xe8\x83\xbd,v.,,1,1,p:could\n"
+            b"could,kd,\xe8\x83\xbd\xef\xbc\x88\xe8\xbf\x87\xe5\x8e\xbb\xe5\xbc\x8f\xef\xbc\x89,v.,,2,2,\n"
+            b"go,g,\xe5\x8e\xbb,v.,,3,3,\n"
+            b"run,r,\xe8\xb7\x91,v.,,4,4,\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            input_path = root / "core-form.csv"
+            input_path.write_bytes(csv_bytes)
+            report = builder.build_core(input_path, root / "out", limit=4)
+            forms = json.loads((root / "out" / "forms.json").read_text(encoding="utf-8"))
+
+        self.assertNotIn("could", forms)
+        self.assertEqual(report["core_form_collisions"], ["could"])
+        eligibility = report["quiz_eligibility"]
+        self.assertEqual(eligibility["ineligible_count"], 0)
+        self.assertNotIn("shadowed_core_keys", eligibility)
+
 
 if __name__ == "__main__":
     unittest.main()

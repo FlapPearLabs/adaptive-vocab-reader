@@ -37,6 +37,11 @@ export interface WordState {
   source: WordStateSource;
   /** 变更时间戳（毫秒） */
   updatedAt: number;
+  /**
+   * 状态版本：每次首测 (re)start / reset 递增。用于隔离不同轮的单词状态，
+   * 并在重复相同 plan.version 时仍能清除上一轮的审计标记（仅靠 planVersion 无法区分）。
+   */
+  version: number;
 }
 
 // ============================================================
@@ -101,6 +106,12 @@ export interface AuditMarker {
    * #3 引入画像版本后将作为并行维度，不在此字段复用 schemaVersion。
    */
   readonly planVersion: string;
+  /**
+   * 标记被创建时的快照状态版本（VocabSnapshot.stateVersion）。
+   * 重复相同 plan.version 重新首测时，仅凭 planVersion 无法区分新旧标记；
+   * worker 据 stateVersion 校验并清除上一轮的陈旧标记。
+   */
+  readonly stateVersion: number;
   readonly createdAt: number;
   readonly pending: boolean;
 }
@@ -139,6 +150,8 @@ export interface AuditPlan {
   readonly version: string;
   /** 被审计的首测计划版本（InitialTestPlan.version） */
   readonly planVersion: string;
+  /** 创建此冻结计划时的快照状态版本（VocabSnapshot.stateVersion） */
+  readonly stateVersion: number;
   /** 安装随机种子 */
   readonly seed: string;
   /** 冻结的审计候选（与 questions/settled 一一对应） */
@@ -173,6 +186,42 @@ export interface StateChange<S extends WordStateSource = WordStateSource> {
 }
 
 // ============================================================
+// 策略 seam 原子结果：worker 只合并，不自行决定清理策略
+// ============================================================
+
+/** 手动标记结果：状态变更 + 是否清除该词陈旧审计标记（手动覆盖优先） */
+export interface ManualMarkResult {
+  readonly change: StateChange<'manual'>;
+  readonly clearMarker: boolean;
+}
+
+/**
+ * 首测开始生命周期 transition（策略生成，worker 机械应用，不自行决定清理）。
+ * 不再是「固定布尔意图（Middle Man）」——策略直接据输入计算并交付**完整、可机械应用**的
+ * 新快照片段，worker 仅做 `...snapshot, ...transition` 式合并，不得自行决定状态版本、
+ * 标记清理、auditPlan 清理或 InitialTestState 的构造：
+ * - nextStateVersion：递增后的快照状态版本（隔离本轮状态）
+ * - auditMarkers：已清空上一轮待审计标记后的完整标记映射（策略收口为「全清」，
+ *   含 stateVersion === nextStateVersion 的异常 marker 一律排除）
+ * - auditPlan：下一轮起始时冻结审计计划应为 null（策略直接给出，worker 不再解释布尔）
+ * - initialTest：由传入 plan 构造的完整首测状态（answers 全 null、completed:false）
+ */
+export interface InitialTestStartTransition {
+  readonly nextStateVersion: number;
+  readonly auditMarkers: Record<string, AuditMarker>;
+  readonly auditPlan: AuditPlan | null;
+  readonly initialTest: InitialTestState;
+}
+
+/** 首测重置生命周期 transition（策略生成，worker 机械应用） */
+export interface InitialTestResetTransition {
+  readonly nextStateVersion: number;
+  readonly auditMarkers: Record<string, AuditMarker>;
+  readonly auditPlan: AuditPlan | null;
+  readonly initialTest: InitialTestState | null;
+}
+
+// ============================================================
 // 条件类型应用（Matt Pocock 风格）
 // ============================================================
 
@@ -191,15 +240,18 @@ export type ApplyAnswerOutcomeKind = 'correct' | 'wrong' | 'unsure' | 'priority-
 /**
  * applyAnswer 的判别联合返回类型。
  * 每个分支的 `change`/`audit` 字段类型都经过精确约束：
- * - correct  → 携带 source='initial' 的状态变更 + 审计标记
- * - wrong/unsure → 携带 source='initial' 的状态变更 + 无审计
+ * - correct  → 携带 source='initial' 的状态变更 + 审计标记（盖 stateVersion）
+ * - wrong/unsure → 携带 source='initial' 的状态变更 + 无审计 + 清除该词陈旧标记
  * - priority-preserved → 页面手动状态优先，不产生任何变更
+ *
+ * `clearMarkerWord` 指示 worker 应清除哪个词的待审计标记（上一轮残留）：
+ * 本轮答错/不确定或手动状态优先时，该词不应再持有任何审计标记。
  */
 export type ApplyAnswerResult =
-  | { readonly kind: 'correct'; readonly change: StateChange<'initial'>; readonly audit: AuditMarker }
-  | { readonly kind: 'wrong'; readonly change: StateChange<'initial'>; readonly audit: null }
-  | { readonly kind: 'unsure'; readonly change: StateChange<'initial'>; readonly audit: null }
-  | { readonly kind: 'priority-preserved'; readonly change: null; readonly audit: null };
+  | { readonly kind: 'correct'; readonly change: StateChange<'initial'>; readonly audit: AuditMarker; readonly clearMarkerWord: null }
+  | { readonly kind: 'wrong'; readonly change: StateChange<'initial'>; readonly audit: null; readonly clearMarkerWord: string }
+  | { readonly kind: 'unsure'; readonly change: StateChange<'initial'>; readonly audit: null; readonly clearMarkerWord: string }
+  | { readonly kind: 'priority-preserved'; readonly change: null; readonly audit: null; readonly clearMarkerWord: string };
 
 // ============================================================
 // 持久化快照
@@ -209,6 +261,11 @@ export interface VocabSnapshot {
   schemaVersion: number;
   /** 词典产物版本标识 */
   dictVersion: string;
+  /**
+   * 状态版本：每次首测 (re)start / reset 递增。单词状态与审计标记/计划据此隔离，
+   * 重复相同 plan.version 重测时仍清除上一轮陈旧标记。
+   */
+  stateVersion: number;
   /** 安装随机种子（十六进制） */
   installSeed: string;
   /** 单词状态映射 */
@@ -227,9 +284,9 @@ export interface VocabSnapshot {
 
 /** 策略模块输入：单个命中词的上下文 */
 export interface LookupContext {
-  /** 规范化后的单词 */
+  /** 状态键（stateKey）：小写 surface form，是单词状态/审计标记/页面 data-word 的统一键（非 entryKey/规范化单词） */
   word: string;
-  /** 命中该词的词形（可能与 word 不同，如 "went" → "go"） */
+  /** 页面原始词形（保留大小写，用于 DOM 定位），例如 "Went"；其小写即 `word`（stateKey）。entryKey/规范化单词只负责词典取义，不承载状态 */
   surfaceForm: string;
   /** 词典条目（如果命中） */
   entry: DictEntry | null;
@@ -241,7 +298,7 @@ export interface LookupContext {
 
 /** 策略模块的展示决策输出 */
 export interface DisplayResult {
-  /** 规范化单词 */
+  /** 状态键（stateKey）：小写 surface form，是页面 data-word 与单词状态的统一键（非 entryKey/规范化单词） */
   word: string;
   /** 展示决策 */
   decision: DisplayDecision;
@@ -263,16 +320,16 @@ export interface VocabStrategy {
   getDisplayDecision(ctx: LookupContext, state: WordState | undefined): DisplayResult;
 
   /**
-   * 用户标记"会"
-   * @param word 规范化单词
+   * 用户标记"会"：返回状态变更 + 是否清除该词陈旧审计标记（手动覆盖优先）。
+   * @param word 状态键（stateKey）
    */
-  markKnown(word: string): StateChange<'manual'>;
+  markKnown(word: string): ManualMarkResult;
 
   /**
-   * 用户标记"不会"
-   * @param word 规范化单词
+   * 用户标记"不会"：返回状态变更 + 是否清除该词陈旧审计标记（手动覆盖优先）。
+   * @param word 状态键（stateKey）
    */
-  markLearning(word: string): StateChange<'manual'>;
+  markLearning(word: string): ManualMarkResult;
 
   // ============================================================
   // 首测：冻结计划 + 结算单题（领域动作，非旧函数浅转发）
@@ -281,8 +338,19 @@ export interface VocabStrategy {
   /** 冻结首测计划：十频段各五题、选项顺序与计划版本在调用时冻结。 */
   freezeInitialTestPlan(input: FreezeInitialTestInput): InitialTestPlan;
 
-  /** 结算一道冻结的首测题：返回原子状态变更（含审计标记），调用方持久化。 */
+  /** 结算一道冻结的首测题：返回原子状态变更（含审计标记）+ 陈旧标记清理意图。 */
   settleInitialTestAnswer(input: SettleInitialTestInput): ApplyAnswerResult;
+
+  /**
+   * 首测开始生命周期 transition：策略据首测计划、当前标记与状态版本计算并交付
+   * 完整、可机械应用的 transition（nextStateVersion + auditMarkers + auditPlan + initialTest），
+   * worker 仅做字段合并，不自行决定状态版本、marker 清理、auditPlan 清空或 InitialTestState 构造。
+   * initialTest 由传入 plan 直接构造（answers 全 null、completed:false）。
+   */
+  startInitialTest(plan: InitialTestPlan, stateVersion: number): InitialTestStartTransition;
+
+  /** 首测重置生命周期 transition：策略据此清除所有待审计标记与冻结计划并递增状态版本。 */
+  resetInitialTest(stateVersion: number): InitialTestResetTransition;
 
   // ============================================================
   // 审计：冻结计划 + 结算单题（Spec B §8 + §6 作答前冻结）
@@ -304,12 +372,14 @@ export interface FreezeInitialTestInput {
   readonly dictVersion: string;
 }
 
-/** 结算冻结首测题输入：冻结计划 + 题号 + 作答 + 该词当前状态 */
+/** 结算冻结首测题输入：冻结计划 + 题号 + 作答 + 该词当前状态 + 当前快照状态版本 */
 export interface SettleInitialTestInput {
   readonly plan: InitialTestPlan;
   readonly questionIndex: number;
   readonly answer: QuizAnswer;
   readonly current: WordState | undefined;
+  /** 当前快照状态版本（VocabSnapshot.stateVersion），盖到新建审计标记 */
+  readonly stateVersion: number;
 }
 
 /** 冻结审计计划输入：候选所需快照片段 + 受控词典视图 + 种子 */
@@ -325,6 +395,8 @@ export interface FreezeAuditPlanInput {
   readonly highConfidenceWords?: readonly string[];
   /** 审计轮次，用于改变段内抽取顺序（默认 0） */
   readonly round?: number;
+  /** 当前快照状态版本（VocabSnapshot.stateVersion），盖到冻结审计计划 */
+  readonly stateVersion: number;
 }
 
 /** 结算冻结审计题输入：冻结计划 + 候选下标 + 作答 + 该词当前状态 */
@@ -347,4 +419,4 @@ export interface SettleAuditResult {
 /** 固定首测题数（十频段 × 五题） */
 export const INITIAL_TEST_LENGTH = 50;
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;

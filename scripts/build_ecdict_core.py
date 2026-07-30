@@ -225,6 +225,11 @@ def build_core(
         if len(ranked) > 1:
             collisions[form] = [candidate["word"] for candidate in ranked]
 
+    # core 优先查找：forms 的键若同时是已选 core 主词条（如 could→can），运行时 lookup 会先命中 core，
+    # 该 forms 项永不生效。记录这些碰撞键并在产物中丢弃，保持构建产物与运行时 core-first 行为一致。
+    core_form_collisions = sorted(form for form in forms if form in core)
+    forms = {key: value for key, value in forms.items() if key not in core}
+
     core_path = output_dir / "dict-core.json"
     forms_path = output_dir / "forms.json"
     bands_path = output_dir / "frequency-bands.json"
@@ -238,23 +243,15 @@ def build_core(
     }
 
     # 首测候选资格统计（与运行时 strategy/quiz.ts eligibleCandidates 同一规则）：
-    # 一个词能成为首测题，当且仅当同时满足：
-    #   1. 全局存在 >= DISTRACTOR_COUNT 个与其自身翻译不同的其他翻译（四选项互异）；
-    #   2. 该词未被 forms 重定向到另一个主词条（自洽：lookup(w).word === w），
-    #      否则计划键 ≠ 页面 data-word（例如 core 含 could 但 forms[could]=can）。
+    # 一个词能成为首测题，当且仅当全局存在 >= DISTRACTOR_COUNT 个与其自身翻译不同的其他翻译
+    # （四选项互异）。core 主词条一律自洽（运行时 core 优先查找，lookup(w).word===w），
+    # 不再因「forms 遮蔽」排除任何 core 词——13 个 core-form 碰撞词作为合法 core 词条保留。
     distinct_translations = {item["translation"] for item in selected}
     distinct_translation_count = len(distinct_translations)
-    shadowed_core_keys = [
-        item["word"]
-        for item in selected
-        if forms.get(item["word"]) is not None and forms.get(item["word"]) != item["word"]
-    ]
-    shadowed_set = set(shadowed_core_keys)
     quiz_ineligible_words = [
         item["word"]
         for item in selected
-        if (sum(1 for t in distinct_translations if t != item["translation"]) < DISTRACTOR_COUNT)
-        or (item["word"] in shadowed_set)
+        if sum(1 for t in distinct_translations if t != item["translation"]) < DISTRACTOR_COUNT
     ]
 
     report = {
@@ -277,11 +274,11 @@ def build_core(
         "selection_order": [item["word"] for item in selected],
         "rejections": dict(sorted(rejections.items())),
         "form_collisions": collisions,
+        "core_form_collisions": core_form_collisions,
         "quiz_eligibility": {
             "distractor_count": DISTRACTOR_COUNT,
             "distinct_translation_count": distinct_translation_count,
-            "self_canonical_rule": "exclude core keys shadowed by forms (forms[w] exists and != w); ensures plan key == page data-word",
-            "shadowed_core_keys": shadowed_core_keys,
+            "self_canonical_rule": "core-first lookup; no form-shadow exclusion (13 core-form collisions kept as core headwords; their forms keys dropped at build time)",
             "ineligible_count": len(quiz_ineligible_words),
             "ineligible_words": quiz_ineligible_words,
         },

@@ -48,13 +48,13 @@ describe('annotateTextNode', () => {
   it('大写词形 "Went" 被正确标注，span 保留原文大小写', () => {
     // 文本："Went home."  词 "went" 在位置 0..4
     const textNode = makeTextNode('Went home.');
-    const ann = makeAnnotation(0, 4, { word: 'go', surfaceForm: 'went' });
+    const ann = makeAnnotation(0, 4, { word: 'went', surfaceForm: 'went' });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans).toHaveLength(1);
     expect(spans[0]!.textContent).toBe('Went'); // 保留原文大小写，不是 "went"
-    expect(spans[0]!.dataset.word).toBe('go'); // data-word 是归一化主词条
+    expect(spans[0]!.dataset.word).toBe('went'); // data-word 是状态键（surface form），而非取义主词条 go
   });
 
   it('句首大写 "Hello" 被正确标注', () => {
@@ -65,7 +65,7 @@ describe('annotateTextNode', () => {
       translation: '你好',
     });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans).toHaveLength(1);
     expect(spans[0]!.textContent).toBe('Hello');
@@ -78,7 +78,7 @@ describe('annotateTextNode', () => {
       surfaceForm: 'hello',
     });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans).toHaveLength(1);
     expect(spans[0]!.textContent).toBe('HeLLo');
@@ -96,7 +96,7 @@ describe('annotateTextNode', () => {
       makeAnnotation(8, 14, { word: 'school', surfaceForm: 'school', translation: '学校' }),
     ];
 
-    const spans = annotateTextNode(textNode, [anns[0]!, anns[1]!], () => {});
+    const { spans } = annotateTextNode(textNode, [anns[0]!, anns[1]!], () => {});
 
     expect(spans).toHaveLength(2);
     expect(spans[0]!.textContent).toBe('Went');
@@ -118,7 +118,7 @@ describe('annotateTextNode', () => {
       translation: '挑战',
     });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans).toHaveLength(1);
     expect(spans[0]!.textContent).toBe('challenge');
@@ -134,7 +134,7 @@ describe('annotateTextNode', () => {
     const textNode = makeTextNode('Went home.');
     const ann = makeAnnotation(0, 4, { decision: 'none', translation: null });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans).toHaveLength(0);
     // 文本节点未被替换
@@ -155,7 +155,7 @@ describe('annotateTextNode', () => {
       showInlineTranslation: true,
     });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans[0]!.classList.contains('avr-strong-first')).toBe(true);
     expect(spans[0]!.dataset.translation).toBe('【挑战】');
@@ -169,7 +169,7 @@ describe('annotateTextNode', () => {
       translation: '挑战',
     });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans[0]!.classList.contains('avr-strong')).toBe(true);
     expect(spans[0]!.classList.contains('avr-strong-first')).toBe(false);
@@ -182,7 +182,7 @@ describe('annotateTextNode', () => {
       translation: '你好',
     });
 
-    const spans = annotateTextNode(textNode, [ann], () => {});
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans[0]!.classList.contains('avr-light')).toBe(true);
     expect(spans[0]!.classList.contains('avr-word')).toBe(true);
@@ -194,7 +194,7 @@ describe('annotateTextNode', () => {
 
   it('空 annotations 返回空数组且不修改文本节点', () => {
     const textNode = makeTextNode('Hello world.');
-    const spans = annotateTextNode(textNode, [], () => {});
+    const { spans } = annotateTextNode(textNode, [], () => {});
     expect(spans).toHaveLength(0);
     expect(textNode.textContent).toBe('Hello world.');
   });
@@ -212,6 +212,38 @@ describe('annotateTextNode', () => {
     annotateTextNode(textNode, anns, () => {});
 
     expect(parent.textContent).toBe(original);
+  });
+
+  // ============================================================
+  // 真实 DOM 节点统计（Fix #3：added/removed 供 netNodes 使用）
+  // ============================================================
+
+  it('annotateTextNode 返回真实 added/removed：单 span + 文本碎片 + 1 个被替换原文节点', () => {
+    const textNode = makeTextNode('Went home.');
+    const ann = makeAnnotation(0, 4, { word: 'went', surfaceForm: 'went' });
+    const res = annotateTextNode(textNode, [ann], () => {});
+    // "Went"(span) + " home."(text) = 2 个新增节点；原 "Went home." 文本节点被替换 = 1
+    expect(res.added).toBe(2);
+    expect(res.removed).toBe(1);
+    expect(res.spans).toHaveLength(1);
+  });
+
+  it('updateWordDisplay 还原 span→Text：added === removed（每 span 变为一个文本节点）', () => {
+    const textNode = makeTextNode('challenge is here');
+    const ann = makeAnnotation(0, 9, {
+      word: 'challenge',
+      surfaceForm: 'challenge',
+      translation: '挑战',
+      decision: 'strong',
+      showInlineTranslation: true,
+    });
+    annotateTextNode(textNode, [ann], () => {});
+
+    const res = updateWordDisplay('challenge', 'none', null, false);
+    // 1 个 span 被替换为 1 个文本节点：移除 1，新增 1（netNodes 修正为 0）
+    expect(res.removed).toBe(1);
+    expect(res.added).toBe(1);
+    expect(document.querySelectorAll('.avr-word[data-word="challenge"]').length).toBe(0);
   });
 });
 

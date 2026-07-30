@@ -16,12 +16,36 @@ import { annotateTextNode, updateWordDisplay, type WordAnnotation } from './anno
 
 /** 非持久化性能观测（仅内存，绝不写入 storage；不含 URL/正文/句子/DOM 内容） */
 export interface PerfReport {
-  /** 累计扫描耗时（毫秒） */
+  /** 累计扫描墙钟（毫秒，含批处理调度） */
   totalScanMs: number;
-  /** 单批最大耗时（毫秒） */
+  /** 单批主线程最长时间（毫秒） */
   maxBatchMs: number;
-  /** 累计增量标注节点数 */
-  annotatedNodes: number;
+  /** 扫描过的文本节点数（已处理节点守卫去重后） */
+  textNodesScanned: number;
+  /** 累计标注的单词数 */
+  wordsAnnotated: number;
+  /** 实际新增到 DOM 的标注 span 数（annotateTextNode 真实返回的插入节点数） */
+  domNodesAdded: number;
+  /** 实际从 DOM 移除的标注 span 数（updateWordDisplay 还原为纯文本时） */
+  domNodesRemoved: number;
+  /** 净增节点数 = domNodesAdded - domNodesRemoved */
+  netNodes: number;
+  /**
+   * 标注前后 documentElement.scrollHeight 变化累计（绝对值，像素）。
+   * 仅反映页面高度变化，不表示布局偏移（layout shift），故命名为 heightDeltaPx。
+   */
+  heightDeltaPx: number;
+  /**
+   * 真实布局偏移（Layout Instability API 累计 CLS 片段）。
+   * 通过 PerformanceObserver 监听 `layout-shift` 条目累加；环境不支持时为 0。
+   * 与 heightDeltaPx 区分：scrollHeight 变化可能由高度增长引起，不一定是位移。
+   */
+  layoutShiftScore: number;
+  /**
+   * 是否真正支持 layout-shift 观测。false 表示当前环境不支持 Layout Instability API，
+   * `layoutShiftScore` 的 0 是「未观测」而非「真实为零」——二者必须区分，不得混淆。
+   */
+  layoutShiftSupported: boolean;
   /** 累计批次数 */
   batches: number;
 }
@@ -62,8 +86,41 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   // 非持久化性能观测累加器（仅内存，不写入 storage）
   let perfTotalMs = 0;
   let perfMaxBatchMs = 0;
-  let perfAnnotatedNodes = 0;
+  let perfTextNodesScanned = 0;
+  let perfWordsAnnotated = 0;
+  let perfDomNodesAdded = 0;
+  let perfDomNodesRemoved = 0;
+  let perfHeightDeltaPx = 0;
+  let perfLayoutShiftScore = 0;
+  let perfLayoutShiftSupported = false;
   let perfBatches = 0;
+
+  // 标注器生成的节点（span 与文本碎片）统一登记，observer 与 processTextNode 据此彻底跳过，
+  // 杜绝 MutationObserver 因自身注入节点而触发的重复扫描（自触发）。
+  const generatedNodes: WeakSet<Node> = new WeakSet<Node>();
+
+  // 真实布局偏移（Layout Instability API）：累计 layout-shift 条目值（排除近期用户输入）。
+  // 与 scrollHeight 差（heightDeltaPx）区分——后者只反映高度变化，不一定是位移。
+  // 不使用 buffered:true：只观测本会话启动后的位移，不混入扫描前的页面位移。
+  if (typeof PerformanceObserver !== 'undefined') {
+    try {
+      const layoutObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const e = entry as PerformanceEntry & { value?: number; hadRecentInput?: boolean };
+          if (typeof e.value === 'number' && !e.hadRecentInput) {
+            perfLayoutShiftScore += e.value;
+          }
+        }
+      });
+      layoutObserver.observe({ type: 'layout-shift' });
+      perfLayoutShiftSupported = true;
+    } catch {
+      // 环境不支持 layout-shift 时静默降级（perfLayoutShiftScore 保持 0，且 layoutShiftSupported=false）
+      perfLayoutShiftSupported = false;
+    }
+  } else {
+    perfLayoutShiftSupported = false;
+  }
 
   function nowMs(): number {
     return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
@@ -74,7 +131,14 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     deps.onPerfReport({
       totalScanMs: Math.round(perfTotalMs * 1000) / 1000,
       maxBatchMs: Math.round(perfMaxBatchMs * 1000) / 1000,
-      annotatedNodes: perfAnnotatedNodes,
+      textNodesScanned: perfTextNodesScanned,
+      wordsAnnotated: perfWordsAnnotated,
+      domNodesAdded: perfDomNodesAdded,
+      domNodesRemoved: perfDomNodesRemoved,
+      netNodes: perfDomNodesAdded - perfDomNodesRemoved,
+      heightDeltaPx: Math.round(perfHeightDeltaPx * 100) / 100,
+      layoutShiftScore: Math.round(perfLayoutShiftScore * 10000) / 10000,
+      layoutShiftSupported: perfLayoutShiftSupported,
       batches: perfBatches,
     });
   }
@@ -83,7 +147,14 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     return {
       totalScanMs: Math.round(perfTotalMs * 1000) / 1000,
       maxBatchMs: Math.round(perfMaxBatchMs * 1000) / 1000,
-      annotatedNodes: perfAnnotatedNodes,
+      textNodesScanned: perfTextNodesScanned,
+      wordsAnnotated: perfWordsAnnotated,
+      domNodesAdded: perfDomNodesAdded,
+      domNodesRemoved: perfDomNodesRemoved,
+      netNodes: perfDomNodesAdded - perfDomNodesRemoved,
+      heightDeltaPx: Math.round(perfHeightDeltaPx * 100) / 100,
+      layoutShiftScore: Math.round(perfLayoutShiftScore * 10000) / 10000,
+      layoutShiftSupported: perfLayoutShiftSupported,
       batches: perfBatches,
     };
   }
@@ -92,24 +163,36 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     if (newStatus === 'unknown') return;
 
     const strategy = createVocabStrategy();
-    const change = newStatus === 'known' ? strategy.markKnown(word) : strategy.markLearning(word);
+    const markResult = newStatus === 'known' ? strategy.markKnown(word) : strategy.markLearning(word);
+    const status = markResult.change.newStatus;
 
-    // 立即更新本地状态
-    vocabState[word] = { status: change.newStatus, source: 'manual', updatedAt: Date.now() };
+    // 立即更新本地状态（内容脚本不跟踪状态版本，沿用既有或 0）
+    vocabState[word] = { status, source: 'manual', updatedAt: Date.now(), version: vocabState[word]?.version ?? 0 };
 
     // 增量更新该词在当前页面的已有标注
     applyWordDisplay(word);
 
     // 发送到 Service Worker 持久化并广播
-    deps.onUserAction(word, change.newStatus);
+    deps.onUserAction(word, status);
   }
 
   function processTextNode(textNode: Text): void {
     if (processedNodes.has(textNode)) return;
+    // 防御：标注器自身生成的节点（span 与文本碎片）不得再被扫描——彻底杜绝自触发
+    if (generatedNodes.has(textNode)) {
+      processedNodes.add(textNode);
+      return;
+    }
     if (!deps.dictionary) return;
 
     const parent = textNode.parentElement;
     if (parent && !isContentNode(parent)) {
+      processedNodes.add(textNode);
+      return;
+    }
+
+    // 防御：扩展自身注入的标注 span 内的文本节点不得再被扫描（避免自触发重标注/嵌套 span）
+    if (parent && parent.closest('.avr-word')) {
       processedNodes.add(textNode);
       return;
     }
@@ -120,6 +203,9 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       return;
     }
 
+    // 真实扫描计数：每个真正扫描的正文文本节点都计入（含无命中词的节点），
+    // 不夸大也不漏计；自触发已被 generatedNodes 拦截，故此数反映真实扫描量。
+    perfTextNodesScanned++;
     const occurrences = extractWordsFromText(text);
     if (occurrences.length === 0) {
       processedNodes.add(textNode);
@@ -131,13 +217,14 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     for (const occ of occurrences) {
       const lookup = deps.dictionary.lookup(occ.word);
       if (!lookup) continue;
-      const occurrenceCount = (pageOccurrenceCounts.get(lookup.word) ?? 0) + 1;
-      pageOccurrenceCounts.set(lookup.word, occurrenceCount);
+      const stateKey = lookup.stateKey;
+      const occurrenceCount = (pageOccurrenceCounts.get(stateKey) ?? 0) + 1;
+      pageOccurrenceCounts.set(stateKey, occurrenceCount);
 
-      const state = vocabState[lookup.word];
+      const state = vocabState[stateKey];
       const result = strategy.getDisplayDecision(
         {
-          word: lookup.word,
+          word: stateKey,
           surfaceForm: occ.word,
           entry: lookup.entry,
           band: lookup.band,
@@ -156,8 +243,10 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     }
 
     if (annotations.length > 0) {
-      perfAnnotatedNodes += annotations.length;
-      annotateTextNode(textNode, annotations, handleUserAction);
+      perfWordsAnnotated += annotations.length;
+      const res = annotateTextNode(textNode, annotations, handleUserAction, generatedNodes);
+      perfDomNodesAdded += res.added;
+      perfDomNodesRemoved += res.removed;
     }
 
     processedNodes.add(textNode);
@@ -165,6 +254,10 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
 
   function scanDocument(root: Node): void {
     const scanStart = nowMs();
+    const scanStartHeight =
+      typeof document !== 'undefined' && document.documentElement
+        ? document.documentElement.scrollHeight
+        : 0;
     const walker = document.createTreeWalker(
       root,
       NodeFilter.SHOW_TEXT,
@@ -199,6 +292,14 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
         requestAnimationFrame(processBatch);
       } else {
         perfTotalMs += nowMs() - scanStart;
+        // 高度影响：标注前后 documentElement.scrollHeight 变化累计（绝对值）。
+        // 注意：这只反映页面高度变化，不表示布局偏移（layout shift）；
+        // 真实布局偏移由 Layout Instability API 另行累加（layoutShiftScore）。
+        const endHeight =
+          typeof document !== 'undefined' && document.documentElement
+            ? document.documentElement.scrollHeight
+            : 0;
+        perfHeightDeltaPx += Math.abs(endHeight - scanStartHeight);
         emitPerf();
       }
     }
@@ -213,7 +314,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     const state = vocabState[word];
     const result = strategy.getDisplayDecision(
       {
-        word: lookup.word,
+        word: lookup.stateKey,
         surfaceForm: word,
         entry: lookup.entry,
         band: lookup.band,
@@ -222,19 +323,42 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       state,
     );
 
-    updateWordDisplay(lookup.word, result.decision, result.translation, result.showInlineTranslation);
+    const res = updateWordDisplay(lookup.stateKey, result.decision, result.translation, result.showInlineTranslation, generatedNodes);
+    if (res.added > 0) perfDomNodesAdded += res.added;
+    if (res.removed > 0) perfDomNodesRemoved += res.removed;
   }
 
   function observeDynamic(root: Node): MutationObserver {
     const observer = new MutationObserver((mutations) => {
+      // 直接处理文本节点的耗时计入性能报告（scanDocument 内部已自计，故仅在文本路径累加）
+      let textWorkMs = 0;
+      let textBatches = 0;
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
-          if (node.nodeType === Node.TEXT_NODE) {
-            processTextNode(node as Text);
-          } else if (node.nodeType === Node.ELEMENT_NODE) {
+          // 彻底跳过扩展自身注入的标注节点（span 与文本碎片），杜绝 MutationObserver 自触发
+          if (generatedNodes.has(node)) continue;
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as Element;
+            // 自身新增的标注 span：直接跳过（不对其 scanDocument，避免递归重扫）
+            if (el.classList && el.classList.contains('avr-word')) continue;
+            // 动态插入的元素子树：交给 scanDocument 做增量标注（其内部自行计时）
             scanDocument(node);
+          } else if (node.nodeType === Node.TEXT_NODE) {
+            // 自身标注 span 内的文本节点：跳过（其父为 .avr-word）
+            const parent = (node as Text).parentElement;
+            if (parent && parent.closest('.avr-word')) continue;
+            const s = nowMs();
+            processTextNode(node as Text);
+            textWorkMs += nowMs() - s;
+            textBatches++;
           }
         }
+      }
+      if (textWorkMs > 0) {
+        perfTotalMs += textWorkMs;
+        if (textWorkMs > perfMaxBatchMs) perfMaxBatchMs = textWorkMs;
+        perfBatches += textBatches;
+        emitPerf();
       }
     });
 
@@ -252,7 +376,8 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   }
 
   function applyRemoteChange(word: string, newStatus: WordState['status']): void {
-    vocabState[word] = { status: newStatus, source: 'manual', updatedAt: Date.now() };
+    // 内容脚本不跟踪状态版本，沿用既有或 0
+    vocabState[word] = { status: newStatus, source: 'manual', updatedAt: Date.now(), version: vocabState[word]?.version ?? 0 };
     applyWordDisplay(word);
   }
 

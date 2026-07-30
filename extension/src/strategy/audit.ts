@@ -34,6 +34,7 @@ import type {
   SettleAuditResult,
 } from '../shared/types';
 import { buildQuestion, isAnswerCorrect, hashString } from './quiz';
+import { auditPlanVersion } from '../shared/auditPlanVersion';
 
 const BAND_COUNT = 10;
 
@@ -116,12 +117,7 @@ function selectAuditCandidates(
   return selected;
 }
 
-/** 计算冻结审计计划版本（确定性）：planVersion + seed + 候选内容哈希 */
-function auditPlanVersion(seed: string, planVersion: string, candidates: readonly AuditPlanCandidate[]): string {
-  const payload = candidates.map((c) => `${c.word}:${c.bucket}:${c.band}`).join('|');
-  const h = (hashString(`${seed}::auditplan::${planVersion}::${payload}`) >>> 0).toString(16).padStart(8, '0');
-  return `${planVersion}:${seed}:${h}`;
-}
+/** 计算冻结审计计划版本（确定性）：planVersion + seed + 候选内容 + 题目内容哈希（见 shared/auditPlanVersion） */
 
 /**
  * 冻结审计计划（Spec B §8 + §6 作答前冻结）。
@@ -147,11 +143,12 @@ export function freezeAuditPlan(input: FreezeAuditPlanInput): AuditPlan {
   const questions: QuizQuestion[] = planCandidates.map((c, i) =>
     buildQuestion(c.word, input.core, input.bands, input.seed, i),
   );
-  const version = auditPlanVersion(input.seed, input.planVersion, planCandidates);
+  const version = auditPlanVersion(input.seed, input.planVersion, planCandidates, questions);
 
   return {
     version,
     planVersion: input.planVersion,
+    stateVersion: input.stateVersion,
     seed: input.seed,
     candidates: planCandidates,
     questions,

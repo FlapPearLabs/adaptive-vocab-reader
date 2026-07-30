@@ -7,7 +7,7 @@ const SEED = 'seed-abc';
 const PLAN_V = 'd:s:v1';
 
 function marker(word: string, planVersion: string, pending = true): AuditMarker {
-  return { word, source: 'initial-correct', planVersion, createdAt: 1000, pending };
+  return { word, source: 'initial-correct', planVersion, stateVersion: 1, createdAt: 1000, pending };
 }
 
 function bandsFor(words: string[]): FrequencyBands {
@@ -51,6 +51,7 @@ describe('freezeAuditPlan (Spec B §8 + §6 作答前冻结)', () => {
       seed: SEED,
       planVersion: PLAN_V,
       count: 10,
+      stateVersion: 1,
     });
 
     expect(plan.candidates.map((c) => c.word).sort()).toEqual(['apple', 'banana']);
@@ -71,6 +72,7 @@ describe('freezeAuditPlan (Spec B §8 + §6 作答前冻结)', () => {
       seed: SEED,
       planVersion: PLAN_V,
       count: 10,
+      stateVersion: 1,
     });
     expect(plan.candidates).toHaveLength(0);
   });
@@ -91,6 +93,7 @@ describe('freezeAuditPlan (Spec B §8 + §6 作答前冻结)', () => {
       seed: SEED,
       planVersion: PLAN_V,
       count: 4,
+      stateVersion: 1,
     };
     const first = freezeAuditPlan(input);
     const second = freezeAuditPlan(input);
@@ -114,6 +117,7 @@ describe('freezeAuditPlan (Spec B §8 + §6 作答前冻结)', () => {
       seed: SEED,
       planVersion: PLAN_V,
       count: 3,
+      stateVersion: 1,
     });
     expect(plan.candidates).toHaveLength(3);
     expect(plan.candidates.every((c) => c.bucket === 'initial-correct')).toBe(true);
@@ -134,6 +138,7 @@ describe('freezeAuditPlan (Spec B §8 + §6 作答前冻结)', () => {
       planVersion: PLAN_V,
       count: 5,
       highConfidenceWords: ['hc1', 'hc2'],
+      stateVersion: 1,
     });
     expect(plan.candidates).toHaveLength(2);
     expect(plan.candidates.every((c) => c.bucket === 'high-confidence')).toBe(true);
@@ -157,6 +162,7 @@ describe('freezeAuditPlan (Spec B §8 + §6 作答前冻结)', () => {
       seed: SEED,
       planVersion: PLAN_V,
       count: 2,
+      stateVersion: 1,
     });
     expect(plan.candidates).toHaveLength(2);
     expect(plan.candidates.map((c) => c.word)).toContain('b1a');
@@ -179,6 +185,7 @@ describe('settleAuditAnswer (Spec B §8)', () => {
       seed: SEED,
       planVersion: PLAN_V,
       count: candidateWords.length,
+      stateVersion: 1,
     });
   }
 

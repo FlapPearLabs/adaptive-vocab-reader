@@ -20,6 +20,24 @@ export interface WordAnnotation {
   endIndex: number;
 }
 
+/** annotateTextNode 的真实 DOM 节点统计（用于性能观测 netNodes） */
+export interface AnnotateResult {
+  /** 创建的标注 span（data-word） */
+  spans: HTMLSpanElement[];
+  /** 实际新增到 DOM 的节点数（新增文本碎片 + span） */
+  added: number;
+  /** 被替换掉的原始文本节点数（通常为 1） */
+  removed: number;
+}
+
+/** updateWordDisplay 的真实 DOM 节点统计 */
+export interface UpdateResult {
+  /** 新增节点数（还原为纯文本时 = 被还原的 span 数） */
+  added: number;
+  /** 移除节点数（被替换的 span / 被替换的原文节点） */
+  removed: number;
+}
+
 /** CSS 样式注入（仅注入一次） */
 let styleInjected = false;
 
@@ -210,8 +228,9 @@ export function annotateTextNode(
   textNode: Text,
   annotations: WordAnnotation[],
   onClick: (word: string, newStatus: 'known' | 'learning') => void,
-): HTMLSpanElement[] {
-  if (annotations.length === 0) return [];
+  generatedNodes?: WeakSet<Node>,
+): AnnotateResult {
+  if (annotations.length === 0) return { spans: [], added: 0, removed: 0 };
 
   const text = textNode.textContent || '';
 
@@ -220,7 +239,7 @@ export function annotateTextNode(
     .filter((a) => a.result.decision !== 'none' && a.startIndex >= 0 && a.endIndex <= text.length && a.startIndex < a.endIndex)
     .sort((a, b) => a.startIndex - b.startIndex);
 
-  if (sorted.length === 0) return [];
+  if (sorted.length === 0) return { spans: [], added: 0, removed: 0 };
 
   type Fragment = string | { result: DisplayResult; rawText: string };
   const fragments: Fragment[] = [];
@@ -248,7 +267,7 @@ export function annotateTextNode(
   }
 
   const hasAnnotations = fragments.some((f) => typeof f !== 'string');
-  if (!hasAnnotations) return [];
+  if (!hasAnnotations) return { spans: [], added: 0, removed: 0 };
 
   installDelegatedHandlers(onClick);
 
@@ -257,7 +276,9 @@ export function annotateTextNode(
 
   for (const frag of fragments) {
     if (typeof frag === 'string') {
-      container.appendChild(document.createTextNode(frag));
+      const tn = document.createTextNode(frag);
+      if (generatedNodes) generatedNodes.add(tn);
+      container.appendChild(tn);
     } else {
       const span = document.createElement('span');
       span.className = `${EXTENSION_CLASS} ${classForDecision(frag.result.decision, frag.result.showInlineTranslation)}`;
@@ -268,11 +289,13 @@ export function annotateTextNode(
       span.setAttribute('data-word', frag.result.word);
       container.appendChild(span);
       spans.push(span);
+      if (generatedNodes) generatedNodes.add(span);
     }
   }
 
+  // 替换原文本节点：实际新增节点数 = fragments.length（文本碎片 + span），被移除 = 原文本节点 1 个
   textNode.parentNode?.replaceChild(container, textNode);
-  return spans;
+  return { spans, added: fragments.length, removed: 1 };
 }
 
 /**
@@ -290,17 +313,23 @@ export function updateWordDisplay(
   decision: DisplayDecision,
   translation: string | null,
   showInlineTranslation: boolean,
-): void {
+  generatedNodes?: WeakSet<Node>,
+): UpdateResult {
   const spans = document.querySelectorAll<HTMLSpanElement>(`.${EXTENSION_CLASS}[data-word="${word}"]`);
 
   if (decision === 'none') {
-    // 还原为纯文本节点
+    // 还原为纯文本节点（移除标注）：每个 span 被一个文本节点替换 → 移除 = 新增 = span 数
+    let removed = 0;
+    let added = 0;
     spans.forEach((span) => {
       const text = span.textContent || '';
       const textNode = document.createTextNode(text);
+      if (generatedNodes) generatedNodes.add(textNode);
       span.parentNode?.replaceChild(textNode, span);
+      removed++;
+      added++;
     });
-    return;
+    return { added, removed };
   }
 
   spans.forEach((span, index) => {
@@ -320,6 +349,7 @@ export function updateWordDisplay(
       span.removeAttribute('data-translation');
     }
   });
+  return { added: 0, removed: 0 };
 }
 
 /**

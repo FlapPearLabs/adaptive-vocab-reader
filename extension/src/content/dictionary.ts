@@ -1,9 +1,13 @@
 import type { DictCore, FormsMap, FrequencyBands, DictEntry } from '../shared/types';
 
 export interface LookupResult {
-  /** 规范化主词条 */
-  word: string;
-  /** 词典条目 */
+  /** 状态键（= 规范化 surface form，小写）：用于单词状态/审计标记/页面 data-word */
+  stateKey: string;
+  /** 取义主词条（词形映射目标或自身）：用于取音标/词性/释义/频段 */
+  entryKey: string;
+  /** 原始 surface form（保留大小写，用于 DOM 定位） */
+  surfaceForm: string;
+  /** 词典条目（entryKey 对应） */
   entry: DictEntry;
   /** 词频段 (0-9) */
   band: number;
@@ -11,8 +15,13 @@ export interface LookupResult {
 
 export interface Dictionary {
   /**
-   * 查询一个词形，返回主词条、词典条目和频段。
-   * 先查词形映射表，再查直接匹配。返回 null 表示未命中。
+   * 查询一个词形，返回状态键、取义主词条、原始词形、词典条目与频段。
+   * 规则（core 主词条优先，词形映射只帮助取义不传播状态）：
+   * 1. 先查 core：若 surface form 本身是 core 主词条（如 could），直接命中所取义，
+   *    stateKey = surface form，entryKey = 自身，状态独立（不被词形映射遮蔽）。
+   * 2. 再查词形映射：若命中（如 went→go），stateKey = surface form（went 独立状态），
+   *    entryKey = 映射目标（go，仅取义），状态不继承 go。
+   * 返回 null 表示未命中。
    */
   lookup(surfaceForm: string): LookupResult | null;
 
@@ -35,19 +44,31 @@ export function createDictionary(
     lookup(surfaceForm: string): LookupResult | null {
       const form = surfaceForm.toLowerCase();
 
-      // 先查词形映射
+      // 1. core 主词条优先：自身即合法主词条（如 could）直接命中，状态独立。
+      const coreEntry = core[form];
+      if (coreEntry) {
+        return {
+          stateKey: form,
+          entryKey: form,
+          surfaceForm,
+          entry: coreEntry,
+          band: bands[form] ?? 9,
+        };
+      }
+
+      // 2. 词形映射：取义目标 + 频段，但状态键仍是 surface form（如 went→go）。
       const mappedWord = forms[form];
       if (mappedWord) {
         const entry = core[mappedWord];
         if (entry) {
-          return { word: mappedWord, entry, band: bands[mappedWord] ?? 9 };
+          return {
+            stateKey: form,
+            entryKey: mappedWord,
+            surfaceForm,
+            entry,
+            band: bands[mappedWord] ?? 9,
+          };
         }
-      }
-
-      // 直接匹配
-      const entry = core[form];
-      if (entry) {
-        return { word: form, entry, band: bands[form] ?? 9 };
       }
 
       return null;

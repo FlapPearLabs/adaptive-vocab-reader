@@ -16,6 +16,7 @@ export function createEmptySnapshot(installSeed: string, dictVersion: string): V
   return {
     schemaVersion: SCHEMA_VERSION,
     dictVersion,
+    stateVersion: 0,
     installSeed,
     words: {},
     auditMarkers: {},
@@ -23,6 +24,83 @@ export function createEmptySnapshot(installSeed: string, dictVersion: string): V
     auditPlan: null,
     initialTest: null,
     lastUpdated: Date.now(),
+  };
+}
+
+/**
+ * 快照迁移（v1 → v2，纯函数，可单测）。
+ *
+ * 旧快照可能缺 `words[*].version`、审计标记缺 `stateVersion`、审计冻结计划缺
+ * `stateVersion` —— 这些字段是 V0.1 状态隔离维度的新增字段，不能继续伪装成 v1。
+ *
+ * 确定性规则（v1 → v2）：
+ * - `schemaVersion` 置为 `SCHEMA_VERSION`（当前 2）。
+ * - `stateVersion`：缺省补 0。
+ * - `words[*].version`：缺省补 0（首测状态隔离维度；v1 无此字段，保守置 0）。
+ * - `auditMarkers`：缺 `stateVersion` 的旧标记补 0（v2 起始 `stateVersion` 也为 0，
+ *   故首轮内仍有效；一旦首测 (re)start 递增 `stateVersion`，`clearStaleAuditMarkers`
+ *   会自动失效这些陈旧标记）。
+ * - `auditPlan`：若缺 `stateVersion`（旧 v1 冻结计划），**安全失效**置 `null`，
+ *   不得继续据此作答（服务端权威校验也会拒绝缺字段的计划）。
+ * - 缺失容器（`words`/`auditMarkers`/`auditLog`/`auditPlan`/`initialTest`）按空/缺省补齐。
+ *
+ * 幂等：对已是 v2 的快照再次迁移结果一致（字段已齐全，规则变为恒等）。
+ * 回滚边界：迁移只增字段、绝不删除用户有效数据（installSeed/词状态/initialTest 原样保留）。
+ * 若升级后需回退到 v1 读取，唯一安全路径是凭发布前备份快照或清除 `chrome.storage` 重装；
+ * 本函数**不提供原地降级**（降级会丢失 v2 新增字段，属需明确人工/脚本决策的破坏性操作，
+ * 且本会话未实际执行任何回滚，故不得声称回滚已验证）。
+ */
+export function migrateSnapshot(raw: unknown): VocabSnapshot {
+  const r = (raw ?? {}) as Partial<VocabSnapshot>;
+
+  const stateVersion = typeof r.stateVersion === 'number' ? r.stateVersion : 0;
+
+  const words: Record<string, WordState> = {};
+  for (const [w, ws] of Object.entries(r.words ?? {})) {
+    if (!ws) continue;
+    words[w] = {
+      status: ws.status ?? 'unknown',
+      source: ws.source ?? 'initial',
+      updatedAt: typeof ws.updatedAt === 'number' ? ws.updatedAt : 0,
+      version: typeof ws.version === 'number' ? ws.version : 0,
+    };
+  }
+
+  const auditMarkers: Record<string, AuditMarker> = {};
+  for (const [w, m] of Object.entries(r.auditMarkers ?? {})) {
+    if (!m) continue;
+    auditMarkers[w] = {
+      word: m.word ?? w,
+      source: m.source ?? 'initial-correct',
+      planVersion: m.planVersion ?? '',
+      stateVersion: typeof m.stateVersion === 'number' ? m.stateVersion : 0,
+      createdAt: typeof m.createdAt === 'number' ? m.createdAt : 0,
+      pending: m.pending ?? false,
+    };
+  }
+
+  // 旧格式（schemaVersion !== 当前）的冻结审计计划**无条件安全失效**置 null：
+  // 旧 v1 计划中可能已写出带 stateVersion 的哈希计划，但旧哈希未覆盖选项翻译，
+  // 属可被篡改的不完整基；V0.1 当前哈希方案下不得原样接受旧计划。仅当快照已是
+  // 当前 schemaVersion 且计划自带合法 stateVersion 时才保留。
+  const isOldFormat = r.schemaVersion !== SCHEMA_VERSION;
+  const storedPlan = r.auditPlan as Partial<AuditPlan> | null;
+  const auditPlan: AuditPlan | null =
+    isOldFormat || !(storedPlan && typeof storedPlan.stateVersion === 'number')
+      ? null
+      : (storedPlan as AuditPlan);
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    dictVersion: r.dictVersion ?? '',
+    stateVersion,
+    installSeed: r.installSeed ?? '',
+    words,
+    auditMarkers,
+    auditLog: r.auditLog ?? [],
+    auditPlan,
+    initialTest: r.initialTest ?? null,
+    lastUpdated: typeof r.lastUpdated === 'number' ? r.lastUpdated : 0,
   };
 }
 
@@ -41,6 +119,8 @@ export function mergeStateChange(
     status: newStatus,
     source,
     updatedAt: Date.now(),
+    // 状态版本：标记该词状态所属的首测轮次，用于隔离/校验
+    version: snapshot.stateVersion,
   };
 
   return {
@@ -79,12 +159,13 @@ export function clearAuditMarker(snapshot: VocabSnapshot, word: string): VocabSn
 }
 
 /**
- * 清除绑定到非当前计划版本的待审计标记（返回新对象，不可变）。
- * 用于首测计划被重做/替换（INITIAL_TEST_START 携带新 plan.version）时，
- * 使上一轮首测产生的审计标记失效，避免用陈旧计划版本核验。
+ * 清除状态版本不等于当前快照状态版本的待审计标记（返回新对象，不可变）。
+ * 用于首测计划被重做/替换（INITIAL_TEST_START 递增 stateVersion）时，使上一轮
+ * 首测产生的审计标记失效。仅靠 planVersion 无法区分「相同种子重测」的陈旧标记，
+ * 故以 stateVersion 为准。当前 stateVersion 由调用方在 bump 后传入。
  */
-export function clearStaleAuditMarkers(snapshot: VocabSnapshot, currentPlanVersion: string): VocabSnapshot {
-  const stale = Object.values(snapshot.auditMarkers).filter((marker) => marker.planVersion !== currentPlanVersion);
+export function clearStaleAuditMarkers(snapshot: VocabSnapshot, currentStateVersion: number): VocabSnapshot {
+  const stale = Object.values(snapshot.auditMarkers).filter((marker) => marker.stateVersion !== currentStateVersion);
   if (stale.length === 0) return snapshot;
   const newMarkers = { ...snapshot.auditMarkers };
   for (const marker of stale) {
@@ -93,6 +174,20 @@ export function clearStaleAuditMarkers(snapshot: VocabSnapshot, currentPlanVersi
   return {
     ...snapshot,
     auditMarkers: newMarkers,
+    lastUpdated: Date.now(),
+  };
+}
+
+/**
+ * 清除所有待审计标记（返回新对象，不可变）。
+ * 用于 INITIAL_TEST_RESET：新一轮首测开始前彻底清空上一轮标记，
+ * 不依赖任何版本号（直接全量清除）。
+ */
+export function clearAllPendingAuditMarkers(snapshot: VocabSnapshot): VocabSnapshot {
+  if (Object.keys(snapshot.auditMarkers).length === 0) return snapshot;
+  return {
+    ...snapshot,
+    auditMarkers: {},
     lastUpdated: Date.now(),
   };
 }

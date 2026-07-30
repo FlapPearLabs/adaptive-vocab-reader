@@ -14,7 +14,7 @@ function ctx(overrides: Partial<LookupContext> = {}): LookupContext {
 }
 
 function state(status: WordState['status']): WordState {
-  return { status, source: 'manual', updatedAt: Date.now() };
+  return { status, source: 'manual', updatedAt: Date.now(), version: 0 };
 }
 
 describe('VocabStrategy', () => {
@@ -87,23 +87,25 @@ describe('VocabStrategy', () => {
 
   describe('markKnown', () => {
     it('标记会返回已知状态变更', () => {
-      const change = strategy.markKnown('test');
-      expect(change).toEqual({
+      const result = strategy.markKnown('test');
+      expect(result.change).toEqual({
         word: 'test',
         newStatus: 'known',
         source: 'manual',
       });
+      expect(result.clearMarker).toBe(true);
     });
   });
 
   describe('markLearning', () => {
     it('标记不会返回学习状态变更', () => {
-      const change = strategy.markLearning('test');
-      expect(change).toEqual({
+      const result = strategy.markLearning('test');
+      expect(result.change).toEqual({
         word: 'test',
         newStatus: 'learning',
         source: 'manual',
       });
+      expect(result.clearMarker).toBe(true);
     });
   });
 

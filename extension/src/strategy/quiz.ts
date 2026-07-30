@@ -81,38 +81,26 @@ function shuffle<T>(input: readonly T[], rng: () => number): T[] {
 }
 
 // ============================================================
-// 候选池：淘汰无法生成四个互异中文选项的词，并排除被词形映射遮蔽的主词条
+// 候选池：仅淘汰无法生成四个互异中文选项的词
 // ============================================================
+// 词形映射不传播状态（core 主词条优先）：lookup 始终以 surface form 作为状态键，
+// 因此「could」与「can」是各自独立的主词条，都可进入首测候选，互不遮蔽。
+// 故此处不再排除任何 core 主词条（旧 isShadowedCoreKey 方案通过排除 13 个合法
+// core 主词条来掩盖状态模型错误，已删除）。
 
 /**
- * 判断一个 core 主词条是否被词形映射「遮蔽」：
- * 若 `forms[word]` 存在且指向另一个词，则 `dictionary.lookup(word).word` 会返回
- * 该遮蔽目标、而非 `word` 本身。这会导致「计划键 ≠ 页面 data-word」的不一致
- * （例如 core 含 `could`，但 `forms[could]=can`，页面把 could 标为 data-word="can"）。
- *
- * 规范化契约：canonical key = `lookup(token).word`。首测候选必须是自洽主词条
- * （`lookup(w).word === w`），保证计划键与页面 data-word 永远一致。
+ * 计算候选池：仅保留「能生成四个互异中文选项」的主词条。
+ * 一个词合格当且仅当：词典中存在至少 3 个与它自身翻译不同的其他翻译
+ * （全局互异翻译数 ≥ 4）。任何 core 主词条（含自身也是词形映射键的，如 could）
+ * 都不应被排除——它们的状态键是自身 surface form，互不干扰。
  */
-export function isShadowedCoreKey(word: string, forms: FormsMap): boolean {
-  const target = forms[word];
-  return target !== undefined && target !== word;
-}
-
-/**
- * 计算候选池：仅保留「能生成四个互异中文选项」且「未被词形映射遮蔽」的自洽主词条。
- * 一个词合格当且仅当：
- * 1. 词典中存在至少 3 个与它自身翻译不同的其他翻译（全局互异翻译数 ≥ 4）；
- * 2. 该词未被 forms 重定向到另一个主词条（自洽：`lookup(w).word === w`）。
- * 无法满足任一条件的词不得进入候选池。
- */
-export function eligibleCandidates(core: DictCore, forms: FormsMap): string[] {
+export function eligibleCandidates(core: DictCore, _forms: FormsMap): string[] {
   const distinctTranslations = new Set<string>();
   for (const entry of Object.values(core)) {
     distinctTranslations.add(entry.translation);
   }
 
   return Object.keys(core).filter((word) => {
-    if (isShadowedCoreKey(word, forms)) return false;
     const own = core[word]!.translation;
     let others = 0;
     for (const t of distinctTranslations) {
@@ -247,29 +235,32 @@ export function isAnswerCorrect(question: QuizQuestion, answer: QuizAnswer): boo
  * 应用一道题的作答，返回判别联合结果。
  *
  * 规则（规格第 4 节 / Issue #2 产品合同）：
- * - 答对         → known + 单次答对待审计标记
- * - 答错 / 不确定 → learning（进入活跃生词表）
+ * - 答对         → known + 单次答对待审计标记（盖当前快照状态版本）
+ * - 答错 / 不确定 → learning（进入活跃生词表），并清除该词上一轮的待审计标记
  * - 页面手动状态优先：若当前状态来自手动标记，则保留手动状态，不产生任何变更
  *
- * 审计标记绑定到 `plan.version`（首测计划版本），由本函数内部读取，
- * 调用方无需再传入版本号，避免误用 schemaVersion 作为状态版本。
+ * 审计标记绑定到 `plan.version`（首测计划版本）与 `stateVersion`（快照状态版本），
+ * 后者由调用方经 SettleInitialTestInput 传入，使重复相同 plan.version 重测时
+ * worker 仍能据 stateVersion 清除上一轮的陈旧标记。
  *
  * @param plan 冻结的首测计划
  * @param questionIndex 题号
  * @param answer 用户作答
  * @param current 该词当前状态（可能 undefined = 未知）
+ * @param stateVersion 当前快照状态版本（盖到新建审计标记）
  */
 export function applyAnswer(
   plan: InitialTestPlan,
   questionIndex: number,
   answer: QuizAnswer,
   current: WordState | undefined,
+  stateVersion: number,
 ): ApplyAnswerResult {
   const question = plan.questions[questionIndex]!;
 
   // 页面手动状态优先：手动标记高于首测结果
   if (current && current.source === 'manual') {
-    return { kind: 'priority-preserved', change: null, audit: null };
+    return { kind: 'priority-preserved', change: null, audit: null, clearMarkerWord: question.word };
   }
 
   const correct = isAnswerCorrect(question, answer);
@@ -285,16 +276,18 @@ export function applyAnswer(
       kind: answer.kind === 'unsure' ? 'unsure' : 'wrong',
       change,
       audit: null,
+      clearMarkerWord: question.word,
     };
   }
 
-  // 答对：创建单次答对待审计标记，绑定首测计划版本
+  // 答对：创建单次答对待审计标记，绑定首测计划版本 + 快照状态版本
   const audit: AuditMarker = {
     word: question.word,
     source: 'initial-correct',
     planVersion: plan.version,
+    stateVersion,
     createdAt: Date.now(),
     pending: true,
   };
-  return { kind: 'correct', change, audit };
+  return { kind: 'correct', change, audit, clearMarkerWord: null };
 }

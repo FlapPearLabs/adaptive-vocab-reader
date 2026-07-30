@@ -71,6 +71,11 @@ function onceListening(server) {
 
 /** 启动一个独立 Chrome 实例（独立 user-data-dir = 独立本地存储），返回 browser 与 chrome 进程 */
 async function launchChrome(userDataDir, chromeForTesting) {
+  // 默认保留 Chrome 原生 sandbox（本机常规路径）。
+  // 仅当显式设置环境变量 AVR_E2E_NO_SANDBOX=1 时，才关闭 sandbox 并绕过 /dev/shm 限制
+  // （受限 CI / 沙箱环境需要）。两种模式均只改变测试运行环境，不影响任何被测行为或断言。
+  const disableSandbox = process.env.AVR_E2E_NO_SANDBOX === '1';
+  const sandboxArgs = disableSandbox ? ['--no-sandbox', '--disable-dev-shm-usage'] : [];
   const chrome = spawn(chromeForTesting, [
     `--user-data-dir=${userDataDir}`,
     `--load-extension=${DIST_DIR}`,
@@ -78,6 +83,7 @@ async function launchChrome(userDataDir, chromeForTesting) {
     '--no-first-run', '--no-default-browser-check',
     '--ignore-certificate-errors', '--remote-debugging-port=0', '--enable-logging=stderr', '--v=1',
     '--headless=new',
+    ...sandboxArgs,
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
   const devtools = await new Promise((resolve, reject) => {
@@ -165,6 +171,11 @@ async function main() {
         response.end(fs.readFileSync(path.join(ROOT, 'tests/fixtures/spa-page.html'), 'utf8'));
         return;
       }
+      if (request.url === '/long-read.html') {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end(fs.readFileSync(path.join(ROOT, 'tests/fixtures/long-read.html'), 'utf8'));
+        return;
+      }
       if (request.url === '/plan-words.html') {
         const f = path.join(tempDir, 'plan-words.html');
         if (fs.existsSync(f)) {
@@ -204,12 +215,12 @@ async function main() {
       forbiddenInNav: document.querySelectorAll('nav .avr-word').length,
       forbiddenInCode: document.querySelectorAll('code .avr-word').length,
       forbiddenInComment: document.querySelectorAll('.comment-section .avr-word').length,
-      challengesFormHit: [...document.querySelectorAll('.avr-word[data-word="challenge"]')]
+      challengesFormHit: [...document.querySelectorAll('.avr-word[data-word="challenges"]')]
         .some((element) => element.textContent?.toLowerCase() === 'challenges'),
     }));
     if (initial.annotations === 0 || initial.unknown === 0) throw new Error(`未获得未知词轻提示：${JSON.stringify(initial)}`);
     if (initial.forbiddenInNav || initial.forbiddenInCode || initial.forbiddenInComment) throw new Error(`扫描了应跳过区域：${JSON.stringify(initial)}`);
-    if (!initial.challengesFormHit) throw new Error(`词形映射未在真实页面命中：${JSON.stringify(initial)}`);
+    if (!initial.challengesFormHit) throw new Error(`词形映射/状态键隔离未在真实页面命中：${JSON.stringify(initial)}`);
 
     const challenge = await page.$('.avr-word[data-word="challenge"]');
     if (!challenge) throw new Error('fixture 中 challenge / challenged 未被本地词典与词形映射命中');
@@ -250,7 +261,24 @@ async function main() {
     const knownAfterReload = await page.evaluate(() => document.querySelectorAll('.avr-word[data-word="challenge"]').length);
     if (knownAfterReload !== 0) throw new Error('“会”状态未立即覆盖并跨刷新保留');
 
-    console.log(`E2E #1 PASS: annotations=${initial.annotations}, unknown=${initial.unknown}, challenge_first=${persisted.first}, challenge_repeats=${persisted.repeats}, local_snapshot=minimal`);
+    // 词形/状态键隔离：form-only 词 "abilities"（→ canonical "ability"）必须以 surface form 为状态键，
+    // 而非 canonical 主词条。data-word 须为 "abilities"，标记 known 后快照键须为 "abilities"，刷新后保留。
+    const abilities = await page.$('.avr-word[data-word="abilities"]');
+    if (!abilities) throw new Error('fixture 未包含 form-only 词 abilities，无法验证状态键隔离');
+    await abilities.click();
+    await page.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true });
+    await page.click('.avr-action-menu button[data-avr-status="known"]');
+    await page.waitForFunction(() => document.querySelectorAll('.avr-word[data-word="abilities"]').length === 0, { timeout: 5_000 });
+    const snapIso = (await worker1.evaluate(async () => chrome.storage.local.get('avr_vocab_snapshot'))).avr_vocab_snapshot;
+    if (snapIso.words?.abilities?.status !== 'known') {
+      throw new Error(`form-only 词未以 surface form 为状态键存储：${JSON.stringify(Object.keys(snapIso.words || {}))}`);
+    }
+    await page.reload({ waitUntil: 'networkidle0' });
+    await wait(400);
+    const abilAfter = await page.evaluate(() => document.querySelectorAll('.avr-word[data-word="abilities"]').length);
+    if (abilAfter !== 0) throw new Error('form-only 词 known 状态未跨刷新保留（状态键隔离失败）');
+
+    console.log(`E2E #1 PASS: annotations=${initial.annotations}, unknown=${initial.unknown}, challenge_first=${persisted.first}, challenge_repeats=${persisted.repeats}, form_isolation=abilities(stateKey=surface), local_snapshot=minimal`);
   } finally {
     if (browser1) await browser1.close();
     await killChrome(chrome1);
@@ -475,14 +503,62 @@ async function main() {
       throw new Error(`SPA 扫描了应跳过的非正文区：${JSON.stringify(skipHits)}`);
     }
 
-    // 性能基线（非持久化，仅 DOM dataset；不含 URL/正文/句子）
-    const perfRaw = await spa.evaluate(() => document.documentElement.dataset.avrPerf);
-    const perf = perfRaw ? JSON.parse(perfRaw) : null;
-    if (!perf || typeof perf.totalScanMs !== 'number' || typeof perf.maxBatchMs !== 'number' || typeof perf.annotatedNodes !== 'number') {
-      throw new Error(`SPA 性能观测未上报：${perfRaw}`);
+    // 性能观测（非持久化，仅 DOM dataset；不含 URL/正文/句子）—— 新 schema 字段
+    const readPerf = async (pg) => {
+      const raw = await pg.evaluate(() => document.documentElement.dataset.avrPerf);
+      return raw ? JSON.parse(raw) : null;
+    };
+    const assertPerfShape = (p, where) => {
+      if (!p
+        || typeof p.totalScanMs !== 'number'
+        || typeof p.maxBatchMs !== 'number'
+        || typeof p.textNodesScanned !== 'number'
+        || typeof p.wordsAnnotated !== 'number'
+        || typeof p.domNodesAdded !== 'number'
+        || typeof p.domNodesRemoved !== 'number'
+        || typeof p.netNodes !== 'number'
+        || typeof p.heightDeltaPx !== 'number'
+        || typeof p.layoutShiftScore !== 'number'
+        || typeof p.layoutShiftSupported !== 'boolean'
+        || typeof p.batches !== 'number') {
+        throw new Error(`性能观测字段缺失（${where}）：${JSON.stringify(p)}`);
+      }
+    };
+
+    // 长文 fixture 多样本性能采样（≥3 次真实 Chrome 样本）：记录扫描墙钟、单批峰值、文本节点数、
+    // 词注释数、实际 DOM 增量与布局偏移；不涉及 URL/正文/句子。
+    const samples = [];
+    for (let s = 0; s < 3; s++) {
+      const longPage = await browser3.newPage();
+      longPage.on('pageerror', (e) => pageLogs.push(`longread err: ${e.message}`));
+      await gotoSafe(longPage, `https://localhost:${PORT}/long-read.html`, { waitUntil: 'networkidle0' });
+      await longPage.waitForSelector('.avr-word', { timeout: 15_000 });
+      await wait(150);
+      const p = await readPerf(longPage);
+      assertPerfShape(p, `long-read#${s}`);
+      samples.push(p);
+      await longPage.close();
     }
-    // 先记录真实基线，不预设阈值（规格：当前不预设性能数值，先记录真实基线）
-    console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, perf_baseline=${JSON.stringify(perf)}`);
+
+    // SPA 页一次性能观测（新 schema；与长文一致调用 assertPerfShape 做 schema 断言，非仅记录）
+    const spaPerf = await readPerf(spa);
+    if (spaPerf) assertPerfShape(spaPerf, 'spa');
+
+    const perfSummary = samples.map((p, i) => ({
+      sample: i + 1,
+      totalScanMs: p.totalScanMs,
+      maxBatchMs: p.maxBatchMs,
+      textNodesScanned: p.textNodesScanned,
+      wordsAnnotated: p.wordsAnnotated,
+      domNodesAdded: p.domNodesAdded,
+      domNodesRemoved: p.domNodesRemoved,
+      netNodes: p.netNodes,
+      heightDeltaPx: p.heightDeltaPx,
+      layoutShiftScore: p.layoutShiftScore,
+      layoutShiftSupported: p.layoutShiftSupported,
+      batches: p.batches,
+    }));
+    console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, perf_samples=${JSON.stringify(perfSummary)}, spa_perf=${spaPerf ? JSON.stringify(spaPerf) : 'n/a'}`);
   } finally {
     if (browser3) await browser3.close();
     await killChrome(chrome3);

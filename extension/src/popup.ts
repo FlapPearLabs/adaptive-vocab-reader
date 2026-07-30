@@ -119,12 +119,13 @@ async function main(): Promise<void> {
 
   async function startAudit(): Promise<void> {
     if (!test?.completed) return;
-    const [{ markers, planVersion }, stateResp] = await Promise.all([
-      sendMessage<{ markers: Record<string, AuditMarker>; planVersion: string }>({ type: 'GET_AUDIT_MARKERS' }),
+    const [{ markers, planVersion, stateVersion }, stateResp] = await Promise.all([
+      sendMessage<{ markers: Record<string, AuditMarker>; planVersion: string; stateVersion: number }>({ type: 'GET_AUDIT_MARKERS' }),
       sendMessage<{ words: Record<string, WordState> }>({ type: 'GET_STATE' }),
     ]);
 
-    // 由策略模块冻结审计计划（候选 + 题目 + 结算位），交 worker 持久化
+    // 由策略模块冻结审计计划（候选 + 题目 + 结算位），交 worker 校验并持久化。
+    // stateVersion 取自快照，供 worker 据状态版本隔离/校验（相同种子重测不沿用旧计划）。
     const plan = strategy.freezeAuditPlan({
       markers,
       words: stateResp.words,
@@ -133,6 +134,7 @@ async function main(): Promise<void> {
       seed: profile.installSeed,
       planVersion,
       count: 20,
+      stateVersion,
     });
     await sendMessage({ type: 'FREEZE_AUDIT_PLAN', plan });
     audit = { plan };

@@ -7,7 +7,6 @@ import {
   applyAnswer,
   eligibleCandidates,
   isAnswerCorrect,
-  isShadowedCoreKey,
 } from './quiz';
 
 // ============================================================
@@ -84,30 +83,32 @@ describe('eligibleCandidates', () => {
     expect(eligible.length).toBe(Object.keys(core).length);
   });
 
-  it('excludes core keys shadowed by forms redirect (plan key must equal page data-word)', () => {
+  it('admits all core headwords including those whose surface form is also a forms key (core-first, no shadow exclusion)', () => {
     // core 含 could 与 can 两个主词条；forms 把 could 重定向到 can。
-    // lookup("could").word === "can" !== "could" → could 被遮蔽，不可进入首测候选。
+    // 旧方案以「lookup(could) 被遮蔽」为由排除 could，掩盖状态模型错误。
+    // 新方案：lookup 以 core 优先，状态键 = 自身 surface form，could 与 can 独立，
+    // 两者都应进入首测候选。
     const core: DictCore = {
       can: { phonetic: '', pos: 'v.', translation: '能' },
-      could: { phonetic: '', pos: 'v.', translation: '可以' },
+      could: { phonetic: '', pos: 'v.', translation: '可以（过去式）' },
       book: { phonetic: '', pos: 'n.', translation: '书' },
       cat: { phonetic: '', pos: 'n.', translation: '猫' },
       dog: { phonetic: '', pos: 'n.', translation: '狗' },
     };
-    const forms: FormsMap = { could: 'can', books: 'book' }; // could 被遮蔽
+    // 每个翻译互异，保证都能凑齐四选项
+    const forms: FormsMap = { could: 'can', books: 'book' };
     const dict = createDictionary(core, forms, {});
 
-    // 自洽契约：每个 eligible 词 w 满足 lookup(w).word === w
     const eligible = eligibleCandidates(core, forms);
-    for (const w of eligible) {
-      expect(dict.lookup(w)!.word).toBe(w);
-    }
-    // 被遮蔽的 could 必须被排除
-    expect(isShadowedCoreKey('could', forms)).toBe(true);
-    expect(isShadowedCoreKey('can', forms)).toBe(false);
-    expect(eligible).not.toContain('could');
-    // 未被遮蔽的 can 仍可入选
+    // could 与 can 都入选（不再因 forms 重定向被排除）
+    expect(eligible).toContain('could');
     expect(eligible).toContain('can');
+    // 状态键独立：lookup(could).stateKey === 'could'，lookup(can).stateKey === 'can'
+    expect(dict.lookup('could')!.stateKey).toBe('could');
+    expect(dict.lookup('can')!.stateKey).toBe('can');
+    // 各自取义正确
+    expect(dict.lookup('could')!.entryKey).toBe('could');
+    expect(dict.lookup('can')!.entryKey).toBe('can');
   });
 });
 
@@ -186,44 +187,50 @@ describe('buildInitialTestPlan', () => {
 // ============================================================
 
 describe('applyAnswer', () => {
-  const manualKnown: WordState = { status: 'known', source: 'manual', updatedAt: 0 };
+  const manualKnown: WordState = { status: 'known', source: 'manual', updatedAt: 0, version: 1 };
 
-  it('correct answer → known + pending audit marker bound to plan.version', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, undefined);
+  it('correct answer → known + pending audit marker bound to plan.version + stateVersion', () => {
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, undefined, 1);
     expect(result.kind).toBe('correct');
     if (result.kind !== 'correct') return;
     expect(result.change.newStatus).toBe('known');
     expect(result.change.source).toBe('initial');
     expect(result.change.word).toBe('apple');
+    expect(result.clearMarkerWord).toBeNull();
     expect(result.audit).not.toBeNull();
     expect(result.audit!.word).toBe('apple');
     expect(result.audit!.pending).toBe(true);
     // 审计标记绑定到首测计划版本，而非 schemaVersion
     expect(result.audit!.planVersion).toBe(SAMPLE_PLAN.version);
+    // 审计标记盖当前快照状态版本，供 worker 隔离/清理
+    expect(result.audit!.stateVersion).toBe(1);
   });
 
-  it('wrong answer → learning, no audit', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 1 }, undefined);
+  it('wrong answer → learning, no audit, clears stale marker for word', () => {
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 1 }, undefined, 1);
     expect(result.kind).toBe('wrong');
     if (result.kind !== 'wrong') return;
     expect(result.change.newStatus).toBe('learning');
     expect(result.change.source).toBe('initial');
     expect(result.audit).toBeNull();
+    expect(result.clearMarkerWord).toBe('apple');
   });
 
-  it('unsure answer → learning, no audit', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'unsure' }, undefined);
+  it('unsure answer → learning, no audit, clears stale marker for word', () => {
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'unsure' }, undefined, 1);
     expect(result.kind).toBe('unsure');
     if (result.kind !== 'unsure') return;
     expect(result.change.newStatus).toBe('learning');
     expect(result.audit).toBeNull();
+    expect(result.clearMarkerWord).toBe('apple');
   });
 
   it('page manual state takes priority over initial test answer', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown, 1);
     expect(result.kind).toBe('priority-preserved');
     expect(result.change).toBeNull();
     expect(result.audit).toBeNull();
+    expect(result.clearMarkerWord).toBe('apple');
   });
 
   it('isAnswerCorrect reflects the frozen correct option', () => {
