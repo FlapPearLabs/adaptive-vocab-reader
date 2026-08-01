@@ -90,6 +90,17 @@
 - **T2 完成定义不得要求立即操作用户真实 Chrome profile。**
 - 真实用户 profile 的备份执行时机是：T5 全绿之后、T6 开始之前、第一次让真实用户 profile 加载 schema 3 构建之前；届时必须取得用户明确配合和授权（详见 T6 的真实用户升级门）。
 
+### R-MIG-8 真实用户备份步骤（发布门定义，T2 不执行）
+
+仅在 T5 隔离真浏览器 E2E 已全绿、用户明确授权并且真实 profile 首次加载 schema 3 构建**之前**执行；开发、单测和隔离 E2E 一律不得触碰真实 profile。
+
+1. 用户在自己的 Chrome profile 中打开扩展 Service Worker 的 DevTools，运行 `const backup = await chrome.storage.local.get('avr_vocab_snapshot')`；确认 `backup.avr_vocab_snapshot.schemaVersion === 2`。
+2. 用户运行 `copy(JSON.stringify(backup))`，将剪贴板内容保存为自己选择的本地只读备份文件；该文件只在其本机保留，不提交仓库、不发送远端。
+3. 用户把该文件的完整内容粘贴回同一 DevTools，赋给 `const backupJson = '…'` 后运行 `const parsed = JSON.parse(backupJson)`；确认 `parsed.avr_vocab_snapshot.schemaVersion === 2`，且 `JSON.stringify(parsed) === JSON.stringify(backup)`，以验证备份可解析并保留原 schema 2 内容。
+4. 记录备份文件位置与校验结果后，才允许用户让该真实 profile 启动 schema 3 构建；不实现、也不尝试原地 3→2 降级。若任一步失败，停止升级，保留原 profile 与备份。
+
+T2 的自动化证据是 schema 2 fixture 经实际 worker/storage 路径迁移到 v3；它不替代上述真实 profile 人工发布门。
+
 **反过度设计检查**：
 - 每词只留最新一条证据，不存历史、不做事件溯源；
 - 迁移并入现有 `migrateSnapshot`，不建框架/registry/降级；

@@ -244,12 +244,12 @@ async function main() {
       forbiddenInNav: document.querySelectorAll('nav .avr-word').length,
       forbiddenInCode: document.querySelectorAll('code .avr-word').length,
       forbiddenInComment: document.querySelectorAll('.comment-section .avr-word').length,
-      challengesFormHit: [...document.querySelectorAll('.avr-word[data-word="challenges"]')]
+      challengesFormHit: [...document.querySelectorAll('.avr-word[data-word="challenge"]')]
         .some((element) => element.textContent?.toLowerCase() === 'challenges'),
     }));
     if (initial.annotations === 0 || initial.unknown === 0) throw new Error(`未获得未知词轻提示：${JSON.stringify(initial)}`);
     if (initial.forbiddenInNav || initial.forbiddenInCode || initial.forbiddenInComment) throw new Error(`扫描了应跳过区域：${JSON.stringify(initial)}`);
-    if (!initial.challengesFormHit) throw new Error(`词形映射/状态键隔离未在真实页面命中：${JSON.stringify(initial)}`);
+    if (!initial.challengesFormHit) throw new Error(`词形映射/wordKey 合并未在真实页面命中：${JSON.stringify(initial)}`);
 
     const challenge = await page.$('.avr-word[data-word="challenge"]');
     if (!challenge) throw new Error('fixture 中 challenge / challenged 未被本地词典与词形映射命中');
@@ -279,6 +279,8 @@ async function main() {
     if (!snapshot1 || !snapshot1.dictVersion || snapshot1.words?.challenge?.status !== 'learning' || /localhost|Journey Through Language|comment-section/.test(serialized1)) {
       throw new Error(`本地快照不符合最小隐私/状态要求：${serialized1}`);
     }
+    const evidenceBeforeManual = snapshot1.assessmentEvidence;
+    if (!isDeepStrictEqual(evidenceBeforeManual, {})) throw new Error('手动标记前的新 profile 不应已有测试证据');
 
     const persistedChallenge = await page.$('.avr-word[data-word="challenge"]');
     if (!persistedChallenge) throw new Error('刷新后无法对 challenge 执行“会”覆盖验收');
@@ -289,28 +291,107 @@ async function main() {
     await wait(500);
     const knownAfterReload = await page.evaluate(() => document.querySelectorAll('.avr-word[data-word="challenge"]').length);
     if (knownAfterReload !== 0) throw new Error('“会”状态未立即覆盖并跨刷新保留');
+    const afterChallengeManual = (await worker1.evaluate(async () => chrome.storage.local.get('avr_vocab_snapshot'))).avr_vocab_snapshot;
+    if (!isDeepStrictEqual(afterChallengeManual.assessmentEvidence, evidenceBeforeManual)) {
+      throw new Error('R-EVD-1 失败：手动标记 challenge 改写了 AssessmentEvidence');
+    }
 
-    // 词形/状态键隔离：form-only 词 "abilities"（→ canonical "ability"）必须以 surface form 为状态键，
-    // 而非 canonical 主词条。data-word 须为 "abilities"，标记 known 后快照键须为 "abilities"，刷新后保留。
-    const abilities = await page.$('.avr-word[data-word="abilities"]');
-    if (!abilities) throw new Error('fixture 未包含 form-only 词 abilities，无法验证状态键隔离');
+    // §21 场景 3（局部）：form-only "abilities" 与 core "ability" 共享 wordKey。
+    // 此固定 1,000 词包没有 go/went；用产物中实际存在的单复数对验证同一行为。
+    const abilitySpans = await page.$$('.avr-word[data-word="ability"]');
+    let abilities;
+    for (const span of abilitySpans) {
+      if ((await span.evaluate((element) => element.textContent?.toLowerCase())) === 'abilities') {
+        abilities = span;
+        break;
+      }
+    }
+    const formsShareWordKey = await page.evaluate(() => {
+      const texts = [...document.querySelectorAll('.avr-word[data-word="ability"]')]
+        .map((element) => element.textContent?.toLowerCase());
+      return texts.includes('ability') && texts.includes('abilities');
+    });
+    if (!abilities || !formsShareWordKey) throw new Error('fixture 未获得 abilities/ability 的共享 wordKey 标注');
     await abilities.click();
     await page.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true });
     await page.click('.avr-action-menu button[data-avr-status="known"]');
-    await page.waitForFunction(() => document.querySelectorAll('.avr-word[data-word="abilities"]').length === 0, { timeout: 5_000 });
+    await page.waitForFunction(() => document.querySelectorAll('.avr-word[data-word="ability"]').length === 0, { timeout: 5_000 });
     const snapIso = (await worker1.evaluate(async () => chrome.storage.local.get('avr_vocab_snapshot'))).avr_vocab_snapshot;
-    if (snapIso.words?.abilities?.status !== 'known') {
-      throw new Error(`form-only 词未以 surface form 为状态键存储：${JSON.stringify(Object.keys(snapIso.words || {}))}`);
+    if (snapIso.words?.ability?.status !== 'known' || snapIso.words?.abilities) {
+      throw new Error(`词形未以 core wordKey 合并存储：${JSON.stringify(Object.keys(snapIso.words || {}))}`);
+    }
+    if (!isDeepStrictEqual(snapIso.assessmentEvidence, evidenceBeforeManual)) {
+      throw new Error('R-EVD-1 失败：手动标记 abilities 改写了 AssessmentEvidence');
     }
     await page.reload({ waitUntil: 'networkidle0' });
     await wait(400);
-    const abilAfter = await page.evaluate(() => document.querySelectorAll('.avr-word[data-word="abilities"]').length);
-    if (abilAfter !== 0) throw new Error('form-only 词 known 状态未跨刷新保留（状态键隔离失败）');
+    const abilAfter = await page.evaluate(() => document.querySelectorAll('.avr-word[data-word="ability"]').length);
+    if (abilAfter !== 0) throw new Error('共享 wordKey 的 known 状态未跨刷新保留');
 
-    console.log(`E2E #1 PASS: annotations=${initial.annotations}, unknown=${initial.unknown}, challenge_first=${persisted.first}, challenge_repeats=${persisted.repeats}, form_isolation=abilities(stateKey=surface), local_snapshot=minimal`);
+    console.log(`E2E #1 PASS: annotations=${initial.annotations}, unknown=${initial.unknown}, challenge_first=${persisted.first}, challenge_repeats=${persisted.repeats}, form_merge=abilities→ability(wordKey), local_snapshot=minimal`);
   } finally {
     if (browser1) await browser1.close();
     await killChrome(chrome1);
+  }
+
+  // ============================================================
+  // 阶段一 B：schema 2 → 3 的真实 worker/storage 启动路径（R-MIG-7）
+  // ============================================================
+  let browserMigration;
+  let chromeMigration;
+  try {
+    const migrationProfile = path.join(tempDir, 'profile-migration');
+    ({ chrome: chromeMigration, browser: browserMigration } = await launchChrome(migrationProfile, chromeForTesting));
+    let workerMigration = await waitForWorker(browserMigration);
+    if (!workerMigration) throw new Error('迁移 E2E 未找到初始 Service Worker');
+    const live = await workerMigration.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    const schema2Fixture = {
+      schemaVersion: 2,
+      dictVersion: live.dictVersion,
+      stateVersion: 0,
+      installSeed: 'migration-seed',
+      words: {
+        ability: { status: 'learning', source: 'manual', updatedAt: 4, version: 0 },
+        abilities: { status: 'known', source: 'initial', updatedAt: 5, version: 0 },
+      },
+      auditMarkers: { legacy: { word: 'legacy' } },
+      auditLog: [{ word: 'legacy' }],
+      auditPlan: { version: 'legacy-plan' },
+      initialTest: {
+        plan: { version: 'old', seed: 'migration-seed', dictVersion: live.dictVersion, questions: [
+          { word: 'ability', options: [{}, {}], correctOptionIndex: 0 },
+        ] },
+        answers: [{ kind: 'option', optionIndex: 0 }],
+        completed: false,
+      },
+      lastUpdated: 5,
+    };
+    await workerMigration.evaluate((snapshot) => chrome.storage.local.set({ avr_vocab_snapshot: snapshot }), schema2Fixture);
+
+    ({ chrome: chromeMigration, browser: browserMigration } = await restartChromeOnSameProfile(migrationProfile, chromeForTesting, browserMigration, chromeMigration));
+    workerMigration = await waitForWorker(browserMigration);
+    if (!workerMigration) throw new Error('迁移 E2E 第一次重启后未找到 Service Worker');
+    const migratedOnce = await workerMigration.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (
+      migratedOnce.schemaVersion !== 3 ||
+      migratedOnce.words?.ability?.status !== 'known' ||
+      migratedOnce.words?.abilities ||
+      !isDeepStrictEqual(migratedOnce.assessmentEvidence, { ability: { outcome: 'known', source: 'initial', assessedAt: 0 } }) ||
+      Object.keys(migratedOnce.auditMarkers || {}).length !== 0 ||
+      migratedOnce.auditPlan !== null ||
+      migratedOnce.dailyTest !== null ||
+      migratedOnce.completedRoundIndex !== 0
+    ) throw new Error(`R-MIG-7 第一次真实迁移结果错误：${JSON.stringify(migratedOnce)}`);
+
+    ({ chrome: chromeMigration, browser: browserMigration } = await restartChromeOnSameProfile(migrationProfile, chromeForTesting, browserMigration, chromeMigration));
+    workerMigration = await waitForWorker(browserMigration);
+    if (!workerMigration) throw new Error('迁移 E2E 第二次重启后未找到 Service Worker');
+    const migratedTwice = await workerMigration.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(migratedTwice, migratedOnce)) throw new Error('R-MIG-7 失败：schema 3 重启后不再恒等');
+    console.log('E2E #1B PASS: schema2_to_v3=true, forms_merge=abilities→ability, evidence_rebuilt=true, persisted_idempotent=true');
+  } finally {
+    if (browserMigration) await browserMigration.close();
+    await killChrome(chromeMigration);
   }
 
   // ============================================================

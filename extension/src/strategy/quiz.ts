@@ -82,16 +82,14 @@ function shuffle<T>(input: readonly T[], rng: () => number): T[] {
 // ============================================================
 // 候选池：仅淘汰无法生成四个互异中文选项的词
 // ============================================================
-// 词形映射不传播状态（core 主词条优先）：lookup 始终以 surface form 作为状态键，
-// 因此「could」与「can」是各自独立的主词条，都可进入首测候选，互不遮蔽。
-// 故此处不再排除任何 core 主词条（旧 isShadowedCoreKey 方案通过排除 13 个合法
-// core 主词条来掩盖状态模型错误，已删除）。
+// 首测候选只来自 core wordKey；页面非 core 屈折形式在运行时共享其映射目标的 wordKey。
+// could/can 都是 core 主词条，故 core 优先后各自独立且都可进入候选池。
 
 /**
  * 计算候选池：仅保留「能生成四个互异中文选项」的主词条。
  * 一个词合格当且仅当：词典中存在至少 3 个与它自身翻译不同的其他翻译
  * （全局互异翻译数 ≥ 4）。任何 core 主词条（含自身也是词形映射键的，如 could）
- * 都不应被排除——它们的状态键是自身 surface form，互不干扰。
+ * 都不应被排除——它们是独立的 core wordKey。
  */
 export function eligibleCandidates(core: DictCore, _forms: FormsMap): string[] {
   const distinctTranslations = new Set<string>();
@@ -236,7 +234,7 @@ export function isAnswerCorrect(question: QuizQuestion, answer: QuizAnswer): boo
  * 规则（RULES.md「审计冻结」/ 批准 Spec §20.6 R-AUD-3 / V0.1 Ticket 01）：
  * - 答对         → known（仅提交已知状态，不再产出任何审计标记）
  * - 答错 / 不确定 → learning（进入活跃生词表），并清除该词上一轮的待审计标记
- * - 页面手动状态优先：若当前状态来自手动标记，则保留手动状态，不产生任何变更
+ * - 测试作答是显式动作：会覆盖先前的手动 WordState；测试证据由调用方同时结算
  *
  * 冻结审计模块（strategy/audit.ts）与审计标记逻辑保留但已从 V0.1 用户路径移除，
  * 首测结算路径不再创建、携带或返回 AuditMarker。
@@ -250,14 +248,9 @@ export function applyAnswer(
   plan: InitialTestPlan,
   questionIndex: number,
   answer: QuizAnswer,
-  current: WordState | undefined,
+  _current: WordState | undefined,
 ): ApplyAnswerResult {
   const question = plan.questions[questionIndex]!;
-
-  // 页面手动状态优先：手动标记高于首测结果
-  if (current && current.source === 'manual') {
-    return { kind: 'priority-preserved', change: null, audit: null, clearMarkerWord: question.word };
-  }
 
   const correct = isAnswerCorrect(question, answer);
   const status = statusFromCorrectness(correct); // 'known' | 'learning'

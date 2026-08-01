@@ -6,7 +6,17 @@
 // 快照不得包含 URL、域名、页面标题、正文、句子或浏览历史。
 // ============================================================
 
-import type { VocabSnapshot, WordState, WordStateSource, AuditMarker, InitialTestState, AuditEvent, AuditPlan } from '../shared/types';
+import type {
+  VocabSnapshot,
+  WordState,
+  WordStateSource,
+  AssessmentSettlement,
+  AuditMarker,
+  InitialTestState,
+  AuditEvent,
+  AuditPlan,
+  FormsMap,
+} from '../shared/types';
 import { SCHEMA_VERSION } from '../shared/types';
 
 /**
@@ -19,76 +29,55 @@ export function createEmptySnapshot(installSeed: string, dictVersion: string): V
     stateVersion: 0,
     installSeed,
     words: {},
+    assessmentEvidence: {},
     auditMarkers: {},
     auditLog: [],
     auditPlan: null,
     initialTest: null,
+    dailyTest: null,
+    completedRoundIndex: 0,
     lastUpdated: Date.now(),
   };
 }
 
 /**
- * 快照迁移（v1 → v2，纯函数，可单测）。
+ * 快照迁移（schema 2 → 3，纯函数，可单测）。
  *
- * 旧快照可能缺 `words[*].version`、审计标记缺 `stateVersion`、审计冻结计划缺
- * `stateVersion` —— 这些字段是 V0.1 状态隔离维度的新增字段，不能继续伪装成 v1。
- *
- * 确定性规则（v1 → v2）：
- * - `schemaVersion` 置为 `SCHEMA_VERSION`（当前 2）。
- * - `stateVersion`：缺省补 0。
- * - `words[*].version`：缺省补 0（首测状态隔离维度；v1 无此字段，保守置 0）。
- * - `auditMarkers`：缺 `stateVersion` 的旧标记补 0（v2 起始 `stateVersion` 也为 0，
- *   故首轮内仍有效；一旦首测 (re)start 递增 `stateVersion`，`clearStaleAuditMarkers`
- *   会自动失效这些陈旧标记）。
- * - `auditPlan`：若缺 `stateVersion`（旧 v1 冻结计划），**安全失效**置 `null`，
- *   不得继续据此作答（服务端权威校验也会拒绝缺字段的计划）。
- * - 缺失容器（`words`/`auditMarkers`/`auditLog`/`auditPlan`/`initialTest`）按空/缺省补齐。
- *
- * 幂等：对已是 v2 的快照再次迁移结果一致（字段已齐全，规则变为恒等）。
- * 回滚边界：迁移只增字段、绝不删除用户有效数据（installSeed/词状态/initialTest 原样保留）。
- * 若升级后需回退到 v1 读取，唯一安全路径是凭发布前备份快照或清除 `chrome.storage` 重装；
- * 本函数**不提供原地降级**（降级会丢失 v2 新增字段，属需明确人工/脚本决策的破坏性操作，
- * 且本会话未实际执行任何回滚，故不得声称回滚已验证）。
+ * 固定四步：按 FormsMap 规范化旧 WordState key 并仲裁冲突；按旧首测同下标题目/答案
+ * 重建 AssessmentEvidence；清空 auditMarkers/auditPlan；补齐 schema 3 的正式每日默认字段。
+ * 无法映射的旧 key 保守保留，auditLog 原样保留且不转换。对已是 v3 的快照恒等返回。
+ * 本函数不提供原地 3→2 降级；真实用户 profile 的 schema 2 备份属于 T5/T6 发布门，
+ * 本 Ticket 仅以 fixture 验证迁移。
  */
-export function migrateSnapshot(raw: unknown): VocabSnapshot {
-  const r = (raw ?? {}) as Partial<VocabSnapshot>;
+export function migrateSnapshot(raw: unknown, forms?: FormsMap): VocabSnapshot {
+  // schema 3 已是完整持久化格式；调用方不得重写、重建或变更它。
+  if (raw && typeof raw === 'object' && (raw as { schemaVersion?: unknown }).schemaVersion === SCHEMA_VERSION) {
+    return raw as VocabSnapshot;
+  }
+
+  const r = (isRecord(raw) ? raw : {}) as Partial<VocabSnapshot>;
+  if ((r.schemaVersion === 1 || r.schemaVersion === 2) && (!forms || !isValidFormsMap(forms))) {
+    throw new Error('Valid FormsMap is required for schema 1/2 migration');
+  }
+  const formsMap = forms ?? {};
 
   const stateVersion = typeof r.stateVersion === 'number' ? r.stateVersion : 0;
 
   const words: Record<string, WordState> = {};
-  for (const [w, ws] of Object.entries(r.words ?? {})) {
-    if (!ws) continue;
-    words[w] = {
-      status: ws.status ?? 'unknown',
-      source: ws.source ?? 'initial',
-      updatedAt: typeof ws.updatedAt === 'number' ? ws.updatedAt : 0,
-      version: typeof ws.version === 'number' ? ws.version : 0,
-    };
+  const rawWords = isRecord(r.words) ? r.words : {};
+  for (const [w, ws] of Object.entries(rawWords)) {
+    if (w.trim().length === 0) continue;
+    const candidate = parseWordState(ws);
+    if (!candidate) continue;
+    const wordKey = formsMap[w.toLowerCase()] ?? w;
+    if (typeof wordKey !== 'string' || wordKey.trim().length === 0) continue;
+    const current = words[wordKey];
+    if (!current || shouldReplaceWordState(current, candidate)) {
+      words[wordKey] = candidate;
+    }
   }
 
-  const auditMarkers: Record<string, AuditMarker> = {};
-  for (const [w, m] of Object.entries(r.auditMarkers ?? {})) {
-    if (!m) continue;
-    auditMarkers[w] = {
-      word: m.word ?? w,
-      source: m.source ?? 'initial-correct',
-      planVersion: m.planVersion ?? '',
-      stateVersion: typeof m.stateVersion === 'number' ? m.stateVersion : 0,
-      createdAt: typeof m.createdAt === 'number' ? m.createdAt : 0,
-      pending: m.pending ?? false,
-    };
-  }
-
-  // 旧格式（schemaVersion !== 当前）的冻结审计计划**无条件安全失效**置 null：
-  // 旧 v1 计划中可能已写出带 stateVersion 的哈希计划，但旧哈希未覆盖选项翻译，
-  // 属可被篡改的不完整基；V0.1 当前哈希方案下不得原样接受旧计划。仅当快照已是
-  // 当前 schemaVersion 且计划自带合法 stateVersion 时才保留。
-  const isOldFormat = r.schemaVersion !== SCHEMA_VERSION;
-  const storedPlan = r.auditPlan as Partial<AuditPlan> | null;
-  const auditPlan: AuditPlan | null =
-    isOldFormat || !(storedPlan && typeof storedPlan.stateVersion === 'number')
-      ? null
-      : (storedPlan as AuditPlan);
+  const assessmentEvidence = rebuildInitialEvidence(r.initialTest, formsMap);
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -96,12 +85,81 @@ export function migrateSnapshot(raw: unknown): VocabSnapshot {
     stateVersion,
     installSeed: r.installSeed ?? '',
     words,
-    auditMarkers,
-    auditLog: r.auditLog ?? [],
-    auditPlan,
+    assessmentEvidence,
+    // schema 3 的审计冻结：仅清空 marker 与活跃计划，旧 auditLog 原样保留但不转换。
+    auditMarkers: {},
+    auditLog: Array.isArray(r.auditLog) ? r.auditLog : [],
+    auditPlan: null,
     initialTest: r.initialTest ?? null,
+    dailyTest: null,
+    completedRoundIndex: 0,
     lastUpdated: typeof r.lastUpdated === 'number' ? r.lastUpdated : 0,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isValidFormsMap(forms: FormsMap): boolean {
+  return Object.entries(forms).every(([surface, wordKey]) =>
+    typeof surface === 'string' && surface.trim().length > 0 && typeof wordKey === 'string' && wordKey.trim().length > 0,
+  );
+}
+
+/** 损坏旧状态一律丢弃，不能用默认值伪造状态后再永久持久化为 v3。 */
+function parseWordState(value: unknown): WordState | null {
+  if (!isRecord(value)) return null;
+  const { status, source, updatedAt, version } = value;
+  const validStatus = status === 'known' || status === 'learning' || status === 'unknown';
+  const validSource = source === 'manual' || source === 'initial' || source === 'daily' || source === 'audit' || source === 'active-verify';
+  if (!validStatus || !validSource || !Number.isFinite(updatedAt) || !Number.isFinite(version)) return null;
+  return { status, source, updatedAt: updatedAt as number, version: version as number };
+}
+
+/** 两个旧 surface 状态并入同一 wordKey 时的固定仲裁。 */
+function shouldReplaceWordState(current: WordState, candidate: WordState): boolean {
+  if (candidate.updatedAt !== current.updatedAt) return candidate.updatedAt > current.updatedAt;
+  if ((candidate.source === 'manual') !== (current.source === 'manual')) return candidate.source === 'manual';
+  if ((candidate.status === 'learning') !== (current.status === 'learning')) return candidate.status === 'learning';
+  return false;
+}
+
+/** 从旧首测的同下标题目/答案重建每词最新一条初测证据。 */
+function rebuildInitialEvidence(initialTest: unknown, forms: FormsMap): VocabSnapshot['assessmentEvidence'] {
+  if (!isRecord(initialTest)) return {};
+  const test = initialTest as { plan?: unknown; answers?: unknown };
+  if (!isRecord(test.plan) || !Array.isArray(test.answers)) return {};
+  const questions = (test.plan as { questions?: unknown }).questions;
+  if (!Array.isArray(questions)) return {};
+
+  const evidence: VocabSnapshot['assessmentEvidence'] = {};
+  for (let index = 0; index < questions.length; index++) {
+    const question = questions[index];
+    const answer = test.answers[index];
+    if (!isRecord(question) || !isRecord(answer)) continue;
+    const q = question as { word?: unknown; options?: unknown; correctOptionIndex?: unknown };
+    const a = answer as { kind?: unknown; optionIndex?: unknown };
+    if (typeof q.word !== 'string' || q.word.trim().length === 0 || !Array.isArray(q.options) || !Number.isInteger(q.correctOptionIndex)) continue;
+    const correctOptionIndex = q.correctOptionIndex as number;
+    if (correctOptionIndex < 0 || correctOptionIndex >= q.options.length) continue;
+
+    let outcome: 'known' | 'learning';
+    if (a.kind === 'unsure') {
+      outcome = 'learning';
+    } else if (a.kind === 'option' && Number.isInteger(a.optionIndex)) {
+      const optionIndex = a.optionIndex as number;
+      if (optionIndex < 0 || optionIndex >= q.options.length) continue;
+      outcome = optionIndex === correctOptionIndex ? 'known' : 'learning';
+    } else {
+      continue;
+    }
+
+    const wordKey = forms[q.word.toLowerCase()] ?? q.word;
+    if (typeof wordKey !== 'string' || wordKey.trim().length === 0) continue;
+    evidence[wordKey] = { outcome, source: 'initial', assessedAt: 0 };
+  }
+  return evidence;
 }
 
 /**
@@ -128,6 +186,24 @@ export function mergeStateChange(
     words: newWords,
     lastUpdated: Date.now(),
   };
+}
+
+/** 初测与每日共用：一次写入当前状态与该词的最新测试证据。 */
+export function mergeAssessment(snapshot: VocabSnapshot, settlement: AssessmentSettlement): VocabSnapshot {
+  const words = {
+    ...snapshot.words,
+    [settlement.change.word]: {
+      status: settlement.change.newStatus,
+      source: settlement.change.source,
+      updatedAt: settlement.evidence.assessedAt,
+      version: snapshot.stateVersion,
+    },
+  };
+  const assessmentEvidence = {
+    ...snapshot.assessmentEvidence,
+    [settlement.change.word]: settlement.evidence,
+  };
+  return { ...snapshot, words, assessmentEvidence, lastUpdated: settlement.evidence.assessedAt };
 }
 
 /**

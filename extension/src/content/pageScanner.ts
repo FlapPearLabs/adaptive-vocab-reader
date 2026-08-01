@@ -217,14 +217,14 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     for (const occ of occurrences) {
       const lookup = deps.dictionary.lookup(occ.word);
       if (!lookup) continue;
-      const stateKey = lookup.stateKey;
-      const occurrenceCount = (pageOccurrenceCounts.get(stateKey) ?? 0) + 1;
-      pageOccurrenceCounts.set(stateKey, occurrenceCount);
+      const wordKey = lookup.wordKey;
+      const occurrenceCount = (pageOccurrenceCounts.get(wordKey) ?? 0) + 1;
+      pageOccurrenceCounts.set(wordKey, occurrenceCount);
 
-      const state = vocabState[stateKey];
+      const state = vocabState[wordKey];
       const result = strategy.getDisplayDecision(
         {
-          word: stateKey,
+          word: wordKey,
           surfaceForm: occ.word,
           entry: lookup.entry,
           band: lookup.band,
@@ -314,7 +314,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     const state = vocabState[word];
     const result = strategy.getDisplayDecision(
       {
-        word: lookup.stateKey,
+        word: lookup.wordKey,
         surfaceForm: word,
         entry: lookup.entry,
         band: lookup.band,
@@ -323,7 +323,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       state,
     );
 
-    const res = updateWordDisplay(lookup.stateKey, result.decision, result.translation, result.showInlineTranslation, generatedNodes);
+    const res = updateWordDisplay(lookup.wordKey, result.decision, result.translation, result.showInlineTranslation, generatedNodes);
     if (res.added > 0) perfDomNodesAdded += res.added;
     if (res.removed > 0) perfDomNodesRemoved += res.removed;
   }

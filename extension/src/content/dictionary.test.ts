@@ -42,10 +42,10 @@ describe('Dictionary', () => {
   });
 
   describe('lookup', () => {
-    it('直接查主词条命中（stateKey === entryKey === 自身）', () => {
+    it('直接查主词条命中（wordKey === entryKey === 自身）', () => {
       const entry = dict.lookup('go');
       expect(entry).not.toBeNull();
-      expect(entry!.stateKey).toBe('go');
+      expect(entry!.wordKey).toBe('go');
       expect(entry!.entryKey).toBe('go');
       expect(entry!.entry.phonetic).toBe('ɡəʊ');
       expect(entry!.entry.pos).toBe('v.');
@@ -53,10 +53,10 @@ describe('Dictionary', () => {
       expect(entry!.band).toBe(0);
     });
 
-    it('core 主词条优先：could 不被 forms[could]=can 遮蔽（stateKey/entryKey 均为 could 自身）', () => {
+    it('core 主词条优先：could 不被 forms[could]=can 遮蔽（wordKey/entryKey 均为 could 自身）', () => {
       const entry = dict.lookup('could');
       expect(entry).not.toBeNull();
-      expect(entry!.stateKey).toBe('could');
+      expect(entry!.wordKey).toBe('could');
       expect(entry!.entryKey).toBe('could');
       expect(entry!.entry.translation).toBe('能（过去式）');
     });
@@ -64,30 +64,30 @@ describe('Dictionary', () => {
     it('can 作为独立 core 主词条命中（与 could 状态互不继承的键已分离）', () => {
       const entry = dict.lookup('can');
       expect(entry).not.toBeNull();
-      expect(entry!.stateKey).toBe('can');
+      expect(entry!.wordKey).toBe('can');
       expect(entry!.entryKey).toBe('can');
       expect(entry!.entry.translation).toBe('能');
     });
 
-    it('非 core 词形映射命中，但状态键仍是 surface form（went→go：stateKey=went, entryKey=go）', () => {
+    it('非 core 词形映射命中后共享 core wordKey（went→go）', () => {
       const entry = dict.lookup('went');
       expect(entry).not.toBeNull();
-      expect(entry!.stateKey).toBe('went'); // 独立状态键
-      expect(entry!.entryKey).toBe('go'); // 仅取 go 的释义
+      expect(entry!.wordKey).toBe('go');
+      expect(entry!.entryKey).toBe('go');
       expect(entry!.entry.translation).toBe('去；走');
     });
 
-    it('通过词形映射命中 going（stateKey=going, entryKey=go）', () => {
+    it('通过词形映射命中 going（wordKey=go, entryKey=go）', () => {
       const entry = dict.lookup('going');
       expect(entry).not.toBeNull();
-      expect(entry!.stateKey).toBe('going');
+      expect(entry!.wordKey).toBe('go');
       expect(entry!.entryKey).toBe('go');
     });
 
-    it('大小写不敏感（surface form 保留原大小写，stateKey 小写）', () => {
+    it('大小写不敏感（surface form 保留原大小写，wordKey 为 core 小写）', () => {
       const entry = dict.lookup('Went');
       expect(entry).not.toBeNull();
-      expect(entry!.stateKey).toBe('went');
+      expect(entry!.wordKey).toBe('go');
       expect(entry!.surfaceForm).toBe('Went');
       expect(entry!.entryKey).toBe('go');
     });

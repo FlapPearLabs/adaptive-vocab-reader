@@ -1,8 +1,8 @@
 import type { DictCore, FormsMap, FrequencyBands, DictEntry } from '../shared/types';
 
 export interface LookupResult {
-  /** 状态键（= 规范化 surface form，小写）：用于单词状态/审计标记/页面 data-word */
-  stateKey: string;
+  /** wordKey（core 主词条小写）：用于单词状态/页面 data-word */
+  wordKey: string;
   /** 取义主词条（词形映射目标或自身）：用于取音标/词性/释义/频段 */
   entryKey: string;
   /** 原始 surface form（保留大小写，用于 DOM 定位） */
@@ -15,12 +15,11 @@ export interface LookupResult {
 
 export interface Dictionary {
   /**
-   * 查询一个词形，返回状态键、取义主词条、原始词形、词典条目与频段。
-   * 规则（core 主词条优先，词形映射只帮助取义不传播状态）：
+   * 查询一个词形，返回 wordKey、取义主词条、原始词形、词典条目与频段。
+   * 规则（core 主词条优先，词形映射到同一个 wordKey）：
    * 1. 先查 core：若 surface form 本身是 core 主词条（如 could），直接命中所取义，
-   *    stateKey = surface form，entryKey = 自身，状态独立（不被词形映射遮蔽）。
-   * 2. 再查词形映射：若命中（如 went→go），stateKey = surface form（went 独立状态），
-   *    entryKey = 映射目标（go，仅取义），状态不继承 go。
+   *    wordKey = entryKey = 自身（不被词形映射遮蔽）。
+   * 2. 再查词形映射：若命中（如 went→go），wordKey = entryKey = 映射目标。
    * 返回 null 表示未命中。
    */
   lookup(surfaceForm: string): LookupResult | null;
@@ -44,11 +43,11 @@ export function createDictionary(
     lookup(surfaceForm: string): LookupResult | null {
       const form = surfaceForm.toLowerCase();
 
-      // 1. core 主词条优先：自身即合法主词条（如 could）直接命中，状态独立。
+      // 1. core 主词条优先：自身即合法主词条（如 could）直接命中。
       const coreEntry = core[form];
       if (coreEntry) {
         return {
-          stateKey: form,
+          wordKey: form,
           entryKey: form,
           surfaceForm,
           entry: coreEntry,
@@ -56,13 +55,13 @@ export function createDictionary(
         };
       }
 
-      // 2. 词形映射：取义目标 + 频段，但状态键仍是 surface form（如 went→go）。
+      // 2. 词形映射：取义目标同时就是 wordKey（如 went→go）。
       const mappedWord = forms[form];
       if (mappedWord) {
         const entry = core[mappedWord];
         if (entry) {
           return {
-            stateKey: form,
+            wordKey: mappedWord,
             entryKey: mappedWord,
             surfaceForm,
             entry,

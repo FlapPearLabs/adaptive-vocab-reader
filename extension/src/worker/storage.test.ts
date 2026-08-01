@@ -4,6 +4,7 @@ import { SCHEMA_VERSION } from '../shared/types';
 import {
   createEmptySnapshot,
   mergeStateChange,
+  mergeAssessment,
   getWords,
   generateInstallSeed,
   addAuditMarker,
@@ -58,6 +59,16 @@ describe('storage', () => {
       const before = snapshot.lastUpdated;
       const updated = mergeStateChange(snapshot, 'hello', 'known');
       expect(updated.lastUpdated).toBeGreaterThanOrEqual(before);
+    });
+  });
+
+  describe('mergeAssessment', () => {
+    it('initial 与 daily 对同一 wordKey 双写状态与最新一条证据，manual 不参与该动作', () => {
+      const start = createEmptySnapshot('seed', 'dict-v1');
+      const initial = mergeAssessment(start, { change: { word: 'go', newStatus: 'known', source: 'initial' }, evidence: { outcome: 'known', source: 'initial', assessedAt: 10 } });
+      const daily = mergeAssessment(initial, { change: { word: 'go', newStatus: 'learning', source: 'daily' }, evidence: { outcome: 'learning', source: 'daily', assessedAt: 20 } });
+      expect(daily.words.go).toMatchObject({ status: 'learning', source: 'daily', updatedAt: 20 });
+      expect(daily.assessmentEvidence).toEqual({ go: { outcome: 'learning', source: 'daily', assessedAt: 20 } });
     });
   });
 
@@ -122,9 +133,12 @@ describe('storage', () => {
       const parsed = JSON.parse(json);
       const topKeys = Object.keys(parsed).sort();
       expect(topKeys).toEqual([
+        'assessmentEvidence',
         'auditLog',
         'auditMarkers',
         'auditPlan',
+        'completedRoundIndex',
+        'dailyTest',
         'dictVersion',
         'initialTest',
         'installSeed',
@@ -241,40 +255,44 @@ describe('storage', () => {
   });
 
   // ============================================================
-  // 快照迁移（Issue #2：v1 → v2，纯函数，可单测）
+  // 快照迁移（schema 2 → 3，纯函数，可单测）
   // - 首次安装 / v1 升级 / 幂等重载 / 损坏字段 / 重测后保留 / 旧计划失效
   // ============================================================
-  describe('migrateSnapshot (v1 → v2)', () => {
-    it('首次安装（undefined）→ 产生合法 v2 空快照', () => {
+  describe('migrateSnapshot (schema 2 → 3)', () => {
+    it('首次安装（undefined）→ 产生合法 v3 空快照和每日默认字段', () => {
       const snap = migrateSnapshot(undefined);
       expect(snap.schemaVersion).toBe(SCHEMA_VERSION);
-      expect(snap.schemaVersion).toBe(2);
+      expect(snap.schemaVersion).toBe(3);
       expect(snap.words).toEqual({});
       expect(snap.auditMarkers).toEqual({});
       expect(snap.auditPlan).toBeNull();
       expect(snap.stateVersion).toBe(0);
+      expect(snap.assessmentEvidence).toEqual({});
+      expect(snap.dailyTest).toBeNull();
+      expect(snap.completedRoundIndex).toBe(0);
     });
 
-    it('v1 旧快照缺 words[*].version 与 marker.stateVersion → 补 0（确定性规则），用户数据保留', () => {
+    it('旧 schema 迁移要求调用方显式传入 FormsMap，合法状态与用户数据保留', () => {
       const v1Raw = {
         schemaVersion: 1,
         dictVersion: 'd',
         stateVersion: 0,
         installSeed: 'seed-1',
-        words: { apple: { status: 'known', source: 'manual', updatedAt: 1 } }, // 无 version 字段
+        words: { apple: { status: 'known', source: 'manual', updatedAt: 1, version: 0 } },
         auditMarkers: { apple: { word: 'apple', source: 'initial-correct', planVersion: 'p', createdAt: 1, pending: true } }, // 无 stateVersion
         auditLog: [],
         auditPlan: { version: 'v', planVersion: 'p', stateVersion: 1, seed: 'seed-1', candidates: [], questions: [], results: [], createdAt: 1 },
         initialTest: null,
         lastUpdated: 1,
       };
-      const snap = migrateSnapshot(v1Raw);
-      expect(snap.schemaVersion).toBe(2);
+      expect(() => migrateSnapshot(v1Raw)).toThrow('FormsMap is required');
+      const snap = migrateSnapshot(v1Raw, {});
+      expect(snap.schemaVersion).toBe(3);
       expect(snap.words['apple']!.version).toBe(0);
-      expect(snap.auditMarkers['apple']!.stateVersion).toBe(0);
+      expect(snap.auditMarkers).toEqual({});
       // 用户有效数据原样保留
       expect(snap.words['apple']!.status).toBe('known');
-      expect(snap.auditMarkers['apple']!.planVersion).toBe('p');
+      expect(snap.auditLog).toEqual([]);
       // schemaVersion===1 属旧格式：即便冻结计划带 stateVersion，也**无条件失效**置 null
       // （旧 v1 哈希未覆盖选项翻译，属不完整基，V0.1 哈希方案下不得原样接受）
       expect(snap.auditPlan).toBeNull();
@@ -302,8 +320,8 @@ describe('storage', () => {
         initialTest: null,
         lastUpdated: 1,
       };
-      const snap = migrateSnapshot(v1Raw);
-      expect(snap.schemaVersion).toBe(2);
+      const snap = migrateSnapshot(v1Raw, {});
+      expect(snap.schemaVersion).toBe(3);
       expect(snap.auditPlan).toBeNull();
     });
 
@@ -320,13 +338,13 @@ describe('storage', () => {
         initialTest: null,
         lastUpdated: 1,
       };
-      const snap = migrateSnapshot(v1Raw);
+      const snap = migrateSnapshot(v1Raw, {});
       expect(snap.auditPlan).toBeNull();
     });
 
-    it('幂等：已是 v2 的快照再次迁移结果一致', () => {
-      const v2Raw = {
-        schemaVersion: 2,
+    it('幂等：已是 v3 的快照恒等返回', () => {
+      const v3Raw = {
+        schemaVersion: 3,
         dictVersion: 'd',
         stateVersion: 3,
         installSeed: 'seed-1',
@@ -335,12 +353,16 @@ describe('storage', () => {
         auditLog: [],
         auditPlan: { version: 'v', planVersion: 'p', stateVersion: 3, seed: 'seed-1', candidates: [], questions: [], results: [], createdAt: 1 },
         initialTest: null,
+        assessmentEvidence: {},
+        dailyTest: null,
+        completedRoundIndex: 0,
         lastUpdated: 1,
       };
-      const a = migrateSnapshot(v2Raw);
+      const a = migrateSnapshot(v3Raw);
       // 模拟序列化后再次读入（深拷贝）
-      const b = migrateSnapshot(JSON.parse(JSON.stringify(v2Raw)));
-      expect(b.schemaVersion).toBe(2);
+      const b = migrateSnapshot(JSON.parse(JSON.stringify(v3Raw)));
+      expect(a).toBe(v3Raw);
+      expect(b.schemaVersion).toBe(3);
       expect(b.stateVersion).toBe(3);
       expect(b.words['apple']).toEqual(a.words['apple']);
       expect(b.auditMarkers['apple']).toEqual(a.auditMarkers['apple']);
@@ -349,10 +371,10 @@ describe('storage', () => {
 
     it('损坏/缺失字段（null / 字符串 / 数字）→ 安全回退默认，不抛异常', () => {
       const snap = migrateSnapshot(null);
-      expect(snap.schemaVersion).toBe(2);
+      expect(snap.schemaVersion).toBe(3);
       expect(snap.words).toEqual({});
       const snap2 = migrateSnapshot('garbage');
-      expect(snap2.schemaVersion).toBe(2);
+      expect(snap2.schemaVersion).toBe(3);
       expect(snap2.auditMarkers).toEqual({});
       const snap3 = migrateSnapshot(42);
       expect(snap3.auditPlan).toBeNull();
@@ -364,17 +386,133 @@ describe('storage', () => {
         dictVersion: 'd',
         stateVersion: 0,
         installSeed: 'keep-seed',
-        words: { banana: { status: 'learning', source: 'initial', updatedAt: 5 } },
+        words: { banana: { status: 'learning', source: 'initial', updatedAt: 5, version: 0 } },
         auditMarkers: {},
         auditLog: [],
         auditPlan: null,
         initialTest: { plan: { version: 'pv', seed: 'keep-seed', dictVersion: 'd', questions: [] }, answers: [], completed: true },
         lastUpdated: 5,
       };
-      const snap = migrateSnapshot(raw);
+      const snap = migrateSnapshot(raw, {});
       expect(snap.installSeed).toBe('keep-seed');
       expect(snap.words['banana']!.status).toBe('learning');
       expect(snap.initialTest?.completed).toBe(true);
+    });
+
+    it('按 FormsMap 把词形并入 wordKey，core collision 与无法映射 key 保持独立', () => {
+      const snap = migrateSnapshot({
+        schemaVersion: 2,
+        dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, initialTest: null, lastUpdated: 0,
+        words: {
+          went: { status: 'known', source: 'initial', updatedAt: 1, version: 0 },
+          go: { status: 'learning', source: 'manual', updatedAt: 2, version: 0 },
+          could: { status: 'known', source: 'manual', updatedAt: 1, version: 0 },
+          orphan: { status: 'learning', source: 'initial', updatedAt: 1, version: 0 },
+        },
+      }, { went: 'go', going: 'go' });
+      expect(snap.words.go).toMatchObject({ status: 'learning', source: 'manual' });
+      expect(snap.words.went).toBeUndefined();
+      expect(snap.words.could).toBeDefined();
+      expect(snap.words.orphan).toBeDefined();
+    });
+
+    it('schema 2 没有显式 FormsMap 时拒绝迁移，避免把 surface key 锁死为 v3', () => {
+      const raw = {
+        schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, initialTest: null, lastUpdated: 0,
+        words: { went: { status: 'known', source: 'initial', updatedAt: 1, version: 0 } },
+      };
+      expect(() => migrateSnapshot(raw)).toThrow('FormsMap is required');
+    });
+
+    it('畸形 FormsMap 的空白 key 或 target 会拒绝迁移，绝不产出空 wordKey', () => {
+      const raw = {
+        schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, lastUpdated: 0,
+        words: { went: { status: 'known', source: 'initial', updatedAt: 1, version: 0 } },
+        initialTest: {
+          plan: { questions: [{ word: 'went', options: [{}, {}], correctOptionIndex: 0 }] },
+          answers: [{ kind: 'option', optionIndex: 0 }], completed: false,
+        },
+      };
+      expect(() => migrateSnapshot(raw, { went: '' })).toThrow('Valid FormsMap');
+      expect(() => migrateSnapshot(raw, { ' ': 'go' })).toThrow('Valid FormsMap');
+    });
+
+    it('合并冲突按 updatedAt、manual、learning 三层仲裁', () => {
+      const common = { schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, initialTest: null, lastUpdated: 0 };
+      expect(migrateSnapshot({ ...common, words: {
+        went: { status: 'learning', source: 'manual', updatedAt: 2, version: 0 },
+        going: { status: 'known', source: 'initial', updatedAt: 3, version: 0 },
+      } }, { went: 'go', going: 'go' }).words.go).toMatchObject({ status: 'known', source: 'initial', updatedAt: 3 });
+      expect(migrateSnapshot({ ...common, words: {
+        went: { status: 'known', source: 'manual', updatedAt: 2, version: 0 },
+        going: { status: 'learning', source: 'initial', updatedAt: 2, version: 0 },
+      } }, { went: 'go', going: 'go' }).words.go).toMatchObject({ status: 'known', source: 'manual' });
+      expect(migrateSnapshot({ ...common, words: {
+        went: { status: 'known', source: 'initial', updatedAt: 2, version: 0 },
+        going: { status: 'learning', source: 'initial', updatedAt: 2, version: 0 },
+      } }, { went: 'go', going: 'go' }).words.go).toMatchObject({ status: 'learning', source: 'initial' });
+    });
+
+    it('按首测题目与答案下标重建证据，不覆盖 manual 状态，跳过损坏记录并清空审计数据', () => {
+      const snap = migrateSnapshot({
+        schemaVersion: 2, dictVersion: 'd', stateVersion: 1, installSeed: 's', lastUpdated: 999,
+        words: { go: { status: 'learning', source: 'manual', updatedAt: 10, version: 1 } },
+        auditMarkers: { old: { word: 'old' } }, auditLog: [{ word: 'old' }], auditPlan: { version: 'old' },
+        initialTest: {
+          plan: { questions: [
+            { word: 'go', options: [{}, {}], correctOptionIndex: 0 },
+            { word: 'went', options: [{}, {}], correctOptionIndex: 0 },
+            { word: 'broken', options: [{}], correctOptionIndex: 2 },
+          ] },
+          answers: [{ kind: 'option', optionIndex: 0 }, { kind: 'unsure' }, { kind: 'option', optionIndex: 0 }], completed: false,
+        },
+      }, { went: 'go' });
+      expect(snap.words.go).toMatchObject({ status: 'learning', source: 'manual' });
+      expect(snap.assessmentEvidence).toEqual({ go: { outcome: 'learning', source: 'initial', assessedAt: 0 } });
+      expect(snap.auditMarkers).toEqual({});
+      expect(snap.auditPlan).toBeNull();
+      expect(snap.auditLog).toEqual([{ word: 'old' }]);
+    });
+
+    it('已完成首测重建全部有效答案的证据，统一使用 assessedAt=0', () => {
+      const snap = migrateSnapshot({
+        schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', words: {}, auditMarkers: {}, auditLog: [], auditPlan: null, lastUpdated: 123,
+        initialTest: {
+          completed: true,
+          plan: { questions: [
+            { word: 'alpha', options: [{}, {}], correctOptionIndex: 1 },
+            { word: 'beta', options: [{}, {}], correctOptionIndex: 0 },
+          ] },
+          answers: [{ kind: 'option', optionIndex: 1 }, { kind: 'option', optionIndex: 1 }],
+        },
+      }, {});
+      expect(snap.assessmentEvidence).toEqual({
+        alpha: { outcome: 'known', source: 'initial', assessedAt: 0 },
+        beta: { outcome: 'learning', source: 'initial', assessedAt: 0 },
+      });
+    });
+
+    it('损坏状态或空题目 key 一律跳过，合法记录迁移后 v3 恒等', () => {
+      const snap = migrateSnapshot({
+        schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, lastUpdated: 0,
+        words: {
+          went: 'corrupt',
+          invalidStatus: { status: 'hidden', source: 'manual', updatedAt: 1, version: 0 },
+          invalidSource: { status: 'known', source: 'other', updatedAt: 1, version: 0 },
+          invalidTime: { status: 'known', source: 'initial', updatedAt: Infinity, version: 0 },
+          valid: { status: 'learning', source: 'manual', updatedAt: 2, version: 0 },
+        },
+        initialTest: {
+          plan: { questions: [
+            { word: '', options: [{}, {}], correctOptionIndex: 0 },
+            { word: 'valid', options: [{}, {}], correctOptionIndex: 0 },
+          ] },
+          answers: [{ kind: 'option', optionIndex: 0 }, { kind: 'option', optionIndex: 0 }], completed: false,
+        },
+      }, { went: 'go' });
+      expect(snap.words).toEqual({ valid: { status: 'learning', source: 'manual', updatedAt: 2, version: 0 } });
+      expect(snap.assessmentEvidence).toEqual({ valid: { outcome: 'known', source: 'initial', assessedAt: 0 } });
+      expect(migrateSnapshot(snap)).toBe(snap);
     });
   });
 });

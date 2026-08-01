@@ -39,7 +39,7 @@ function makeBands(words: string[]): FrequencyBands {
 describe('VocabStrategy seam（深 Module Interface 行为）', () => {
   const strategy: VocabStrategy = createVocabStrategy();
 
-  it('暴露且仅暴露 9 个领域动作方法（展示×2 + 标记×2 + 冻结/结算×4 含生命周期 transition）', () => {
+  it('暴露且仅暴露 10 个领域动作方法（含初测/每日共用测试结算）', () => {
     // 行为断言：strategy 对象恰好具备这些方法（非内部函数浅转发清单）
     const methods = Object.keys(strategy).sort();
     expect(methods).toEqual(
@@ -50,6 +50,7 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
         'markKnown',
         'markLearning',
         'resetInitialTest',
+        'settleAssessment',
         'settleAuditAnswer',
         'settleInitialTestAnswer',
         'startInitialTest',
@@ -141,7 +142,7 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
     expect('audit' in res).toBe(false);
   });
 
-  it('settleInitialTestAnswer：答错/不确定→不会且无审计标记；手动状态优先', () => {
+  it('settleInitialTestAnswer：答错/不确定→不会；测试作答覆盖手动状态', () => {
     const words = Array.from({ length: 6 }, (_, i) => `w${i}`);
     const core = makeCore(words);
     const bands = makeBands(words);
@@ -158,9 +159,9 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
     expect(unsure.change!.newStatus).toBe('learning');
 
     const manual: WordState = { status: 'known', source: 'manual', updatedAt: 0, version: 1 };
-    const priority = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex }, current: manual });
-    expect(priority.kind).toBe('priority-preserved');
-    expect(priority.change).toBeNull();
+    const afterManual = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex }, current: manual });
+    expect(afterManual.kind).toBe('correct');
+    expect(afterManual.change.newStatus).toBe('known');
   });
 
   // ---- 审计：冻结 + 结算 ----

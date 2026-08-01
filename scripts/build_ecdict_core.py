@@ -230,6 +230,13 @@ def build_core(
     core_form_collisions = sorted(form for form in forms if form in core)
     forms = {key: value for key, value in forms.items() if key not in core}
 
+    # schema 3 迁移只依赖这份最小 FormsMap：键绝不遮蔽 core，目标必为 core。
+    # 若构建逻辑未来变动，宁可拒绝产物也不能产出会误合并用户状态的映射。
+    if any(form in core for form in forms):
+        raise ValueError("forms key must not be a core headword")
+    if any(target not in core for target in forms.values()):
+        raise ValueError("forms target must be a core headword")
+
     core_path = output_dir / "dict-core.json"
     forms_path = output_dir / "forms.json"
     bands_path = output_dir / "frequency-bands.json"

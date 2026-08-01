@@ -8,8 +8,12 @@ export type WordStatus = 'known' | 'learning' | 'unknown';
 /** 页面展示决策 */
 export type DisplayDecision = 'strong' | 'light' | 'none';
 
-/** 状态变更来源：手动标记 / 首测作答 / 审计作答 / 活跃生词状态核验 */
-export type WordStateSource = 'manual' | 'initial' | 'audit' | 'active-verify';
+/** 状态变更来源：手动标记 / 首测作答 / 每日作答 / 审计作答 / 活跃生词状态核验 */
+export type WordStateSource = 'manual' | 'initial' | 'daily' | 'audit' | 'active-verify';
+
+/** 测试证据的结果与来源；手动标记不产生证据。 */
+export type AssessmentOutcome = 'known' | 'learning';
+export type AssessmentSource = 'initial' | 'daily';
 
 /** 词典条目 */
 export interface DictEntry {
@@ -42,6 +46,13 @@ export interface WordState {
    * 并在重复相同 plan.version 时仍能清除上一轮的审计标记（仅靠 planVersion 无法区分）。
    */
   version: number;
+}
+
+/** 每个 wordKey 最近一次测试的最小证据；不保存测试历史。 */
+export interface AssessmentEvidence {
+  outcome: AssessmentOutcome;
+  source: AssessmentSource;
+  assessedAt: number;
 }
 
 // ============================================================
@@ -232,23 +243,33 @@ export type IsCommittal<A extends QuizAnswer> = A extends { kind: 'unsure' } ? f
 export type StatusFromCorrectness<C extends boolean> = C extends true ? 'known' : 'learning';
 
 /** 作答结果种类 */
-export type ApplyAnswerOutcomeKind = 'correct' | 'wrong' | 'unsure' | 'priority-preserved';
+export type ApplyAnswerOutcomeKind = 'correct' | 'wrong' | 'unsure';
 
 /**
  * applyAnswer 的判别联合返回类型。
  * 每个分支的 `change` 字段类型经过精确约束（source='initial'）：
  * - correct  → 携带已知状态变更（V0.1 不再产出审计标记，见 Ticket 01 / R-AUD-3）
  * - wrong/unsure → 携带未知状态变更 + 清除该词陈旧审计标记（防御性，标记本不应存在）
- * - priority-preserved → 页面手动状态优先，不产生任何变更
- *
- * `clearMarkerWord` 指示 worker 应清除哪个词的待审计标记（上一轮残留）：
- * 本轮答错/不确定或手动状态优先时，该词不应再持有任何审计标记。
+ * `clearMarkerWord` 指示 worker 应清除哪个词的待审计标记（上一轮残留）。
  */
 export type ApplyAnswerResult =
   | { readonly kind: 'correct'; readonly change: StateChange<'initial'>; readonly clearMarkerWord: null }
   | { readonly kind: 'wrong'; readonly change: StateChange<'initial'>; readonly audit: null; readonly clearMarkerWord: string }
-  | { readonly kind: 'unsure'; readonly change: StateChange<'initial'>; readonly audit: null; readonly clearMarkerWord: string }
-  | { readonly kind: 'priority-preserved'; readonly change: null; readonly audit: null; readonly clearMarkerWord: string };
+  | { readonly kind: 'unsure'; readonly change: StateChange<'initial'>; readonly audit: null; readonly clearMarkerWord: string };
+
+/** 初测与每日测试共用的原子结算输入。 */
+export interface AssessmentSettlementInput {
+  readonly word: string;
+  readonly outcome: AssessmentOutcome;
+  readonly source: AssessmentSource;
+  readonly assessedAt: number;
+}
+
+/** 测试结算同步交付的状态变更与独立证据。 */
+export interface AssessmentSettlement {
+  readonly change: StateChange<AssessmentSource>;
+  readonly evidence: AssessmentEvidence;
+}
 
 // ============================================================
 // 持久化快照
@@ -267,6 +288,8 @@ export interface VocabSnapshot {
   installSeed: string;
   /** 单词状态映射 */
   words: Record<string, WordState>;
+  /** 按 wordKey 保存的最近测试证据；与页面状态独立。 */
+  assessmentEvidence: Record<string, AssessmentEvidence>;
   /** 单次答对待审计标记（仅首测正确词与高置信不提示未知词） */
   auditMarkers: Record<string, AuditMarker>;
   /** 审计事件日志（答对/答错或不确定的最小状态证据，供漏提示率计算） */
@@ -275,15 +298,19 @@ export interface VocabSnapshot {
   auditPlan: AuditPlan | null;
   /** 首测冻结计划与作答进度；null 表示尚未开始 */
   initialTest: InitialTestState | null;
+  /** schema 3 的正式每日轮默认槽位；结构与行为均由 Ticket 04 接入。 */
+  dailyTest: null;
+  /** 已完成每日轮数；schema 3 首次安装为 0。 */
+  completedRoundIndex: number;
   /** 最后更新时间戳 */
   lastUpdated: number;
 }
 
 /** 策略模块输入：单个命中词的上下文 */
 export interface LookupContext {
-  /** 状态键（stateKey）：小写 surface form，是单词状态/审计标记/页面 data-word 的统一键（非 entryKey/规范化单词） */
+  /** wordKey：core 主词条小写形式，是单词状态/页面 data-word 的统一键。 */
   word: string;
-  /** 页面原始词形（保留大小写，用于 DOM 定位），例如 "Went"；其小写即 `word`（stateKey）。entryKey/规范化单词只负责词典取义，不承载状态 */
+  /** 页面原始词形（保留大小写，用于 DOM 定位），例如 "Went"；状态身份由 `word`（wordKey）承载。 */
   surfaceForm: string;
   /** 词典条目（如果命中） */
   entry: DictEntry | null;
@@ -295,7 +322,7 @@ export interface LookupContext {
 
 /** 策略模块的展示决策输出 */
 export interface DisplayResult {
-  /** 状态键（stateKey）：小写 surface form，是页面 data-word 与单词状态的统一键（非 entryKey/规范化单词） */
+  /** wordKey：页面 data-word 与单词状态的统一键。 */
   word: string;
   /** 展示决策 */
   decision: DisplayDecision;
@@ -318,13 +345,13 @@ export interface VocabStrategy {
 
   /**
    * 用户标记"会"：返回状态变更 + 是否清除该词陈旧审计标记（手动覆盖优先）。
-   * @param word 状态键（stateKey）
+   * @param word wordKey
    */
   markKnown(word: string): ManualMarkResult;
 
   /**
    * 用户标记"不会"：返回状态变更 + 是否清除该词陈旧审计标记（手动覆盖优先）。
-   * @param word 状态键（stateKey）
+   * @param word wordKey
    */
   markLearning(word: string): ManualMarkResult;
 
@@ -337,6 +364,9 @@ export interface VocabStrategy {
 
   /** 结算一道冻结的首测题：返回原子状态变更 + 陈旧标记清理意图（V0.1 用户路径已切断审计，不再产出审计标记）。 */
   settleInitialTestAnswer(input: SettleInitialTestInput): ApplyAnswerResult;
+
+  /** 初测与每日共用的测试结算领域动作；手动标记不调用此动作。 */
+  settleAssessment(input: AssessmentSettlementInput): AssessmentSettlement;
 
   /**
    * 首测开始生命周期 transition：策略据首测计划、当前标记与状态版本计算并交付
@@ -414,4 +444,4 @@ export interface SettleAuditResult {
 /** 固定首测题数（十频段 × 五题） */
 export const INITIAL_TEST_LENGTH = 50;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;

@@ -103,9 +103,9 @@ describe('eligibleCandidates', () => {
     // could 与 can 都入选（不再因 forms 重定向被排除）
     expect(eligible).toContain('could');
     expect(eligible).toContain('can');
-    // 状态键独立：lookup(could).stateKey === 'could'，lookup(can).stateKey === 'can'
-    expect(dict.lookup('could')!.stateKey).toBe('could');
-    expect(dict.lookup('can')!.stateKey).toBe('can');
+    // core 优先：could 与 can 保持各自独立的 wordKey
+    expect(dict.lookup('could')!.wordKey).toBe('could');
+    expect(dict.lookup('can')!.wordKey).toBe('can');
     // 各自取义正确
     expect(dict.lookup('could')!.entryKey).toBe('could');
     expect(dict.lookup('can')!.entryKey).toBe('can');
@@ -221,13 +221,11 @@ describe('applyAnswer', () => {
     expect(result.clearMarkerWord).toBe('apple');
   });
 
-  it('page manual state takes priority over initial test answer', () => {
+  it('initial test answer overwrites prior manual WordState', () => {
     const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown);
-    expect(result.kind).toBe('priority-preserved');
-    if (result.kind !== 'priority-preserved') return;
-    expect(result.change).toBeNull();
-    expect(result.audit).toBeNull();
-    expect(result.clearMarkerWord).toBe('apple');
+    expect(result.kind).toBe('correct');
+    if (result.kind !== 'correct') return;
+    expect(result.change).toEqual({ word: 'apple', newStatus: 'known', source: 'initial' });
   });
 
   it('isAnswerCorrect reflects the frozen correct option', () => {

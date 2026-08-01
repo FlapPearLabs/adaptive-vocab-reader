@@ -192,6 +192,26 @@ class EcdictCoreBuildTests(unittest.TestCase):
         self.assertEqual(eligibility["ineligible_count"], 0)
         self.assertNotIn("shadowed_core_keys", eligibility)
 
+    def test_forms_map_keys_never_shadow_a_core_headword(self):
+        builder = load_builder_module()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            output_dir = Path(temporary_dir)
+            builder.build_core(FIXTURE_PATH, output_dir, limit=4)
+            core = json.loads((output_dir / "dict-core.json").read_text(encoding="utf-8"))
+            forms = json.loads((output_dir / "forms.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(set(forms).isdisjoint(core))
+
+    def test_forms_map_targets_are_always_selected_core_headwords(self):
+        builder = load_builder_module()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            output_dir = Path(temporary_dir)
+            builder.build_core(FIXTURE_PATH, output_dir, limit=4)
+            core = json.loads((output_dir / "dict-core.json").read_text(encoding="utf-8"))
+            forms = json.loads((output_dir / "forms.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(set(forms.values()).issubset(core))
+
 
 if __name__ == "__main__":
     unittest.main()

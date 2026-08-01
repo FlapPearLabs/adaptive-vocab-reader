@@ -28,6 +28,8 @@ import type {
   InitialTestStartTransition,
   InitialTestResetTransition,
   AuditMarker,
+  AssessmentSettlement,
+  AssessmentSettlementInput,
 } from '../shared/types';
 import { buildInitialTestPlan, applyAnswer } from './quiz';
 import { freezeAuditPlan, settleAuditAnswer } from './audit';
@@ -94,6 +96,14 @@ export function createVocabStrategy(): VocabStrategy {
 
     settleInitialTestAnswer(input: SettleInitialTestInput): ApplyAnswerResult {
       return applyAnswer(input.plan, input.questionIndex, input.answer, input.current);
+    },
+
+    settleAssessment(input: AssessmentSettlementInput): AssessmentSettlement {
+      // 一个显式测试动作同步产生当前 WordState 与独立的最新 AssessmentEvidence；不保存历史。
+      return {
+        change: { word: input.word, newStatus: input.outcome, source: input.source },
+        evidence: { outcome: input.outcome, source: input.source, assessedAt: input.assessedAt },
+      };
     },
 
     // ---- 首测开始/重置：策略生成的完整生命周期 transition（worker 机械应用）----

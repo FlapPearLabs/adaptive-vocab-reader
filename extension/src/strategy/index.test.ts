@@ -109,6 +109,15 @@ describe('VocabStrategy', () => {
     });
   });
 
+  describe('settleAssessment', () => {
+    it('initial 与 daily 共用同一结算动作，保留调用方传入的最新证据语义', () => {
+      expect(strategy.settleAssessment({ word: 'go', outcome: 'known', source: 'initial', assessedAt: 10 }))
+        .toEqual({ change: { word: 'go', newStatus: 'known', source: 'initial' }, evidence: { outcome: 'known', source: 'initial', assessedAt: 10 } });
+      expect(strategy.settleAssessment({ word: 'go', outcome: 'learning', source: 'daily', assessedAt: 20 }))
+        .toEqual({ change: { word: 'go', newStatus: 'learning', source: 'daily' }, evidence: { outcome: 'learning', source: 'daily', assessedAt: 20 } });
+    });
+  });
+
   // ============================================================
   // 确定性
   // ============================================================

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import type {
   VocabSnapshot,
   InitialTestPlan,
@@ -56,20 +56,11 @@ describe('reduceWorkerMessage — INITIAL_TEST_ANSWER 协调路径', () => {
     };
   }
 
-  it('priority-preserved：记录作答、清除旧标记，且不改变手动状态（真实协调路径）', () => {
+  it('首测会覆盖手动 WordState，并以同一 wordKey 写入初测证据（真实协调路径）', () => {
     const word = 'apple';
     const snapshot: VocabSnapshot = createEmptySnapshot(SEED, 'd');
-    // 该词已被用户手动标记为 known（手动状态优先）
-    snapshot.words[word] = { status: 'known', source: 'manual', updatedAt: 1, version: 0 };
-    // 上一轮的残留待审计标记（来自旧首测计划）
-    snapshot.auditMarkers[word] = {
-      word,
-      source: 'initial-correct',
-      planVersion: 'OLD-PLAN',
-      stateVersion: 0,
-      createdAt: 1,
-      pending: true,
-    };
+    // 该词先被用户手动标记为 learning；首测答对后必须由最新显式测试动作覆盖。
+    snapshot.words[word] = { status: 'learning', source: 'manual', updatedAt: 1, version: 0 };
     snapshot.initialTest = { plan: planFor(word), answers: [null], completed: false };
 
     const { snapshot: next, response, broadcast, changed } = reduceWorkerMessage(
@@ -78,18 +69,17 @@ describe('reduceWorkerMessage — INITIAL_TEST_ANSWER 协调路径', () => {
       { id: 'ext', url: 'popup.html' },
     );
 
-    // 1) 作答已被记录（不能因 priority-preserved 而永久未答）
+    // 1) 作答已被记录
     expect(next.initialTest?.answers[0]).not.toBeNull();
-    // 2) 旧标记被清除
-    expect(next.auditMarkers[word]).toBeUndefined();
-    // 3) 手动状态未被改变
-    expect(next.words[word]?.source).toBe('manual');
+    // 2) 最新 initial 覆盖旧 manual，且同时写入唯一测试证据
+    expect(next.words[word]?.source).toBe('initial');
     expect(next.words[word]?.status).toBe('known');
-    // 4) 不广播（状态未变）
-    expect(broadcast).toBeUndefined();
+    expect(next.assessmentEvidence[word]).toMatchObject({ outcome: 'known', source: 'initial' });
+    // 3) 广播最新状态
+    expect(broadcast).toEqual({ word, newStatus: 'known' });
     expect(changed).toBe(true);
-    // 5) 结果类型确为 priority-preserved
-    expect((response as { result?: { kind?: string } }).result?.kind).toBe('priority-preserved');
+    // 4) 结果类型确为 correct
+    expect((response as { result?: { kind?: string } }).result?.kind).toBe('correct');
   });
 
   it('首测答对（无手动状态）→ 状态置为 known、不创建审计标记、广播状态变更', () => {
@@ -107,6 +97,7 @@ describe('reduceWorkerMessage — INITIAL_TEST_ANSWER 协调路径', () => {
     expect(next.auditMarkers[word]).toBeUndefined();
     expect(Object.keys(next.auditMarkers)).toHaveLength(0);
     expect(next.words[word]?.status).toBe('known');
+    expect(next.assessmentEvidence[word]).toMatchObject({ outcome: 'known', source: 'initial' });
     expect(broadcast).toEqual({ word, newStatus: 'known' });
     expect(changed).toBe(true);
   });
@@ -137,6 +128,7 @@ describe('reduceWorkerMessage — STATE_CHANGE 清除标记（手动覆盖优先
       createdAt: 1,
       pending: true,
     };
+    snapshot.assessmentEvidence[word] = { outcome: 'learning', source: 'initial', assessedAt: 7 };
     const { snapshot: next } = reduceWorkerMessage(
       snapshot,
       { type: 'STATE_CHANGE', word, newStatus: 'known' },
@@ -144,6 +136,7 @@ describe('reduceWorkerMessage — STATE_CHANGE 清除标记（手动覆盖优先
     );
     expect(next.auditMarkers[word]).toBeUndefined();
     expect(next.words[word]?.status).toBe('known');
+    expect(next.assessmentEvidence[word]).toEqual({ outcome: 'learning', source: 'initial', assessedAt: 7 });
   });
 });
 
@@ -280,6 +273,7 @@ describe('loadSnapshot — 持久化迁移 + 重启验证（Fix #1 真实 storag
   });
   afterEach(() => {
     delete (globalThis as { chrome?: unknown }).chrome;
+    vi.unstubAllGlobals();
   });
 
   function v1RawWithPlan() {
@@ -288,7 +282,7 @@ describe('loadSnapshot — 持久化迁移 + 重启验证（Fix #1 真实 storag
       dictVersion: 'd',
       stateVersion: 0,
       installSeed: 'seed-1',
-      words: { apple: { status: 'known', source: 'manual', updatedAt: 1 } },
+      words: { apple: { status: 'known', source: 'manual', updatedAt: 1, version: 0 } },
       auditMarkers: {},
       auditLog: [],
       auditPlan: {
@@ -306,45 +300,90 @@ describe('loadSnapshot — 持久化迁移 + 重启验证（Fix #1 真实 storag
     };
   }
 
-  it('旧 v1 快照（auditPlan 带 stateVersion）→ 迁移为 v2 并立即写回 storage', async () => {
+  it('旧 v1 快照（auditPlan 带 stateVersion）→ 迁移为 v3 并立即写回 storage', async () => {
     store[STORAGE_KEY] = v1RawWithPlan();
 
     const snap = await loadSnapshot();
 
-    // 内存中返回升级后的 v2
-    expect(snap.schemaVersion).toBe(2);
+    // 内存中返回升级后的 v3
+    expect(snap.schemaVersion).toBe(3);
     expect(snap.auditPlan).toBeNull();
     // 升级结果已持久化写回 storage（持久迁移，非按次转换）
     const persisted = store[STORAGE_KEY] as VocabSnapshot;
-    expect(persisted.schemaVersion).toBe(2);
+    expect(persisted.schemaVersion).toBe(3);
     expect(persisted.auditPlan).toBeNull();
     // 用户有效数据保留
     expect(persisted.words['apple']?.status).toBe('known');
   });
 
-  it('重启后再次读取 → 命中已升级 v2 直接短路，不再重新迁移（幂等持久）', async () => {
+  it('重启后再次读取 → 命中已升级 v3 直接短路，不再重新迁移（幂等持久）', async () => {
     store[STORAGE_KEY] = v1RawWithPlan();
 
     const first = await loadSnapshot();
-    // 模拟 worker 重启：storage 中已是持久化的 v2
+    // 模拟 worker 重启：storage 中已是持久化的 v3
     const second = await loadSnapshot();
 
-    expect(second.schemaVersion).toBe(2);
-    // 第二次应直接短路返回持久化 v2，auditPlan 仍为 null（未被中间态污染）
+    expect(second.schemaVersion).toBe(3);
+    // 第二次应直接短路返回持久化 v3，auditPlan 仍为 null（未被中间态污染）
     expect(second.auditPlan).toBeNull();
     // 两次均基于同一持久化 installSeed，内容一致
     expect(second.installSeed).toBe(first.installSeed);
-    // storage 中仅一份 v2（未被反复重写产生多版本）
-    expect((store[STORAGE_KEY] as VocabSnapshot).schemaVersion).toBe(2);
+    // storage 中仅一份 v3（未被反复重写产生多版本）
+    expect((store[STORAGE_KEY] as VocabSnapshot).schemaVersion).toBe(3);
   });
 
-  it('首次运行（storage 空）→ 创建并持久化空 v2 快照', async () => {
+  it('首次运行（storage 空）→ 创建并持久化空 v3 快照', async () => {
     const snap = await loadSnapshot();
-    expect(snap.schemaVersion).toBe(2);
+    expect(snap.schemaVersion).toBe(3);
     expect(snap.words).toEqual({});
     const persisted = store[STORAGE_KEY] as VocabSnapshot;
-    expect(persisted.schemaVersion).toBe(2);
+    expect(persisted.schemaVersion).toBe(3);
     expect(typeof persisted.installSeed).toBe('string');
+  });
+
+  it('schema 2 fixture 经真实 worker/storage 路径读取最小 FormsMap 后合并为 wordKey，并只写回一次 v3', async () => {
+    (globalThis as { chrome?: { runtime?: unknown } }).chrome!.runtime = { getURL: (path: string) => `chrome-extension://test/${path}` };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ went: 'go' }) });
+    vi.stubGlobal('fetch', fetchMock);
+    store[STORAGE_KEY] = {
+      schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, initialTest: null, lastUpdated: 1,
+      words: { went: { status: 'known', source: 'initial', updatedAt: 1, version: 0 } },
+    };
+
+    const snap = await loadSnapshot();
+    expect(fetchMock).toHaveBeenCalledWith('chrome-extension://test/data/forms.json');
+    expect(snap.schemaVersion).toBe(3);
+    expect(snap.words).toEqual({ go: { status: 'known', source: 'initial', updatedAt: 1, version: 0 } });
+    expect((store[STORAGE_KEY] as VocabSnapshot).schemaVersion).toBe(3);
+  });
+
+  it('生产路径 FormsMap 不可读取时保留 schema 2 原快照，绝不错误写成 v3', async () => {
+    (globalThis as { chrome?: { runtime?: unknown } }).chrome!.runtime = { getURL: () => 'chrome-extension://test/data/forms.json' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    const fixture = {
+      schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, initialTest: null, lastUpdated: 1,
+      words: { went: { status: 'known', source: 'initial', updatedAt: 1, version: 0 } },
+    };
+    store[STORAGE_KEY] = fixture;
+
+    await expect(loadSnapshot()).rejects.toThrow('FormsMap unavailable');
+    expect(store[STORAGE_KEY]).toBe(fixture);
+    expect((store[STORAGE_KEY] as { schemaVersion: number }).schemaVersion).toBe(2);
+  });
+
+  it('生产路径 FormsMap 含空白 target 时保留 schema 2 原快照，绝不持久化空 wordKey', async () => {
+    (globalThis as { chrome?: { runtime?: unknown } }).chrome!.runtime = { getURL: () => 'chrome-extension://test/data/forms.json' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ went: ' ' }) }));
+    const fixture = {
+      schemaVersion: 2, dictVersion: 'd', stateVersion: 0, installSeed: 's', auditMarkers: {}, auditLog: [], auditPlan: null, lastUpdated: 1,
+      words: { went: { status: 'known', source: 'initial', updatedAt: 1, version: 0 } },
+      initialTest: { plan: { questions: [{ word: 'went', options: [{}, {}], correctOptionIndex: 0 }] }, answers: [{ kind: 'option', optionIndex: 0 }], completed: false },
+    };
+    store[STORAGE_KEY] = fixture;
+
+    await expect(loadSnapshot()).rejects.toThrow('FormsMap unavailable');
+    expect(store[STORAGE_KEY]).toBe(fixture);
+    expect((store[STORAGE_KEY] as { schemaVersion: number }).schemaVersion).toBe(2);
   });
 });
 

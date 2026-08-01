@@ -22,11 +22,13 @@ import type {
   QuizAnswer,
   AuditPlan,
   VocabStrategy,
+  FormsMap,
 } from '../shared/types';
 import { SCHEMA_VERSION } from '../shared/types';
 import {
   createEmptySnapshot,
   mergeStateChange,
+  mergeAssessment,
   getWords,
   generateInstallSeed,
   setInitialTest,
@@ -148,18 +150,15 @@ export function reduceWorkerMessage(
       answers[questionIndex] = answer;
       const completed = answers.every((a) => a !== null);
 
-      if (result.kind === 'priority-preserved' || result.change === null) {
-        // 页面手动状态优先：不改变手动状态；但仍须清除该词上一轮残留的待审计标记，
-        // 且必须记录作答（否则该题为永久未答，冻结审计计划与完成判定失效）。
-        let next = setInitialTest(snapshot, { plan: test.plan, answers, completed });
-        if (result.clearMarkerWord) {
-          next = clearAuditMarker(next, result.clearMarkerWord);
-        }
-        return { snapshot: next, response: { result }, changed: true };
-      }
-
-      // 应用状态变更（mergeStateChange 自动以当前 stateVersion 标记单词状态）
-      let next = mergeStateChange(snapshot, result.change.word, result.change.newStatus, 'initial');
+      // 初测/每日共享的结算语义：测试写入会覆盖先前 manual WordState，
+      // 同时按 wordKey 覆盖该词唯一一条 AssessmentEvidence。
+      const settlement = strat.settleAssessment({
+        word: result.change.word,
+        outcome: result.change.newStatus as 'known' | 'learning',
+        source: 'initial',
+        assessedAt: Date.now(),
+      });
+      let next = mergeAssessment(snapshot, settlement);
       // 清除该词上一轮残留的待审计标记（答错/不确定/手动优先时；
       // 答对分支在 V0.1 已不再产出标记，见 Ticket 01 / R-AUD-3）
       if (result.clearMarkerWord) {
@@ -266,9 +265,9 @@ export function reduceWorkerMessage(
 
 /**
  * 从 chrome.storage.local 加载快照。
- * 首次安装时创建空快照；旧快照缺字段时向前迁移（migrateSnapshot 处理 v1→v2）。
- * 关键：迁移不是「按次读取转换」——一旦检测到旧格式，立即把升级后的 v2 快照
- * 写回 storage，使「重启」读到的是已升级的 v2，而非每次读取都重新转换。
+ * 首次安装时创建空快照；旧快照缺字段时向前迁移。
+ * 关键：迁移不是「按次读取转换」——一旦检测到旧格式，立即把升级后的 v3 快照
+ * 写回 storage，使「重启」读到的是已升级的 v3，而非每次读取都重新转换。
  */
 export async function loadSnapshot(): Promise<VocabSnapshot> {
   const result = await chrome.storage.local.get(STORAGE_KEY);
@@ -280,8 +279,14 @@ export async function loadSnapshot(): Promise<VocabSnapshot> {
   }
 
   if (stored && typeof stored.schemaVersion === 'number') {
+    // worker 只在迁移时读取最小 FormsMap；不加载完整词典，也不参与 runtime 查词。
+    const forms = await loadFormsMap();
+    if (forms === null) {
+      // 不能在缺少 FormsMap 时把 schema 2 锁死为 v3：那会让待合并的 surface key 永久保留。
+      throw new Error('FormsMap unavailable; schema 2 migration postponed without persistence');
+    }
     // 旧格式：迁移并立即持久化升级结果（重启验证的持久迁移）
-    const migrated = migrateSnapshot(stored);
+    const migrated = migrateSnapshot(stored, forms);
     await chrome.storage.local.set({ [STORAGE_KEY]: migrated });
     return migrated;
   }
@@ -291,6 +296,25 @@ export async function loadSnapshot(): Promise<VocabSnapshot> {
   const snapshot = createEmptySnapshot(seed, DICTIONARY_VERSION);
   await chrome.storage.local.set({ [STORAGE_KEY]: snapshot });
   return snapshot;
+}
+
+async function loadFormsMap(): Promise<FormsMap | null> {
+  // 仅供纯 worker 单测：真实扩展必有 chrome.runtime，生产路径绝不静默跳过 FormsMap。
+  if (typeof chrome === 'undefined' || !chrome.runtime?.getURL) return {};
+  try {
+    const response = await fetch(chrome.runtime.getURL('data/forms.json'));
+    if (!response.ok) return null;
+    const raw: unknown = await response.json();
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const forms: FormsMap = {};
+    for (const [surface, wordKey] of Object.entries(raw)) {
+      if (surface.trim().length === 0 || typeof wordKey !== 'string' || wordKey.trim().length === 0) return null;
+      forms[surface] = wordKey;
+    }
+    return Object.keys(forms).length > 0 ? forms : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
