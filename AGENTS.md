@@ -109,7 +109,7 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 验收或预期返回：……
 ```
 
-- **路由矩阵与任务状态确认**：发送审查提示词时，交付者必须填写 `ORIGIN_AGENT`、`ORIGIN_TASK_STATUS` 和 `CODEX_TASK_STATUS`（均为 `ACTIVE / COMPLETED / UNKNOWN`）。路由只按下表决定，禁止只根据文档/代码阶段覆盖源任务信息：
+- **路由矩阵与任务状态确认**：发送审查提示词时，交付者必须填写 `ORIGIN_AGENT`（`WorkBuddy / Codex`）、`ORIGIN_TASK_STATUS` 和 `CODEX_TASK_STATUS`（后两者均为 `ACTIVE / COMPLETED / UNKNOWN`）。路由只按下表决定，禁止只根据文档/代码阶段覆盖源任务信息：
 
 | 审查结论 | 目标代理 | 使用的任务状态 | ACTIVE | COMPLETED | UNKNOWN |
 | --- | --- | --- | --- | --- | --- |
