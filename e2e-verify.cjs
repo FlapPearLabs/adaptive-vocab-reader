@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 const puppeteer = require('puppeteer-core');
 
 const ROOT = __dirname;
@@ -131,6 +132,34 @@ async function getWorker(browser) {
     (t) => t.type() === 'service_worker' && t.url().endsWith('/worker.js'),
   );
   return sw ? sw.worker() : null;
+}
+
+/** 轮询等待扩展 Service Worker 出现（重启后的新实例） */
+async function waitForWorker(browser, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const worker = await getWorker(browser);
+    if (worker) return worker;
+    await wait(200);
+  }
+  return null;
+}
+
+/**
+ * 同 profile 重启整个 Chrome 进程（R-AUD-2）。
+ * worker 将 currentSnapshot 缓存在内存，且不监听 chrome.storage 的外部变化；
+ * 注入的残留快照只有在「新 Service Worker 启动时经 loadSnapshot 重新读取」才会被
+ * 运行时消费。chrome.storage.local 随 profile 持久化到磁盘，因此杀掉进程后用同一
+ * user-data-dir 重新启动，新 worker 的启动路径就会从 storage 加载注入快照——
+ * 这是对「终止并重新启动 Service Worker」的最强真实验证（整进程重启 + 真实启动路径）。
+ */
+async function restartChromeOnSameProfile(userDataDir, chromeForTesting, browser, chrome) {
+  await browser.close();
+  await killChrome(chrome);
+  await wait(500);
+  const relaunched = await launchChrome(userDataDir, chromeForTesting);
+  await wait(1_000);
+  return relaunched;
 }
 
 async function main() {
@@ -293,33 +322,39 @@ async function main() {
     ({ chrome: chrome2, browser: browser2 } = await launchChrome(path.join(tempDir, 'profile-2'), chromeForTesting));
     await wait(1_000);
 
-    const extensionId = extensionIdFromTargets(browser2);
-    if (!extensionId) throw new Error('无法解析扩展 ID，无法打开弹窗');
+    const extensionId0 = extensionIdFromTargets(browser2);
+    if (!extensionId0) throw new Error('无法解析扩展 ID，无法打开弹窗');
+    let extensionId = extensionId0;
 
-    const worker2 = await getWorker(browser2);
+    let worker2 = await getWorker(browser2);
     if (!worker2) throw new Error('未找到本扩展的 Service Worker，无法检查首测快照');
 
     // 场景 16 / R-AUD-2：注入未完成（残留）的冻结审计计划，验证打开首测弹窗后
     // 不恢复、不进入审计 UI，仅显示正常首测开始界面（V0.1 用户路径已切断审计）。
+    // 残留快照基于 storage 中当前真实快照克隆（继承 schemaVersion/dictVersion/
+    // stateVersion），仅改写 installSeed/auditPlan/auditMarkers/initialTest，确保
+    // 重启后的 loadSnapshot 原样接受（schemaVersion 匹配）而非触发迁移。
+    const liveSnapshot = await worker2.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     const residualPlan = {
       version: 'residual-plan-version',
       planVersion: 'residual-plan-version',
-      stateVersion: 1,
+      stateVersion: liveSnapshot.stateVersion,
       seed: 'residual-seed',
       candidates: [{ word: 'apple', bucket: 'initial-correct', band: 0 }],
       questions: [{ word: 'apple', correctOptionIndex: 0, options: [{ translation: '苹果' }, { translation: '香蕉' }] }],
       results: [null],
       createdAt: 1,
     };
+    const residualMarkers = {
+      apple: { word: 'apple', source: 'initial-correct', planVersion: 'residual-plan-version', stateVersion: liveSnapshot.stateVersion, createdAt: 1, pending: true },
+    };
     const residualSnapshot = {
-      schemaVersion: 2,
-      dictVersion: 'd',
-      stateVersion: 1,
+      schemaVersion: liveSnapshot.schemaVersion,
+      dictVersion: liveSnapshot.dictVersion,
+      stateVersion: liveSnapshot.stateVersion,
       installSeed: 'residual-seed',
       words: {},
-      auditMarkers: {
-        apple: { word: 'apple', source: 'initial-correct', planVersion: 'residual-plan-version', stateVersion: 1, createdAt: 1, pending: true },
-      },
+      auditMarkers: residualMarkers,
       auditLog: [],
       auditPlan: residualPlan,
       initialTest: null,
@@ -327,6 +362,15 @@ async function main() {
     };
     await worker2.evaluate((snap) => chrome.storage.local.set({ avr_vocab_snapshot: snap }), residualSnapshot);
     console.log('[stage2] 已注入残留未完成 auditPlan（R-AUD-2 验证）');
+
+    // R-AUD-2 关键修复：worker 将 currentSnapshot 缓存在内存，且不监听 storage 外部变化，
+    // 注入后仅重开弹窗不会让 worker 重新读取 storage。改用「同 profile 重启整个 Chrome」：
+    // storage.local 随 profile 持久化，新进程启动时扩展 Service Worker 经 loadSnapshot
+    // 从 storage 重新加载注入的残留快照（命中真实启动路径）。
+    ({ chrome: chrome2, browser: browser2 } = await restartChromeOnSameProfile(path.join(tempDir, 'profile-2'), chromeForTesting, browser2, chrome2));
+    extensionId = extensionIdFromTargets(browser2);
+    if (!extensionId) throw new Error('无法解析扩展 ID，无法打开弹窗（重启后）');
+    console.log('[stage2] 已按注入快照重启 Chrome（同 profile），新 Service Worker 启动时从 storage 加载');
 
     const popup = await browser2.newPage();
     popup.on('console', (m) => pageLogs.push(`popup: ${m.type()}: ${m.text()}`));
@@ -337,12 +381,30 @@ async function main() {
     await popup.waitForSelector('button.primary', { timeout: 10_000 });
     console.log('[stage2] button.primary found');
 
+    // R-AUD-2 证据 1（非审计消息）：GET_PROFILE 必须返回注入的 installSeed，
+    // 证明新 worker 真实加载了注入快照（而非仍持有重启前的内存缓存）。
+    const profile = await popup.evaluate(() => chrome.runtime.sendMessage({ type: 'GET_PROFILE' }));
+    if (!profile || profile.installSeed !== 'residual-seed') {
+      throw new Error(`R-AUD-2 失败：新 worker 未加载注入快照（installSeed=${profile && profile.installSeed}，期望 residual-seed）`);
+    }
+    worker2 = await waitForWorker(browser2);
+    if (!worker2) throw new Error('R-AUD-2 失败：重启后未找到本扩展 Service Worker');
+    console.log('[stage2] R-AUD-2 证据 1 通过：GET_PROFILE 返回 residual-seed（worker 已按注入快照重启）');
+
     // 场景 16 / R-AUD-2：弹窗打开后必须显示正常首测开始界面，绝不恢复残留审计计划
     const popupTextBeforeStart = await popup.evaluate(() => document.body.innerText || '');
     if (/开始审计/.test(popupTextBeforeStart)) throw new Error(`R-AUD-2 失败：残留审计计划被恢复为审计入口：${popupTextBeforeStart}`);
     if (/审计中/.test(popupTextBeforeStart)) throw new Error(`R-AUD-2 失败：残留审计计划导致弹窗进入审计 UI：${popupTextBeforeStart}`);
     if (!/开始测评/.test(popupTextBeforeStart)) throw new Error(`R-AUD-2 失败：弹窗未显示正常首测开始界面（应含「开始测评」）：${popupTextBeforeStart}`);
-    console.log('[stage2] R-AUD-2 通过：残留 auditPlan 未被弹窗恢复/进入');
+
+    // R-AUD-2 证据 2：首测开始前，storage 中的残留 auditPlan/auditMarkers 必须原样保留
+    // （证明 popup 启动流程既未读取恢复、也未清除冻结审计计划）。
+    const storedBeforeStart = await popup.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!storedBeforeStart || !storedBeforeStart.auditPlan) throw new Error('R-AUD-2 失败：popup 启动流程清除了残留 auditPlan');
+    // 注：chrome.storage.local 序列化会按 key 排序，必须用深等比较而非 JSON 字符串比较
+    if (!isDeepStrictEqual(storedBeforeStart.auditPlan, residualPlan)) throw new Error('R-AUD-2 失败：残留 auditPlan 被改写');
+    if (!isDeepStrictEqual(storedBeforeStart.auditMarkers, residualMarkers)) throw new Error('R-AUD-2 失败：残留 auditMarkers 被改写');
+    console.log('[stage2] R-AUD-2 通过：worker 重启加载注入快照，弹窗仅显示「开始测评」，残留 auditPlan/auditMarkers 原样保留');
 
     // 开始测评
     await popup.click('button.primary');
@@ -486,7 +548,7 @@ async function main() {
     // 场景 16 / R-AUD-1：V0.1 已切断审计用户路径——首测完成摘要不得再暴露「开始审计」入口
     if (/开始审计/.test(summaryText)) throw new Error(`场景 16 失败：重开弹窗仍暴露审计入口：${summaryText}`);
 
-    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit_markers=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true, audit_entry_absent=true, residual_plan_ignored=true`);
+    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit_markers=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true, audit_entry_absent=true, residual_plan_ignored=true, worker_reloaded=true`);
   } finally {
     if (browser2) await browser2.close();
     await killChrome(chrome2);

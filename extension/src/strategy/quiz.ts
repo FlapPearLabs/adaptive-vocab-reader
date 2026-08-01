@@ -233,7 +233,7 @@ export function isAnswerCorrect(question: QuizQuestion, answer: QuizAnswer): boo
 /**
  * 应用一道题的作答，返回判别联合结果。
  *
- * 规则（规格第 4 节 / Issue #2 产品合同；V0.1 Ticket 01 / R-AUD-3 已切断审计）：
+ * 规则（RULES.md「审计冻结」/ 批准 Spec §20.6 R-AUD-3 / V0.1 Ticket 01）：
  * - 答对         → known（仅提交已知状态，不再产出任何审计标记）
  * - 答错 / 不确定 → learning（进入活跃生词表），并清除该词上一轮的待审计标记
  * - 页面手动状态优先：若当前状态来自手动标记，则保留手动状态，不产生任何变更
