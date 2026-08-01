@@ -92,6 +92,8 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 - 未经用户明确授权，不得 commit、push、创建 Issue/PR、发布包、部署、修改生产配置、创建远端标签或发送外部消息。
 - 用户授权创建某个文件或本地成果，不等于授权任何 Git 或远端操作。
 - **Git 同步常驻授权（2026-08-01 用户显式确认）**：当用户对某次改动给出肯定确认（如“可以 / 做吧 / 同意 / OK / yes”等），即视为授权将该改动 commit 并 push 到 GitHub；这是本条默认规则的显式覆盖。若当时无远端仓库，应先新建仓库（归属 `FlapPearLabs/adaptive-vocab-reader` 或用户指定）再推送。沉默或“先别动”不算同意。推送流程沿用第 3 节约定：先 `unset GH_TOKEN`，不修改 main、不强合并、不关闭 Issue（另行授权除外）。
+- **网页版 GPT 审查流程（2026-08-01 用户确认）**：用户同意改动后，先 commit 并推到**临时分支** `review/<主题>`（或开 PR），由用户将 PR diff 交给网页版 GPT 审查以节省 token（仓库已于 2026-08-01 设为 public，网页版可直接读取）。审查通过 → 合并/保留分支；未通过 → 本地 `git reset --soft HEAD~1`（或 `commit --amend`）撤回该提交，修改后 `git push --force-with-lease` **该临时分支**。**严禁 force-push `main`**；`main` 始终保持线性、可审计。
+- **撤回已 push 提交的原则**：临时分支上的撤回允许改写历史（force-with-lease）；`main` 上的撤回只允许 `git revert`（新增撤回提交，不改写历史）。
 
 ## 6. 本项目的最低质量门禁
 
