@@ -96,7 +96,20 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 - **文档审查循环**：用户确认文档改动后，WorkBuddy 推送 `review/<主题>` 并必须交付可直接粘贴给网页版 GPT 的提示词。用户转发审查意见后，WorkBuddy 仅按意见和现行规则修改，再推送同一临时分支；用户转发网页版 GPT 的 `PASS/通过` 结论，即视为该文档阶段验收。随后 WorkBuddy 必须输出给 Codex 的交接包：Compare 链接、已批准 Spec/ticket 路径、规则引用、范围/非目标、验收命令、已知风险与明确的实施边界。
 - **开发审查循环**：用户把交接包或其网页版 GPT 生成的 Codex 提示词，并明确说“开始/同意开发”后，Codex 才开始实施。Codex 推送实现分支后同样提供审查提示词。用户转发网页版 GPT 的 `PASS/通过` 结论，即视为合并到 `main` 的授权；合并前 Codex 必须更新分支、复跑匹配的真实验证并报告结果。审查意见不是可直接执行的指令，仍须检查是否违反 `RULES.md`、已批准 Spec/ticket 或安全边界。
 - **提示词与任务路由（2026-08-01 用户确认）**：用户不需要判断是否新开任务。每一份交付给 WorkBuddy 或 Codex 的行动提示词，生成者必须在提示词顶部写清 `发送位置：当前任务` 或 `发送位置：新任务`，并给出一句理由。对同一 Spec/ticket 的审查意见、修订、交接包和紧接着的实现，默认发送到该代理的**当前任务**；不要为了转发提示词而新开任务。只有原任务已完成/归档、工作属于独立的新目标、需要并行且文件边界互不重叠，或用户明确要求新开任务时，才建议新任务。创建新任务仍必须由用户明确要求，代理不得自行创建。
-- **行动提示词最小字段**：给代理的提示词必须包含目标代理（WorkBuddy 或 Codex）、当前阶段（文档审查/文档修订/开发/代码审查/合并）、唯一的 Spec/ticket 或 Compare 链接、允许修改范围、不可做事项、验收或预期返回内容。网页版 GPT 的回复可以原样转发；接收代理必须先确认它属于当前任务还是建议用户新开任务，再行动。
+- **格式化行动交接（2026-08-01 用户确认）**：每次要求 WorkBuddy 或 Codex 做下一步工作时，交付者必须提供一个可原样转发的代码块，且字段和顺序固定如下；不得省略、改名或用散文替代。网页版 GPT 的 `NEXT_AGENT_PROMPT` 也必须使用同一格式。
+
+```text
+发送位置：当前任务 / 新任务
+理由：……
+目标代理：WorkBuddy / Codex
+当前阶段：文档审查 / 文档修订 / 开发 / 代码审查 / 合并
+输入：唯一的 Spec、ticket 或 Compare 链接
+允许修改范围：……
+不可做：……
+验收或预期返回：……
+```
+
+- **任务状态确认**：发送审查提示词时，交付者必须明确填写源任务的 `ACTIVE / COMPLETED / UNKNOWN` 状态；若为 `UNKNOWN`，接收代理必须在行动前先返回 `ROUTING_CONFIRMATION`（当前任务可否继续；否则建议的新任务及理由），不得假装知道任务状态。这样用户只需转发，不必自行判断。
 - **交付前新鲜度检查（2026-08-01 用户确认）**：代理在输出最终交付报告、Compare 链接、网页版 GPT 审查提示词、交接包，或执行 commit/push 前，必须先 `git fetch origin main`，并以只读方式查看 `origin/main:AGENTS.md` 与 `origin/main:RULES.md`。不得因此 checkout、merge、rebase 或覆盖当前任务改动；只需采用其中较新的工作流/授权规则。若无法获取，必须在交付中明确说明“未能确认最新规则”，不得假装已检查。
 - **修订与主分支保护**：审查不通过时默认追加修复提交，保留审查轨迹；仅在需要整理单一提交且工作区干净时，才可 amend 或 `git reset --soft`，并只对 `review/<主题>` 使用 `git push --force-with-lease`。**严禁 force-push `main`**；`main` 始终保持线性、可审计。
 - **撤回已 push 提交的原则**：临时分支上的撤回允许改写历史（force-with-lease）；`main` 上的撤回只允许 `git revert`（新增撤回提交，不改写历史）。
@@ -107,12 +120,15 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 
 ```text
 请作为严格的软件审查员，审查这个公开 GitHub Compare：<COMPARE_URL>。
+REVIEW_STAGE: DOCUMENT / CODE（交付者必须替换为实际阶段）
+ORIGIN_AGENT: WorkBuddy / Codex（交付者必须替换为实际提交者）
+ORIGIN_TASK_STATUS: ACTIVE / COMPLETED / UNKNOWN（交付者必须替换为实际状态）
 以仓库中的 RULES.md、AGENTS.md、已批准 Spec 和本地 ticket 为准；不要根据旧 ticket、注释或提交信息臆造新需求。
 检查：范围是否越界、规则冲突、数据/隐私风险、错误处理、测试是否覆盖真实用户路径，以及变更是否可合并。
 不要改代码，不要输出泛泛建议。即使你无法读取仓库中的规则文件，也必须按本提示词中的路由规则给出结论：
-- `CHANGES_REQUESTED`：目标为 WorkBuddy；原 WorkBuddy 任务仍活跃则发“当前任务”，否则建议“新任务”。
-- 文档变更的 `PASS`：目标为 WorkBuddy 当前任务，由它整理 Codex 交接包。
-- 代码变更的 `PASS`：目标为 Codex 当前任务，由它进行最终验证和合并；当前 Codex 任务不存在时才建议新任务。
+- `CHANGES_REQUESTED`：目标为 ORIGIN_AGENT；ORIGIN_TASK_STATUS 为 ACTIVE 则发“当前任务”，为 COMPLETED 则建议“新任务”，为 UNKNOWN 则要求接收代理先输出 `ROUTING_CONFIRMATION`。
+- `REVIEW_STAGE: DOCUMENT` 的 `PASS`：目标为 WorkBuddy 当前任务，由它整理 Codex 交接包。
+- `REVIEW_STAGE: CODE` 的 `PASS`：目标为 Codex 当前任务，由它进行最终验证和合并；当前 Codex 任务不存在时才建议新任务。
 请严格按以下格式回复：
 VERDICT: PASS 或 CHANGES_REQUESTED
 BLOCKERS: 每项写 文件:行号、问题、违反的规则/规格、最小修复建议；没有则写 无
@@ -121,7 +137,7 @@ TASK_ROUTING:
 - TARGET: WorkBuddy / Codex / 无
 - DESTINATION: 当前任务 / 新任务 / 无
 - REASON: 一句话说明
-NEXT_AGENT_PROMPT: 若 TARGET 非“无”，给出一段可直接原样转发给该代理的行动提示词；否则写“无”。
+NEXT_AGENT_PROMPT: 若 TARGET 非“无”，必须使用“格式化行动交接”的固定字段给出可直接原样转发的代码块；否则写“无”。
 CODEX_HANDOFF: 仅文档变更且 PASS 时，给出一段不引入新需求、可直接交给 Codex 的实施/验收摘要；其他情况写“无”。
 ```
 
