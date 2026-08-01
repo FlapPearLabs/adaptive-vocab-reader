@@ -231,24 +231,21 @@ export type IsCommittal<A extends QuizAnswer> = A extends { kind: 'unsure' } ? f
 /** 由「是否答对」在类型层映射出结果状态 */
 export type StatusFromCorrectness<C extends boolean> = C extends true ? 'known' : 'learning';
 
-/** 不同作答结果对应的审计标记类型 */
-export type AuditForOutcome<K extends ApplyAnswerOutcomeKind> = K extends 'correct' ? AuditMarker : null;
-
 /** 作答结果种类 */
 export type ApplyAnswerOutcomeKind = 'correct' | 'wrong' | 'unsure' | 'priority-preserved';
 
 /**
  * applyAnswer 的判别联合返回类型。
- * 每个分支的 `change`/`audit` 字段类型都经过精确约束：
- * - correct  → 携带 source='initial' 的状态变更 + 审计标记（盖 stateVersion）
- * - wrong/unsure → 携带 source='initial' 的状态变更 + 无审计 + 清除该词陈旧标记
+ * 每个分支的 `change` 字段类型经过精确约束（source='initial'）：
+ * - correct  → 携带已知状态变更（V0.1 不再产出审计标记，见 Ticket 01 / R-AUD-3）
+ * - wrong/unsure → 携带未知状态变更 + 清除该词陈旧审计标记（防御性，标记本不应存在）
  * - priority-preserved → 页面手动状态优先，不产生任何变更
  *
  * `clearMarkerWord` 指示 worker 应清除哪个词的待审计标记（上一轮残留）：
  * 本轮答错/不确定或手动状态优先时，该词不应再持有任何审计标记。
  */
 export type ApplyAnswerResult =
-  | { readonly kind: 'correct'; readonly change: StateChange<'initial'>; readonly audit: AuditMarker; readonly clearMarkerWord: null }
+  | { readonly kind: 'correct'; readonly change: StateChange<'initial'>; readonly clearMarkerWord: null }
   | { readonly kind: 'wrong'; readonly change: StateChange<'initial'>; readonly audit: null; readonly clearMarkerWord: string }
   | { readonly kind: 'unsure'; readonly change: StateChange<'initial'>; readonly audit: null; readonly clearMarkerWord: string }
   | { readonly kind: 'priority-preserved'; readonly change: null; readonly audit: null; readonly clearMarkerWord: string };

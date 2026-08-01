@@ -113,7 +113,7 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
   });
 
   // ---- 首测：冻结 + 结算 ----
-  it('freezeInitialTestPlan 冻结 50 题（十频段各五题）；settleInitialTestAnswer 结算答对→会+审计标记', () => {
+  it('freezeInitialTestPlan 冻结 50 题（十频段各五题）；settleInitialTestAnswer 结算答对→会（V0.1 不再产出审计标记）', () => {
     const words = Array.from({ length: 60 }, (_, i) => `w${i}`);
     const core = makeCore(words);
     const bands = makeBands(words);
@@ -126,16 +126,19 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
     expect(perBand.size).toBe(10);
     for (let b = 0; b < 10; b++) expect(perBand.get(b)).toBe(5);
 
-    // 结算第 0 题：答对 → known + 审计标记（调用方无需 isAnswerCorrect，正确下标已在冻结题里）
+    // 结算第 0 题：答对 → known（调用方无需 isAnswerCorrect，正确下标已在冻结题里）
+    // R-AUD-3：V0.1 用户路径已切断审计——答对分支不得再交付任何审计标记字段。
     const q0 = plan.questions[0]!;
     const correct: QuizAnswer = { kind: 'option', optionIndex: q0.correctOptionIndex };
     const res = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: correct, current: undefined, stateVersion: 0 });
     expect(res.kind).toBe('correct');
     if (res.kind === 'correct') {
       expect(res.change.newStatus).toBe('known');
-      expect(res.audit).not.toBeNull();
-      expect(res.audit!.planVersion).toBe(plan.version);
+      expect(res.change.source).toBe('initial');
     }
+    // 结算结果不携带 audit 字段（审计标记的产出位置已从首测结算路径移除）
+    expect(Object.keys(res).sort()).toEqual(['change', 'clearMarkerWord', 'kind']);
+    expect('audit' in res).toBe(false);
   });
 
   it('settleInitialTestAnswer：答错/不确定→不会且无审计标记；手动状态优先', () => {

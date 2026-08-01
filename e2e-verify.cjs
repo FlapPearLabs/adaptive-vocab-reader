@@ -411,8 +411,9 @@ async function main() {
     const knownCount = initialWords.filter((w) => w.status === 'known').length;
     const learningCount = initialWords.filter((w) => w.status === 'learning').length;
     if (knownCount !== 25 || learningCount !== 25) throw new Error(`首测状态分布错误：known=${knownCount}, learning=${learningCount}`);
+    // 场景 16 / R-AUD-3：V0.1 已切断审计用户路径——首测答对不再产出审计标记
     const auditCount = Object.keys(afterTest.auditMarkers).length;
-    if (auditCount !== 25) throw new Error(`审计标记数应为 25（答对词），实际 ${auditCount}`);
+    if (auditCount !== 0) throw new Error(`审计标记数应为 0（V0.1 已切断审计路径），实际 ${auditCount}`);
     const serialized2 = JSON.stringify(afterTest);
     if (/localhost|comment-section|sentence/.test(serialized2)) throw new Error('首测快照包含页面信息');
 
@@ -446,8 +447,10 @@ async function main() {
     await popup2.waitForSelector('.summary', { timeout: 10_000 });
     const summaryText = await popup2.$eval('.summary', (el) => el.textContent || '');
     if (!/首测完成/.test(summaryText)) throw new Error(`重开弹窗未恢复已完成状态：${summaryText}`);
+    // 场景 16 / R-AUD-1：V0.1 已切断审计用户路径——首测完成摘要不得再暴露「开始审计」入口
+    if (/开始审计/.test(summaryText)) throw new Error(`场景 16 失败：重开弹窗仍暴露审计入口：${summaryText}`);
 
-    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true`);
+    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true, audit_path_cut=true`);
   } finally {
     if (browser2) await browser2.close();
     await killChrome(chrome2);

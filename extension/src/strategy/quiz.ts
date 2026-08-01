@@ -19,7 +19,6 @@ import type {
   QuizQuestion,
   InitialTestPlan,
   WordState,
-  AuditMarker,
   StateChange,
   ApplyAnswerResult,
   StatusFromCorrectness,
@@ -280,14 +279,7 @@ export function applyAnswer(
     };
   }
 
-  // 答对：创建单次答对待审计标记，绑定首测计划版本 + 快照状态版本
-  const audit: AuditMarker = {
-    word: question.word,
-    source: 'initial-correct',
-    planVersion: plan.version,
-    stateVersion,
-    createdAt: Date.now(),
-    pending: true,
-  };
-  return { kind: 'correct', change, audit, clearMarkerWord: null };
+  // 答对：仅提交已知状态。V0.1 用户路径已切断审计（Ticket 01 / R-AUD-3），
+  // 不再创建待审计标记；审计相关逻辑保留在冻结的 strategy/audit.ts，仅不可达。
+  return { kind: 'correct', change, clearMarkerWord: null };
 }

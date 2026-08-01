@@ -189,7 +189,7 @@ describe('buildInitialTestPlan', () => {
 describe('applyAnswer', () => {
   const manualKnown: WordState = { status: 'known', source: 'manual', updatedAt: 0, version: 1 };
 
-  it('correct answer → known + pending audit marker bound to plan.version + stateVersion', () => {
+  it('correct answer → known (V0.1 不再产出审计标记)', () => {
     const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, undefined, 1);
     expect(result.kind).toBe('correct');
     if (result.kind !== 'correct') return;
@@ -197,13 +197,9 @@ describe('applyAnswer', () => {
     expect(result.change.source).toBe('initial');
     expect(result.change.word).toBe('apple');
     expect(result.clearMarkerWord).toBeNull();
-    expect(result.audit).not.toBeNull();
-    expect(result.audit!.word).toBe('apple');
-    expect(result.audit!.pending).toBe(true);
-    // 审计标记绑定到首测计划版本，而非 schemaVersion
-    expect(result.audit!.planVersion).toBe(SAMPLE_PLAN.version);
-    // 审计标记盖当前快照状态版本，供 worker 隔离/清理
-    expect(result.audit!.stateVersion).toBe(1);
+    // R-AUD-3：V0.1 用户路径已切断审计——答对分支不得再产出任何审计标记
+    expect(Object.keys(result).sort()).toEqual(['change', 'clearMarkerWord', 'kind']);
+    expect('audit' in result).toBe(false);
   });
 
   it('wrong answer → learning, no audit, clears stale marker for word', () => {
@@ -228,6 +224,7 @@ describe('applyAnswer', () => {
   it('page manual state takes priority over initial test answer', () => {
     const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown, 1);
     expect(result.kind).toBe('priority-preserved');
+    if (result.kind !== 'priority-preserved') return;
     expect(result.change).toBeNull();
     expect(result.audit).toBeNull();
     expect(result.clearMarkerWord).toBe('apple');

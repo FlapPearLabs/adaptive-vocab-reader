@@ -92,7 +92,7 @@ describe('reduceWorkerMessage — INITIAL_TEST_ANSWER 协调路径', () => {
     expect((response as { result?: { kind?: string } }).result?.kind).toBe('priority-preserved');
   });
 
-  it('首测答对（无手动状态）→ 加审计标记并广播状态变更', () => {
+  it('首测答对（无手动状态）→ 状态置为 known、不创建审计标记、广播状态变更', () => {
     const word = 'apple';
     const snapshot: VocabSnapshot = createEmptySnapshot(SEED, 'd');
     snapshot.initialTest = { plan: planFor(word), answers: [null], completed: false };
@@ -103,7 +103,9 @@ describe('reduceWorkerMessage — INITIAL_TEST_ANSWER 协调路径', () => {
       { id: 'ext', url: 'popup.html' },
     );
 
-    expect(next.auditMarkers[word]).toBeDefined();
+    // R-AUD-3：V0.1 用户路径已切断审计——首测结算不得创建任何审计标记
+    expect(next.auditMarkers[word]).toBeUndefined();
+    expect(Object.keys(next.auditMarkers)).toHaveLength(0);
     expect(next.words[word]?.status).toBe('known');
     expect(broadcast).toEqual({ word, newStatus: 'known' });
     expect(changed).toBe(true);

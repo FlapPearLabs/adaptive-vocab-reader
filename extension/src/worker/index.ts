@@ -29,7 +29,6 @@ import {
   mergeStateChange,
   getWords,
   generateInstallSeed,
-  addAuditMarker,
   setInitialTest,
   setAuditPlan,
   clearAuditMarker,
@@ -162,10 +161,8 @@ export function reduceWorkerMessage(
 
       // 应用状态变更（mergeStateChange 自动以当前 stateVersion 标记单词状态）
       let next = mergeStateChange(snapshot, result.change.word, result.change.newStatus, 'initial');
-      if (result.audit) {
-        next = addAuditMarker(next, result.audit);
-      }
-      // 清除该词上一轮残留的待审计标记（答错/不确定/手动优先时）
+      // 清除该词上一轮残留的待审计标记（答错/不确定/手动优先时；
+      // 答对分支在 V0.1 已不再产出标记，见 Ticket 01 / R-AUD-3）
       if (result.clearMarkerWord) {
         next = clearAuditMarker(next, result.clearMarkerWord);
       }
