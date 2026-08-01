@@ -108,11 +108,20 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 请作为严格的软件审查员，审查这个公开 GitHub Compare：<COMPARE_URL>。
 以仓库中的 RULES.md、AGENTS.md、已批准 Spec 和本地 ticket 为准；不要根据旧 ticket、注释或提交信息臆造新需求。
 检查：范围是否越界、规则冲突、数据/隐私风险、错误处理、测试是否覆盖真实用户路径，以及变更是否可合并。
-不要改代码，不要输出泛泛建议。请严格按以下格式回复：
+不要改代码，不要输出泛泛建议。即使你无法读取仓库中的规则文件，也必须按本提示词中的路由规则给出结论：
+- `CHANGES_REQUESTED`：目标为 WorkBuddy；原 WorkBuddy 任务仍活跃则发“当前任务”，否则建议“新任务”。
+- 文档变更的 `PASS`：目标为 WorkBuddy 当前任务，由它整理 Codex 交接包。
+- 代码变更的 `PASS`：目标为 Codex 当前任务，由它进行最终验证和合并；当前 Codex 任务不存在时才建议新任务。
+请严格按以下格式回复：
 VERDICT: PASS 或 CHANGES_REQUESTED
 BLOCKERS: 每项写 文件:行号、问题、违反的规则/规格、最小修复建议；没有则写 无
 NON_BLOCKING: 可选建议；没有则写 无
-CODEX_HANDOFF: 若 PASS，给出一段不引入新需求、可直接交给 Codex 的实施/验收摘要；若未通过写“等待修复后重审”。
+TASK_ROUTING:
+- TARGET: WorkBuddy / Codex / 无
+- DESTINATION: 当前任务 / 新任务 / 无
+- REASON: 一句话说明
+NEXT_AGENT_PROMPT: 若 TARGET 非“无”，给出一段可直接原样转发给该代理的行动提示词；否则写“无”。
+CODEX_HANDOFF: 仅文档变更且 PASS 时，给出一段不引入新需求、可直接交给 Codex 的实施/验收摘要；其他情况写“无”。
 ```
 
 ## 6. 本项目的最低质量门禁
