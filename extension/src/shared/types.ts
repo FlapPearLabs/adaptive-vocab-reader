@@ -335,7 +335,7 @@ export interface VocabStrategy {
   /** 冻结首测计划：十频段各五题、选项顺序与计划版本在调用时冻结。 */
   freezeInitialTestPlan(input: FreezeInitialTestInput): InitialTestPlan;
 
-  /** 结算一道冻结的首测题：返回原子状态变更（含审计标记）+ 陈旧标记清理意图。 */
+  /** 结算一道冻结的首测题：返回原子状态变更 + 陈旧标记清理意图（V0.1 用户路径已切断审计，不再产出审计标记）。 */
   settleInitialTestAnswer(input: SettleInitialTestInput): ApplyAnswerResult;
 
   /**
@@ -369,14 +369,12 @@ export interface FreezeInitialTestInput {
   readonly dictVersion: string;
 }
 
-/** 结算冻结首测题输入：冻结计划 + 题号 + 作答 + 该词当前状态 + 当前快照状态版本 */
+/** 结算冻结首测题输入：冻结计划 + 题号 + 作答 + 该词当前状态（V0.1 用户路径已切断审计，不再需要 stateVersion） */
 export interface SettleInitialTestInput {
   readonly plan: InitialTestPlan;
   readonly questionIndex: number;
   readonly answer: QuizAnswer;
   readonly current: WordState | undefined;
-  /** 当前快照状态版本（VocabSnapshot.stateVersion），盖到新建审计标记 */
-  readonly stateVersion: number;
 }
 
 /** 冻结审计计划输入：候选所需快照片段 + 受控词典视图 + 种子 */

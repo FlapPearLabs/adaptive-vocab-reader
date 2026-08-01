@@ -233,27 +233,24 @@ export function isAnswerCorrect(question: QuizQuestion, answer: QuizAnswer): boo
 /**
  * 应用一道题的作答，返回判别联合结果。
  *
- * 规则（规格第 4 节 / Issue #2 产品合同）：
- * - 答对         → known + 单次答对待审计标记（盖当前快照状态版本）
+ * 规则（规格第 4 节 / Issue #2 产品合同；V0.1 Ticket 01 / R-AUD-3 已切断审计）：
+ * - 答对         → known（仅提交已知状态，不再产出任何审计标记）
  * - 答错 / 不确定 → learning（进入活跃生词表），并清除该词上一轮的待审计标记
  * - 页面手动状态优先：若当前状态来自手动标记，则保留手动状态，不产生任何变更
  *
- * 审计标记绑定到 `plan.version`（首测计划版本）与 `stateVersion`（快照状态版本），
- * 后者由调用方经 SettleInitialTestInput 传入，使重复相同 plan.version 重测时
- * worker 仍能据 stateVersion 清除上一轮的陈旧标记。
+ * 冻结审计模块（strategy/audit.ts）与审计标记逻辑保留但已从 V0.1 用户路径移除，
+ * 首测结算路径不再创建、携带或返回 AuditMarker。
  *
  * @param plan 冻结的首测计划
  * @param questionIndex 题号
  * @param answer 用户作答
  * @param current 该词当前状态（可能 undefined = 未知）
- * @param stateVersion 当前快照状态版本（盖到新建审计标记）
  */
 export function applyAnswer(
   plan: InitialTestPlan,
   questionIndex: number,
   answer: QuizAnswer,
   current: WordState | undefined,
-  stateVersion: number,
 ): ApplyAnswerResult {
   const question = plan.questions[questionIndex]!;
 

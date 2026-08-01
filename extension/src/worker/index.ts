@@ -141,7 +141,6 @@ export function reduceWorkerMessage(
         questionIndex,
         answer,
         current,
-        stateVersion: snapshot.stateVersion,
       });
 
       // 记录作答（无论是否产生状态变更，作答本身必须持久化）

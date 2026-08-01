@@ -190,7 +190,7 @@ describe('applyAnswer', () => {
   const manualKnown: WordState = { status: 'known', source: 'manual', updatedAt: 0, version: 1 };
 
   it('correct answer → known (V0.1 不再产出审计标记)', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, undefined, 1);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, undefined);
     expect(result.kind).toBe('correct');
     if (result.kind !== 'correct') return;
     expect(result.change.newStatus).toBe('known');
@@ -203,7 +203,7 @@ describe('applyAnswer', () => {
   });
 
   it('wrong answer → learning, no audit, clears stale marker for word', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 1 }, undefined, 1);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 1 }, undefined);
     expect(result.kind).toBe('wrong');
     if (result.kind !== 'wrong') return;
     expect(result.change.newStatus).toBe('learning');
@@ -213,7 +213,7 @@ describe('applyAnswer', () => {
   });
 
   it('unsure answer → learning, no audit, clears stale marker for word', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'unsure' }, undefined, 1);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'unsure' }, undefined);
     expect(result.kind).toBe('unsure');
     if (result.kind !== 'unsure') return;
     expect(result.change.newStatus).toBe('learning');
@@ -222,7 +222,7 @@ describe('applyAnswer', () => {
   });
 
   it('page manual state takes priority over initial test answer', () => {
-    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown, 1);
+    const result = applyAnswer(SAMPLE_PLAN, 0, { kind: 'option', optionIndex: 0 }, manualKnown);
     expect(result.kind).toBe('priority-preserved');
     if (result.kind !== 'priority-preserved') return;
     expect(result.change).toBeNull();

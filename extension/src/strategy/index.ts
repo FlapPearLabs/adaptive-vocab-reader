@@ -93,7 +93,7 @@ export function createVocabStrategy(): VocabStrategy {
     },
 
     settleInitialTestAnswer(input: SettleInitialTestInput): ApplyAnswerResult {
-      return applyAnswer(input.plan, input.questionIndex, input.answer, input.current, input.stateVersion);
+      return applyAnswer(input.plan, input.questionIndex, input.answer, input.current);
     },
 
     // ---- 首测开始/重置：策略生成的完整生命周期 transition（worker 机械应用）----

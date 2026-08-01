@@ -130,7 +130,7 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
     // R-AUD-3：V0.1 用户路径已切断审计——答对分支不得再交付任何审计标记字段。
     const q0 = plan.questions[0]!;
     const correct: QuizAnswer = { kind: 'option', optionIndex: q0.correctOptionIndex };
-    const res = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: correct, current: undefined, stateVersion: 0 });
+    const res = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: correct, current: undefined });
     expect(res.kind).toBe('correct');
     if (res.kind === 'correct') {
       expect(res.change.newStatus).toBe('known');
@@ -149,16 +149,16 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
     const q0 = plan.questions[0]!;
     const wrongIdx = q0.correctOptionIndex === 0 ? 1 : 0;
 
-    const wrong = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'option', optionIndex: wrongIdx }, current: undefined, stateVersion: 0 });
+    const wrong = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'option', optionIndex: wrongIdx }, current: undefined });
     expect(wrong.kind).toBe('wrong');
     expect(wrong.change!.newStatus).toBe('learning');
 
-    const unsure = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'unsure' }, current: undefined, stateVersion: 0 });
+    const unsure = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'unsure' }, current: undefined });
     expect(unsure.kind).toBe('unsure');
     expect(unsure.change!.newStatus).toBe('learning');
 
     const manual: WordState = { status: 'known', source: 'manual', updatedAt: 0, version: 1 };
-    const priority = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex }, current: manual, stateVersion: 0 });
+    const priority = strategy.settleInitialTestAnswer({ plan, questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex }, current: manual });
     expect(priority.kind).toBe('priority-preserved');
     expect(priority.change).toBeNull();
   });

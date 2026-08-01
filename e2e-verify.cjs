@@ -299,6 +299,35 @@ async function main() {
     const worker2 = await getWorker(browser2);
     if (!worker2) throw new Error('未找到本扩展的 Service Worker，无法检查首测快照');
 
+    // 场景 16 / R-AUD-2：注入未完成（残留）的冻结审计计划，验证打开首测弹窗后
+    // 不恢复、不进入审计 UI，仅显示正常首测开始界面（V0.1 用户路径已切断审计）。
+    const residualPlan = {
+      version: 'residual-plan-version',
+      planVersion: 'residual-plan-version',
+      stateVersion: 1,
+      seed: 'residual-seed',
+      candidates: [{ word: 'apple', bucket: 'initial-correct', band: 0 }],
+      questions: [{ word: 'apple', correctOptionIndex: 0, options: [{ translation: '苹果' }, { translation: '香蕉' }] }],
+      results: [null],
+      createdAt: 1,
+    };
+    const residualSnapshot = {
+      schemaVersion: 2,
+      dictVersion: 'd',
+      stateVersion: 1,
+      installSeed: 'residual-seed',
+      words: {},
+      auditMarkers: {
+        apple: { word: 'apple', source: 'initial-correct', planVersion: 'residual-plan-version', stateVersion: 1, createdAt: 1, pending: true },
+      },
+      auditLog: [],
+      auditPlan: residualPlan,
+      initialTest: null,
+      lastUpdated: Date.now(),
+    };
+    await worker2.evaluate((snap) => chrome.storage.local.set({ avr_vocab_snapshot: snap }), residualSnapshot);
+    console.log('[stage2] 已注入残留未完成 auditPlan（R-AUD-2 验证）');
+
     const popup = await browser2.newPage();
     popup.on('console', (m) => pageLogs.push(`popup: ${m.type()}: ${m.text()}`));
     popup.on('pageerror', (e) => pageLogs.push(`popup pageerror: ${e.message}`));
@@ -307,6 +336,13 @@ async function main() {
     console.log('[stage2] popup goto done');
     await popup.waitForSelector('button.primary', { timeout: 10_000 });
     console.log('[stage2] button.primary found');
+
+    // 场景 16 / R-AUD-2：弹窗打开后必须显示正常首测开始界面，绝不恢复残留审计计划
+    const popupTextBeforeStart = await popup.evaluate(() => document.body.innerText || '');
+    if (/开始审计/.test(popupTextBeforeStart)) throw new Error(`R-AUD-2 失败：残留审计计划被恢复为审计入口：${popupTextBeforeStart}`);
+    if (/审计中/.test(popupTextBeforeStart)) throw new Error(`R-AUD-2 失败：残留审计计划导致弹窗进入审计 UI：${popupTextBeforeStart}`);
+    if (!/开始测评/.test(popupTextBeforeStart)) throw new Error(`R-AUD-2 失败：弹窗未显示正常首测开始界面（应含「开始测评」）：${popupTextBeforeStart}`);
+    console.log('[stage2] R-AUD-2 通过：残留 auditPlan 未被弹窗恢复/进入');
 
     // 开始测评
     await popup.click('button.primary');
@@ -450,7 +486,7 @@ async function main() {
     // 场景 16 / R-AUD-1：V0.1 已切断审计用户路径——首测完成摘要不得再暴露「开始审计」入口
     if (/开始审计/.test(summaryText)) throw new Error(`场景 16 失败：重开弹窗仍暴露审计入口：${summaryText}`);
 
-    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true, audit_path_cut=true`);
+    console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit_markers=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true, audit_entry_absent=true, residual_plan_ignored=true`);
   } finally {
     if (browser2) await browser2.close();
     await killChrome(chrome2);
