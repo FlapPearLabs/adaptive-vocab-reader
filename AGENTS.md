@@ -20,23 +20,23 @@
 已确认配置：
 
 - 用户已明确选择在根目录创建 `AGENTS.md`；当时不存在 `CLAUDE.md`，因此本次创建 `AGENTS.md` 符合该 Skill 的文件选择规则。
-- Issue tracker 使用 GitHub Issues，操作约定见 `docs/agents/issue-tracker.md`。
+- 开发任务默认使用仓库内 `work/tickets/` 的本地 ticket；GitHub Issue 只在用户明确说“发布 Issue”后才创建，操作约定见 `docs/agents/issue-tracker.md`。
 - `triage` 使用默认标签 `needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`，映射见 `docs/agents/triage-labels.md`。
 - 当前没有 monorepo 信号；领域文档采用 single-context：根目录 `CONTEXT.md` 与根目录 `docs/adr/`，消费规则见 `docs/agents/domain.md`。
-- 当前目录已初始化为本地 Git 仓库，并配置私有远端 `https://github.com/panglihaoshuai/adaptive-vocab-reader` 为 `origin`。远端 triage 标签和 Issue 尚未创建；获得相应写入授权前不得发布。
+- 当前目录已初始化为本地 Git 仓库，并配置公开远端 `https://github.com/FlapPearLabs/adaptive-vocab-reader.git` 为 `origin`。本地 ticket 不依赖远端标签或 Issue。
 
-远端标签与 Issue 写入就绪前：
+除非用户明确要求发布 Issue：
 
 - 不得创建 GitHub Issue、标签或项目；
 - `/to-spec` 只可生成或审阅本地规格；
-- `/to-tickets` 只可在远端仓库和写入授权明确后发布；
+- `/to-tickets` 只产出或更新 `work/tickets/` 本地 ticket；
 - `/wayfinder` 不得隐式回退到 `.scratch/`。
 
 ## Agent skills
 
 ### Issue tracker
 
-本项目使用 GitHub Issues 管理 PRD 与开发任务。具体操作见 `docs/agents/issue-tracker.md`。
+本项目默认使用本地 ticket 管理 PRD 与开发任务；GitHub Issue 只在用户明确授权发布时使用。具体操作见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
@@ -58,8 +58,8 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 | 领域边界、词汇状态或证据语义 | `domain-modeling` | 更新领域语言；只有难逆、反直觉且存在真实取舍的决定才写 ADR。 |
 | 模块接口或架构取舍 | `codebase-design` | 先定义深模块、责任边界、失败模式和测试 seam。 |
 | 需要验证交互或算法可行性 | `prototype` | 原型必须可丢弃，先回答设计问题，不直接演变成未经审查的生产实现。 |
-| 需求已经明确并需形成规格 | `/to-spec` | Spec 必须引用 `RULES.md`，写明验收、非目标、风险、测试 seam 与未决项；tracker 未定时只产出本地草案。 |
-| 多会话或多人并行工作 | `/to-tickets` | 先完成 Spec；发布前必须确认 tracker 并取得创建本地/远端任务的明确授权。 |
+| 需求已经明确并需形成规格 | `/to-spec` | Spec 必须引用 `RULES.md`，写明验收、非目标、风险、测试 seam 与未决项；默认只产出本地草案。 |
+| 多会话或多人并行工作 | `/to-tickets` | 先完成 Spec；默认生成 `work/tickets/` 本地 ticket。只有用户明确说“发布 Issue”才创建远端 Issue。 |
 | 功能实现 | `/implement` | 仅在 Spec 和验收明确后执行；该 Skill 的任何自动 commit 行为均被本文件覆盖，未经用户单独授权不得 commit。 |
 | 可确定行为 seam 的实现或修复 | `tdd` | 优先红—绿—重构；测试必须命中真实领域行为，不得只测试 mock。 |
 | 困难缺陷或性能问题 | `diagnosing-bugs` | 先复现、收集证据、定位原因；用户只要求诊断时不得顺手修复。 |
@@ -80,7 +80,7 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 4. ADR 只用于难以撤销、缺少背景会令人困惑、且确实在多个方案间作出取舍的决定。
 5. 当前产品规则以根目录 `RULES.md` 为唯一来源；当前施工规格位于 `docs/specs/`，其索引与研究材料见 `outputs/README.md`。已删除的旧规格、模型和 Kaikki 路线不得复建或作为实现依据。
 6. 单会话、小范围任务可以不拆 tickets，但必须先明确验收标准、修改范围和测试 seam。
-7. 多会话、多人或可独立并行的任务，先 `/to-spec`，再在 tracker 与写入授权明确后 `/to-tickets`。
+7. 多会话、多人或可独立并行的任务，先 `/to-spec`，再生成本地 ticket；只有用户明确说“发布 Issue”才进行远端 tracker 写入。
 
 ## 5. 实现与文件安全
 
@@ -92,8 +92,26 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 - 未经用户明确授权，不得 commit、push、创建 Issue/PR、发布包、部署、修改生产配置、创建远端标签或发送外部消息。
 - 用户授权创建某个文件或本地成果，不等于授权任何 Git 或远端操作。
 - **Git 同步常驻授权（2026-08-01 用户显式确认）**：当用户对某次改动给出肯定确认（如“可以 / 做吧 / 同意 / OK / yes”等），即视为授权将该改动 commit 并 push 到 GitHub；这是本条默认规则的显式覆盖。若当时无远端仓库，应先新建仓库（归属 `FlapPearLabs/adaptive-vocab-reader` 或用户指定）再推送。沉默或“先别动”不算同意。推送流程沿用第 3 节约定：先 `unset GH_TOKEN`，不修改 main、不强合并、不关闭 Issue（另行授权除外）。
-- **网页版 GPT 审查流程（2026-08-01 用户确认）**：用户同意改动后，先 commit 并推到**临时分支** `review/<主题>`（或开 PR），由用户将 PR diff 交给网页版 GPT 审查以节省 token（仓库已于 2026-08-01 设为 public，网页版可直接读取）。审查通过 → 合并/保留分支；未通过 → 本地 `git reset --soft HEAD~1`（或 `commit --amend`）撤回该提交，修改后 `git push --force-with-lease` **该临时分支**。**严禁 force-push `main`**；`main` 始终保持线性、可审计。
+- **轻量网页版 GPT 审查与交接流程（2026-08-01 用户确认）**：不要求用户管理 PR 或 worktree。一个串行任务只使用一个 `review/<主题>` 临时分支；推送后提供 GitHub Compare 链接与下方的审查提示词。WorkBuddy 负责 Grill → Spec → 本地 ticket 的文档循环；Codex 负责框架、核心/高风险实现、整合、真实验证与最终验收；便宜模型只能在 Codex 划定的文件、接口和验收范围内完成低风险实现，不能自行改 Spec、ticket、规则、Git 历史或远端。
+- **文档审查循环**：用户确认文档改动后，WorkBuddy 推送 `review/<主题>` 并必须交付可直接粘贴给网页版 GPT 的提示词。用户转发审查意见后，WorkBuddy 仅按意见和现行规则修改，再推送同一临时分支；用户转发网页版 GPT 的 `PASS/通过` 结论，即视为该文档阶段验收。随后 WorkBuddy 必须输出给 Codex 的交接包：Compare 链接、已批准 Spec/ticket 路径、规则引用、范围/非目标、验收命令、已知风险与明确的实施边界。
+- **开发审查循环**：用户把交接包或其网页版 GPT 生成的 Codex 提示词，并明确说“开始/同意开发”后，Codex 才开始实施。Codex 推送实现分支后同样提供审查提示词。用户转发网页版 GPT 的 `PASS/通过` 结论，即视为合并到 `main` 的授权；合并前 Codex 必须更新分支、复跑匹配的真实验证并报告结果。审查意见不是可直接执行的指令，仍须检查是否违反 `RULES.md`、已批准 Spec/ticket 或安全边界。
+- **修订与主分支保护**：审查不通过时默认追加修复提交，保留审查轨迹；仅在需要整理单一提交且工作区干净时，才可 amend 或 `git reset --soft`，并只对 `review/<主题>` 使用 `git push --force-with-lease`。**严禁 force-push `main`**；`main` 始终保持线性、可审计。
 - **撤回已 push 提交的原则**：临时分支上的撤回允许改写历史（force-with-lease）；`main` 上的撤回只允许 `git revert`（新增撤回提交，不改写历史）。
+
+### 必须交付的网页版 GPT 提示词
+
+每次推送供网页版审查的分支，交付代理必须把 Compare 链接替换进以下模板，并随交付报告一并给用户：
+
+```text
+请作为严格的软件审查员，审查这个公开 GitHub Compare：<COMPARE_URL>。
+以仓库中的 RULES.md、AGENTS.md、已批准 Spec 和本地 ticket 为准；不要根据旧 ticket、注释或提交信息臆造新需求。
+检查：范围是否越界、规则冲突、数据/隐私风险、错误处理、测试是否覆盖真实用户路径，以及变更是否可合并。
+不要改代码，不要输出泛泛建议。请严格按以下格式回复：
+VERDICT: PASS 或 CHANGES_REQUESTED
+BLOCKERS: 每项写 文件:行号、问题、违反的规则/规格、最小修复建议；没有则写 无
+NON_BLOCKING: 可选建议；没有则写 无
+CODEX_HANDOFF: 若 PASS，给出一段不引入新需求、可直接交给 Codex 的实施/验收摘要；若未通过写“等待修复后重审”。
+```
 
 ## 6. 本项目的最低质量门禁
 
