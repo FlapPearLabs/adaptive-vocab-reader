@@ -99,7 +99,7 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 - **格式化行动交接（2026-08-01 用户确认）**：每次要求 WorkBuddy 或 Codex 做下一步工作时，交付者必须提供一个可原样转发的代码块，且字段和顺序固定如下；不得省略、改名或用散文替代。网页版 GPT 的 `NEXT_AGENT_PROMPT` 也必须使用同一格式。
 
 ```text
-发送位置：当前任务 / 新任务
+发送位置：当前任务 / 新任务 / 待确认
 理由：……
 目标代理：WorkBuddy / Codex
 当前阶段：文档审查 / 文档修订 / 开发 / 代码审查 / 合并
@@ -109,7 +109,15 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 验收或预期返回：……
 ```
 
-- **任务状态确认**：发送审查提示词时，交付者必须明确填写源任务的 `ACTIVE / COMPLETED / UNKNOWN` 状态；若为 `UNKNOWN`，接收代理必须在行动前先返回 `ROUTING_CONFIRMATION`（当前任务可否继续；否则建议的新任务及理由），不得假装知道任务状态。这样用户只需转发，不必自行判断。
+- **路由矩阵与任务状态确认**：发送审查提示词时，交付者必须填写 `ORIGIN_AGENT`、`ORIGIN_TASK_STATUS` 和 `CODEX_TASK_STATUS`（均为 `ACTIVE / COMPLETED / UNKNOWN`）。路由只按下表决定，禁止只根据文档/代码阶段覆盖源任务信息：
+
+| 审查结论 | 目标代理 | 使用的任务状态 | ACTIVE | COMPLETED | UNKNOWN |
+| --- | --- | --- | --- | --- | --- |
+| `CHANGES_REQUESTED` | `ORIGIN_AGENT` | `ORIGIN_TASK_STATUS` | 当前任务 | 新任务 | 待确认 |
+| `DOCUMENT` 的 `PASS` | `ORIGIN_AGENT` | `ORIGIN_TASK_STATUS` | 当前任务 | 新任务 | 待确认 |
+| `CODE` 的 `PASS` | Codex | `CODEX_TASK_STATUS` | 当前任务 | 新任务 | 待确认 |
+
+`待确认` 时，`NEXT_AGENT_PROMPT` 只能使用固定格式请求 `ROUTING_CONFIRMATION`，明确禁止修改文件、提交或推送；收到该提示词的代理只返回“当前任务可否继续”或“需新任务及理由”。用户只需原样转发，不必猜测任务位置。
 - **交付前新鲜度检查（2026-08-01 用户确认）**：代理在输出最终交付报告、Compare 链接、网页版 GPT 审查提示词、交接包，或执行 commit/push 前，必须先 `git fetch origin main`，并以只读方式查看 `origin/main:AGENTS.md` 与 `origin/main:RULES.md`。不得因此 checkout、merge、rebase 或覆盖当前任务改动；只需采用其中较新的工作流/授权规则。若无法获取，必须在交付中明确说明“未能确认最新规则”，不得假装已检查。
 - **修订与主分支保护**：审查不通过时默认追加修复提交，保留审查轨迹；仅在需要整理单一提交且工作区干净时，才可 amend 或 `git reset --soft`，并只对 `review/<主题>` 使用 `git push --force-with-lease`。**严禁 force-push `main`**；`main` 始终保持线性、可审计。
 - **撤回已 push 提交的原则**：临时分支上的撤回允许改写历史（force-with-lease）；`main` 上的撤回只允许 `git revert`（新增撤回提交，不改写历史）。
@@ -123,19 +131,21 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 REVIEW_STAGE: DOCUMENT / CODE（交付者必须替换为实际阶段）
 ORIGIN_AGENT: WorkBuddy / Codex（交付者必须替换为实际提交者）
 ORIGIN_TASK_STATUS: ACTIVE / COMPLETED / UNKNOWN（交付者必须替换为实际状态）
+CODEX_TASK_STATUS: ACTIVE / COMPLETED / UNKNOWN（交付者必须替换为实际状态；仅 CODE 的 PASS 使用）
 以仓库中的 RULES.md、AGENTS.md、已批准 Spec 和本地 ticket 为准；不要根据旧 ticket、注释或提交信息臆造新需求。
 检查：范围是否越界、规则冲突、数据/隐私风险、错误处理、测试是否覆盖真实用户路径，以及变更是否可合并。
 不要改代码，不要输出泛泛建议。即使你无法读取仓库中的规则文件，也必须按本提示词中的路由规则给出结论：
-- `CHANGES_REQUESTED`：目标为 ORIGIN_AGENT；ORIGIN_TASK_STATUS 为 ACTIVE 则发“当前任务”，为 COMPLETED 则建议“新任务”，为 UNKNOWN 则要求接收代理先输出 `ROUTING_CONFIRMATION`。
-- `REVIEW_STAGE: DOCUMENT` 的 `PASS`：目标为 WorkBuddy 当前任务，由它整理 Codex 交接包。
-- `REVIEW_STAGE: CODE` 的 `PASS`：目标为 Codex 当前任务，由它进行最终验证和合并；当前 Codex 任务不存在时才建议新任务。
+- `CHANGES_REQUESTED`：目标为 ORIGIN_AGENT，并使用 ORIGIN_TASK_STATUS 路由。
+- `REVIEW_STAGE: DOCUMENT` 的 `PASS`：目标为 ORIGIN_AGENT，并使用 ORIGIN_TASK_STATUS 路由；只有目标为 WorkBuddy 时，才由它整理 Codex 交接包。
+- `REVIEW_STAGE: CODE` 的 `PASS`：目标为 Codex，并使用 CODEX_TASK_STATUS 路由；由 Codex 进行最终验证和合并。
+- 状态为 UNKNOWN 时，DESTINATION 必须是“待确认”，不得猜测当前或新任务。
 请严格按以下格式回复：
 VERDICT: PASS 或 CHANGES_REQUESTED
 BLOCKERS: 每项写 文件:行号、问题、违反的规则/规格、最小修复建议；没有则写 无
 NON_BLOCKING: 可选建议；没有则写 无
 TASK_ROUTING:
 - TARGET: WorkBuddy / Codex / 无
-- DESTINATION: 当前任务 / 新任务 / 无
+- DESTINATION: 当前任务 / 新任务 / 待确认 / 无
 - REASON: 一句话说明
 NEXT_AGENT_PROMPT: 若 TARGET 非“无”，必须使用“格式化行动交接”的固定字段给出可直接原样转发的代码块；否则写“无”。
 CODEX_HANDOFF: 仅文档变更且 PASS 时，给出一段不引入新需求、可直接交给 Codex 的实施/验收摘要；其他情况写“无”。

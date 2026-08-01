@@ -9,7 +9,7 @@
 - 路径：`work/tickets/<日期或版本>/<序号>-<主题>.md`。
 - 生成顺序：Grill 明确决策 → 已批准 Spec → 本地 ticket；不得让 ticket 取代 Spec。
 - 每个 ticket 必须写明范围、非目标、验收、测试 seam、依赖、风险，以及“用户现在多得到了什么”。
-- 文档推送后，WorkBuddy 必须按 `AGENTS.md` 的模板提供网页版 GPT 审查提示词与 Compare 链接，并明确 `REVIEW_STAGE` 和源任务状态；通过后输出使用“格式化行动交接”字段的 Codex 交接包。
+- 文档推送后，WorkBuddy 必须按 `AGENTS.md` 的模板提供网页版 GPT 审查提示词与 Compare 链接，并明确 `REVIEW_STAGE`、源代理、源任务状态和 Codex 任务状态；通过后按路由矩阵输出使用“格式化行动交接”字段的下一步交接包。
 
 ## 仅在明确授权时使用的 GitHub Issue 操作
 
