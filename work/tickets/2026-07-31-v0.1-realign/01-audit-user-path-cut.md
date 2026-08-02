@@ -8,7 +8,7 @@
 
 **Blocked by**：None — can start immediately（T1 → T2 为施工阻塞顺序，不是数据模型依赖）
 
-**Status:** ready-for-agent
+**Status:** done
 
 **用户可见收益**：打开 popup 不再看到「开始审计」这类 V0.1 根本不支持的入口，也不会被恢复进一个半成品审计流程；V0.1 用户路径只剩「阅读 + 首测」，不会误写入与新证据模型冲突的状态。
 
@@ -78,7 +78,15 @@ npm run test:e2e   # 含 §21 场景 16 局部断言
 
 ## Acceptance criteria
 
-- [ ] popup 任何状态下都不存在审计入口元素（DOM 负向断言）。
-- [ ] popup 启动不读取、不恢复 `auditPlan`。
-- [ ] 首测答对后 `snapshot.auditMarkers` 保持为空。
-- [ ] popup、content 与其他 V0.1 发送端不发送审计消息；首测和每日用户动作不触发审计 handler；冻结的 worker 审计 handler 和内部模块可以继续存在，但任何 V0.1 用户可达路径都不能调用它们。
+- [x] popup 任何状态下都不存在审计入口元素（DOM 负向断言）。
+- [x] popup 启动不读取、不恢复 `auditPlan`。
+- [x] 首测答对后 `snapshot.auditMarkers` 保持为空。
+- [x] popup、content 与其他 V0.1 发送端不发送审计消息；首测和每日用户动作不触发审计 handler；冻结的 worker 审计 handler 和内部模块可以继续存在，但任何 V0.1 用户可达路径都不能调用它们。
+
+## 完成记录（归档）
+
+- **完成日期**：2026-08-02
+- **合并 commit**：`0303836`（review/ticket-01-remediation → main，快进合并）
+- **审查结论**：网页版 GPT `VERDICT: PASS`（无 BLOCKER）；用户 2026-08-02 显式确认 01/02 完成并通过审查，授权纳入版本库
+- **验证**：`npm run typecheck` / `npm test`（207 单测）/ `npm run build` / 真实 Chrome E2E（§21 场景 16）全绿
+- **范围回顾**：R-AUD-1~5 全部落地——popup 无审计入口、首测不建 AuditMarker、用户路径不调用冻结审计模块；冻结代码未删未扩，未新增冻结测试

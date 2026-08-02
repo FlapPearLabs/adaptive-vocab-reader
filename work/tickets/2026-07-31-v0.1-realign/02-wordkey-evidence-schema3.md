@@ -9,7 +9,7 @@
 
 **Blocked by**：01 — 切断 V0.1 审计用户路径（T1 → T2 为施工阻塞顺序，不是数据模型硬依赖）
 
-**Status:** ready-for-agent
+**Status:** done
 
 **用户可见收益**：在页面上把 `went` 标为「会」，`go / going / gone` 立刻一起不再提示——同一个词只需判断一次；升级后旧词汇状态和旧首测结果不丢；此后手动标记再也不会把自己已经测过的样本从统计里抹掉。
 
@@ -127,12 +127,20 @@ npm run test:e2e   # 含 §21 场景 3 局部断言
 
 ## Acceptance criteria
 
-- [ ] `went/going/gone` → wordKey=`go` 共享状态与提示；`could` 独立于 `can`。
-- [ ] 页面 `data-word` 输出 wordKey；标记任一屈折形式后同 wordKey 其他词形提示一致变化。
-- [ ] manual 不创建、不修改、不删除 `AssessmentEvidence`。
-- [ ] 首测作答同时写 `WordState(initial)` 与 `AssessmentEvidence(initial, assessedAt=作答时刻)`；同词再测整条覆盖。
-- [ ] 迁移：surface 状态并入 core wordKey；无法映射的旧 key 保守保留。
-- [ ] 迁移：冲突按 `updatedAt` → `manual` → `learning` 三层仲裁。
-- [ ] 迁移：按下标配对 `initialTest.plan.questions` + `answers` 重建证据，`assessedAt=0`，不用 `Date.now`/`lastUpdated`/`WordState.source` 反推；部分首测只恢复已答题；损坏或越界跳过；manual `WordState` 不被覆盖。
-- [ ] 迁移：`auditMarkers` 清空、`auditPlan=null`、`auditLog` 保留不转换。
-- [ ] 迁移确定、纯函数、幂等，一次持久化写入；对已是 v3 的快照恒等。
+- [x] `went/going/gone` → wordKey=`go` 共享状态与提示；`could` 独立于 `can`。
+- [x] 页面 `data-word` 输出 wordKey；标记任一屈折形式后同 wordKey 其他词形提示一致变化。
+- [x] manual 不创建、不修改、不删除 `AssessmentEvidence`。
+- [x] 首测作答同时写 `WordState(initial)` 与 `AssessmentEvidence(initial, assessedAt=作答时刻)`；同词再测整条覆盖。
+- [x] 迁移：surface 状态并入 core wordKey；无法映射的旧 key 保守保留。
+- [x] 迁移：冲突按 `updatedAt` → `manual` → `learning` 三层仲裁。
+- [x] 迁移：按下标配对 `initialTest.plan.questions` + `answers` 重建证据，`assessedAt=0`，不用 `Date.now`/`lastUpdated`/`WordState.source` 反推；部分首测只恢复已答题；损坏或越界跳过；manual `WordState` 不被覆盖。
+- [x] 迁移：`auditMarkers` 清空、`auditPlan=null`、`auditLog` 保留不转换。
+- [x] 迁移确定、纯函数、幂等，一次持久化写入；对已是 v3 的快照恒等。
+
+## 完成记录（归档）
+
+- **完成日期**：2026-08-02
+- **合并 commit**：`6f5272b`（main 当前 tip）
+- **审查结论**：Codex 实施并合并 main；用户 2026-08-02 显式确认 01/02 完成并通过审查，授权纳入版本库
+- **验证**：`npm run typecheck` / `npm test` / `python3 tests/test_build_ecdict_core.py -v`（9/9）/ `npm run build` / 真实 Chrome E2E（§21 场景 3）全绿
+- **范围回顾**：wordKey 身份、AssessmentEvidence 双写、schema 2→3 纯迁移（v2→v3 四步）、R-MIG-8 备份步骤已定义未执行（留待 T5 全绿后 T6 真实 profile 发布门）；未建任何被禁抽象层
