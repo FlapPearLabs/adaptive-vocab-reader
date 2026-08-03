@@ -15,6 +15,9 @@ const puppeteer = require('puppeteer-core');
 const ROOT = __dirname;
 const DIST_DIR = path.join(ROOT, 'dist');
 const FIXTURE = path.join(ROOT, 'tests/fixtures/test-page.html');
+// T5 场景 14：真实 schema 2 快照 fixture（隔离文件，不触碰真实 profile）。
+// 经扩展自身 worker/storage 启动路径升级 v3（R-MIG-7），不得只调迁移纯函数冒充。
+const SCHEMA2_FIXTURE_PATH = path.join(ROOT, 'tests/fixtures/schema2-snapshot.json');
 const PORT = 18923;
 
 function findChromeForTesting() {
@@ -221,6 +224,16 @@ async function main() {
           return;
         }
       }
+      // T5 跨标签同步页（sync-*.html）：由测试动态写入 tempDir，同一 wordKey 不同词形分页。
+      const syncHit = /^\/sync-([a-z0-9-]+)\.html$/.exec(request.url || '');
+      if (syncHit) {
+        const f = path.join(tempDir, `sync-${syncHit[1]}.html`);
+        if (fs.existsSync(f)) {
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          response.end(fs.readFileSync(f, 'utf8'));
+          return;
+        }
+      }
       response.writeHead(404).end();
     },
   );
@@ -353,27 +366,15 @@ async function main() {
     let workerMigration = await waitForWorker(browserMigration);
     if (!workerMigration) throw new Error('迁移 E2E 未找到初始 Service Worker');
     const live = await workerMigration.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
-    const schema2Fixture = {
-      schemaVersion: 2,
-      dictVersion: live.dictVersion,
-      stateVersion: 0,
-      installSeed: 'migration-seed',
-      words: {
-        ability: { status: 'learning', source: 'manual', updatedAt: 4, version: 0 },
-        abilities: { status: 'known', source: 'initial', updatedAt: 5, version: 0 },
-      },
-      auditMarkers: { legacy: { word: 'legacy' } },
-      auditLog: [{ word: 'legacy' }],
-      auditPlan: { version: 'legacy-plan' },
-      initialTest: {
-        plan: { version: 'old', seed: 'migration-seed', dictVersion: live.dictVersion, questions: [
-          { word: 'ability', options: [{}, {}], correctOptionIndex: 0 },
-        ] },
-        answers: [{ kind: 'option', optionIndex: 0 }],
-        completed: false,
-      },
-      lastUpdated: 5,
-    };
+    // T5 场景 14：注入真实 schema 2 快照 fixture（文件，非内联构造），
+    // 经「重启 → loadSnapshot → migrateSnapshot → 持久化写回」的真实 worker/storage 路径升级 v3。
+    const schema2Fixture = JSON.parse(fs.readFileSync(SCHEMA2_FIXTURE_PATH, 'utf8'));
+    if (schema2Fixture.schemaVersion !== 2) {
+      throw new Error(`schema2 fixture 不是 schema 2 快照：${schema2Fixture.schemaVersion}`);
+    }
+    if (schema2Fixture.dictVersion !== live.dictVersion) {
+      throw new Error(`schema2 fixture 的 dictVersion 与当前构建不一致：${schema2Fixture.dictVersion} vs ${live.dictVersion}（fixture 已过期）`);
+    }
     await workerMigration.evaluate((snapshot) => chrome.storage.local.set({ avr_vocab_snapshot: snapshot }), schema2Fixture);
 
     ({ chrome: chromeMigration, browser: browserMigration } = await restartChromeOnSameProfile(migrationProfile, chromeForTesting, browserMigration, chromeMigration));
@@ -382,11 +383,22 @@ async function main() {
     const migratedOnce = await workerMigration.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     if (
       migratedOnce.schemaVersion !== 3 ||
+      // R-MIG-3 冲突仲裁：abilities(known/initial/updatedAt=5) 胜出 ability(learning/manual/updatedAt=4) → ability=known/initial
       migratedOnce.words?.ability?.status !== 'known' ||
+      migratedOnce.words?.ability?.source !== 'initial' ||
       migratedOnce.words?.abilities ||
-      !isDeepStrictEqual(migratedOnce.assessmentEvidence, { ability: { outcome: 'known', source: 'initial', assessedAt: 0 } }) ||
+      // R-MIG-2 无法映射的旧 key 保守保留（bogusword 不在 core/forms 中）
+      migratedOnce.words?.bogusword?.status !== 'known' ||
+      // R-MIG-4 部分首测按同下标重建证据（ability 对→known；able 错→learning；损坏题 corrupt 跳过）
+      !isDeepStrictEqual(migratedOnce.assessmentEvidence, {
+        ability: { outcome: 'known', source: 'initial', assessedAt: 0 },
+        able: { outcome: 'learning', source: 'initial', assessedAt: 0 },
+      }) ||
+      // R-AUD-2/schema 3 冻结：auditMarkers 清空、auditPlan=null，auditLog 保留但不转换
       Object.keys(migratedOnce.auditMarkers || {}).length !== 0 ||
       migratedOnce.auditPlan !== null ||
+      migratedOnce.auditLog?.length !== 1 ||
+      // schema 3 正式字段：dailyTest=null、completedRoundIndex=0 已初始化
       migratedOnce.dailyTest !== null ||
       migratedOnce.completedRoundIndex !== 0
     ) throw new Error(`R-MIG-7 第一次真实迁移结果错误：${JSON.stringify(migratedOnce)}`);
@@ -396,7 +408,7 @@ async function main() {
     if (!workerMigration) throw new Error('迁移 E2E 第二次重启后未找到 Service Worker');
     const migratedTwice = await workerMigration.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     if (!isDeepStrictEqual(migratedTwice, migratedOnce)) throw new Error('R-MIG-7 失败：schema 3 重启后不再恒等');
-    console.log('E2E #1B PASS: schema2_to_v3=true, forms_merge=abilities→ability, evidence_rebuilt=true, persisted_idempotent=true');
+    console.log('E2E #1B PASS: schema2_fixture→v3=true, forms_merge=abilities→ability, conflict_arbitration=updatedAt_newer, unmapable_key_kept=true, evidence_rebuilt=true, corrupt_skipped=true, audit_cleared=true, persisted_idempotent=true');
   } finally {
     if (browserMigration) await browserMigration.close();
     await killChrome(chromeMigration);
@@ -1098,7 +1110,297 @@ async function main() {
     await killChrome(chrome4);
   }
 
-  console.log('E2E ALL PASS');
+  // ============================================================
+  // 阶段五：浏览器重启后五项持久化并查（§21 场景 15 补全）
+  // 同时验证 WordState / AssessmentEvidence / DailyTestState /
+  // completedRoundIndex / schemaVersion=3（R-MIG-7、R-EVD-2/4、R-DLY-2/7/8）
+  // ============================================================
+  let browser5;
+  let chrome5;
+  try {
+    const profile5 = path.join(tempDir, 'profile-5');
+    ({ chrome: chrome5, browser: browser5 } = await launchChrome(profile5, chromeForTesting));
+    await wait(1_000);
+    let extId5 = extensionIdFromTargets(browser5);
+    if (!extId5) throw new Error('阶段五：无法解析扩展 ID');
+    let worker5 = await getWorker(browser5);
+    if (!worker5) throw new Error('阶段五：未找到本扩展 Service Worker');
+
+    const openPopup5 = async () => {
+      const p = await browser5.newPage();
+      p.on('pageerror', (e) => pageLogs.push(`stage5 popup error: ${e.message}`));
+      await gotoSafe(p, `chrome-extension://${extId5}/popup.html`, { waitUntil: 'networkidle0' });
+      return p;
+    };
+    const readSnap5 = () => worker5.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    const clickOption5 = (p, qIdx, optionIdx) => p.evaluate((qi, oi) => {
+      const card = document.querySelectorAll('.question')[qi];
+      const opts = card.querySelectorAll('.option:not(.unsure)');
+      (opts[oi] || opts[0]).click();
+    }, qIdx, optionIdx);
+
+    // 首测 50 题（q0-24 对、q25-49 错，与阶段二同模式）
+    let popup5 = await openPopup5();
+    await popup5.waitForSelector('button.primary', { timeout: 10_000 });
+    await popup5.evaluate(() => { document.querySelector('button.primary')?.click(); });
+    await popup5.waitForSelector('.question', { timeout: 10_000 });
+    const plan5 = (await readSnap5()).initialTest.plan;
+    if (plan5.questions.length !== 50) throw new Error(`阶段五首测计划异常：${plan5.questions.length}`);
+    for (let i = 0; i < plan5.questions.length; i++) {
+      const q = plan5.questions[i];
+      const target = i < 25 ? q.correctOptionIndex : (q.correctOptionIndex === 0 ? 1 : 0);
+      await clickOption5(popup5, i, target);
+      await wait(20);
+    }
+    await popup5.waitForSelector('.summary', { timeout: 10_000 });
+    await popup5.waitForSelector('.estimate-point', { timeout: 10_000 });
+
+    // 每日五题全答对（completed → completedRoundIndex=1）
+    await popup5.evaluate(() => { document.querySelector('.daily-start')?.click(); });
+    await popup5.waitForSelector('.question', { timeout: 10_000 });
+    const dailyPlan5 = (await readSnap5()).dailyTest;
+    if (!dailyPlan5 || dailyPlan5.questions.length !== 5) throw new Error('阶段五：每日计划异常');
+    for (let i = 0; i < dailyPlan5.questions.length; i++) {
+      await clickOption5(popup5, i, dailyPlan5.questions[i].correctOptionIndex);
+      await wait(50);
+    }
+    await popup5.waitForSelector('.daily-complete', { timeout: 10_000 });
+
+    // 重启前快照（五项并查基准）
+    const beforeRestart = await readSnap5();
+    const fiveBefore = {
+      schemaVersion: beforeRestart.schemaVersion,
+      words: beforeRestart.words,
+      evidence: beforeRestart.assessmentEvidence,
+      dailyTest: beforeRestart.dailyTest,
+      completedRoundIndex: beforeRestart.completedRoundIndex,
+    };
+    if (fiveBefore.schemaVersion !== 3) {
+      throw new Error(`阶段五前置：schemaVersion 应为 3，实际 ${fiveBefore.schemaVersion}`);
+    }
+    if (Object.keys(fiveBefore.words).length !== 55 || Object.keys(fiveBefore.evidence).length !== 55) {
+      throw new Error(`阶段五前置：应 55 词/55 证据（50 首测 + 5 每日），实际 ${Object.keys(fiveBefore.words).length}/${Object.keys(fiveBefore.evidence).length}`);
+    }
+    if (fiveBefore.dailyTest?.completed !== true || fiveBefore.dailyTest.answers.some((a) => a === null)) {
+      throw new Error('阶段五前置：DailyTestState 应为已完成且 5 题全答');
+    }
+    if (fiveBefore.completedRoundIndex !== 1) {
+      throw new Error(`阶段五前置：completedRoundIndex 应为 1，实际 ${fiveBefore.completedRoundIndex}`);
+    }
+    if (!fiveBefore.dailyTest?.localDate) throw new Error('阶段五前置：DailyTestState 缺 localDate');
+
+    // 同 profile 重启整个 Chrome：新 Service Worker 经真实 loadSnapshot 路径读 storage
+    ({ chrome: chrome5, browser: browser5 } = await restartChromeOnSameProfile(profile5, chromeForTesting, browser5, chrome5));
+    extId5 = extensionIdFromTargets(browser5);
+    if (!extId5) throw new Error('阶段五：重启后无法解析扩展 ID');
+    worker5 = await waitForWorker(browser5);
+    if (!worker5) throw new Error('阶段五：重启后未找到 Service Worker');
+
+    const afterRestart = await readSnap5();
+    const fiveAfter = {
+      schemaVersion: afterRestart.schemaVersion,
+      words: afterRestart.words,
+      evidence: afterRestart.assessmentEvidence,
+      dailyTest: afterRestart.dailyTest,
+      completedRoundIndex: afterRestart.completedRoundIndex,
+    };
+    for (const field of ['schemaVersion', 'words', 'evidence', 'dailyTest', 'completedRoundIndex']) {
+      if (!isDeepStrictEqual(fiveBefore[field], fiveAfter[field])) {
+        throw new Error(`场景 15 失败：重启后 ${field} 不一致（前=${JSON.stringify(fiveBefore[field]).slice(0, 200)}，后=${JSON.stringify(fiveAfter[field]).slice(0, 200)}）`);
+      }
+    }
+    // 重启后 popup 恢复已完成摘要/估计/每日完成（真实 UI 证据）
+    popup5 = await openPopup5();
+    await popup5.waitForSelector('.summary', { timeout: 10_000 });
+    await popup5.waitForSelector('.estimate-point', { timeout: 10_000 });
+    await popup5.waitForSelector('.daily-complete', { timeout: 10_000 });
+    const summary5 = await popup5.evaluate(() => document.body.innerText || '');
+    if (!/首测完成/.test(summary5) || !/今日五题已完成/.test(summary5)) {
+      throw new Error(`场景 15 失败：重启后 popup 未恢复完整状态：${summary5}`);
+    }
+    console.log(`E2E #15 PASS: restart_persistence=true, schemaVersion=3, words=${Object.keys(fiveAfter.words).length}, evidence=${Object.keys(fiveAfter.evidence).length}, dailyTest_completed=true, completedRoundIndex=${fiveAfter.completedRoundIndex}`);
+  } finally {
+    if (browser5) await browser5.close();
+    await killChrome(chrome5);
+  }
+
+  // ============================================================
+  // 阶段六：两个真实标签页含同一 wordKey 不同词形时，
+  // manual / daily 更新后同步（§21 持久化验收补全；R-KEY-3/R-DLY-4）
+  // ============================================================
+  let browser6;
+  let chrome6;
+  try {
+    const profile6 = path.join(tempDir, 'profile-6');
+    ({ chrome: chrome6, browser: browser6 } = await launchChrome(profile6, chromeForTesting));
+    await wait(1_000);
+    let extId6 = extensionIdFromTargets(browser6);
+    if (!extId6) throw new Error('阶段六：无法解析扩展 ID');
+    let worker6 = await getWorker(browser6);
+    if (!worker6) throw new Error('阶段六：未找到本扩展 Service Worker');
+
+    const openPopup6 = async () => {
+      const p = await browser6.newPage();
+      p.on('pageerror', (e) => pageLogs.push(`stage6 popup error: ${e.message}`));
+      await gotoSafe(p, `chrome-extension://${extId6}/popup.html`, { waitUntil: 'networkidle0' });
+      return p;
+    };
+    const readSnap6 = () => worker6.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    const clickOption6 = (p, qIdx, optionIdx) => p.evaluate((qi, oi) => {
+      const card = document.querySelectorAll('.question')[qi];
+      const opts = card.querySelectorAll('.option:not(.unsure)');
+      (opts[oi] || opts[0]).click();
+    }, qIdx, optionIdx);
+    const writeSyncPage = (name, words) => {
+      fs.writeFileSync(
+        path.join(tempDir, `${name}.html`),
+        `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>sync</title></head><body><article><p>${words.join(' ')}</p></article></body></html>`,
+      );
+    };
+
+    // 完成 50 题首测（获得每日入口）
+    let popup6 = await openPopup6();
+    await popup6.waitForSelector('button.primary', { timeout: 10_000 });
+    await popup6.evaluate(() => { document.querySelector('button.primary')?.click(); });
+    await popup6.waitForSelector('.question', { timeout: 10_000 });
+    const plan6 = (await readSnap6()).initialTest.plan;
+    if (plan6.questions.length !== 50) throw new Error(`阶段六首测计划异常：${plan6.questions.length}`);
+    for (let i = 0; i < plan6.questions.length; i++) {
+      const q = plan6.questions[i];
+      const target = i < 25 ? q.correctOptionIndex : (q.correctOptionIndex === 0 ? 1 : 0);
+      await clickOption6(popup6, i, target);
+      await wait(20);
+    }
+    await popup6.waitForSelector('.summary', { timeout: 10_000 });
+    await popup6.waitForSelector('.estimate-point', { timeout: 10_000 });
+
+    // ---- manual 更新同步：pageA=core 词形，pageB=屈折词形（同一 wordKey）----
+    // 选词不依赖首测结果：从 1,000 词包中选一个「不在首测 50 题内、forms 有屈折映射」的
+    // 词，保证其在首测后仍为未知（unknown → light），两页稳定标注。
+    const core6 = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'dict-core.json'), 'utf8'));
+    const forms6 = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'forms.json'), 'utf8'));
+    const planWords6 = new Set(plan6.questions.map((q) => q.word));
+    let syncWord = null;
+    let syncInflected = null;
+    for (const w of Object.keys(core6)) {
+      if (planWords6.has(w)) continue;
+      const hits = Object.entries(forms6).filter(([surface, wk]) => wk === w && surface !== w);
+      if (hits.length > 0) { syncWord = w; syncInflected = hits[0][0]; break; }
+    }
+    if (!syncWord || !syncInflected) throw new Error('阶段六：词包中未找到可用于跨标签同步的词形对');
+    writeSyncPage('sync-a', [syncWord]);
+    writeSyncPage('sync-b', [syncInflected]);
+    const pageA = await browser6.newPage();
+    pageA.on('pageerror', (e) => pageLogs.push(`syncA error: ${e.message}`));
+    await gotoSafe(pageA, `https://localhost:${PORT}/sync-a.html`, { waitUntil: 'networkidle0' });
+    await pageA.waitForSelector(`.avr-word[data-word="${syncWord}"]`, { timeout: 10_000 });
+    const pageB = await browser6.newPage();
+    pageB.on('pageerror', (e) => pageLogs.push(`syncB error: ${e.message}`));
+    await gotoSafe(pageB, `https://localhost:${PORT}/sync-b.html`, { waitUntil: 'networkidle0' });
+    await pageB.waitForSelector(`.avr-word[data-word="${syncWord}"]`, { timeout: 10_000 });
+    const preA = await pageA.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, syncWord);
+    const preB = await pageB.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, syncWord);
+    if (preA !== 1 || preB !== 1) {
+      throw new Error(`跨标签前置失败：两页应各 1 个 light（A=${preA}, B=${preB}，word=${syncWord}）`);
+    }
+
+    // pageA 手动标记 learning（不会）→ worker 广播 → pageB 的屈折词形同步 strong
+    // 注意：learning 后「同页首现」span 的 class 是 avr-strong-first（行内中文），
+    // `.avr-strong` 选择器不匹配它，必须同时匹配两个 class。
+    const strongSel = (w) => `.avr-word[data-word="${w}"].avr-strong, .avr-word[data-word="${w}"].avr-strong-first`;
+    await pageA.evaluate((w) => { document.querySelector(`.avr-word[data-word="${w}"]`)?.click(); }, syncWord);
+    await pageA.waitForSelector('.avr-action-menu button[data-avr-status="learning"]', { visible: true });
+    await pageA.evaluate(() => { document.querySelector('.avr-action-menu button[data-avr-status="learning"]')?.click(); });
+    await pageA.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, { timeout: 10_000 }, strongSel(syncWord));
+    await pageB.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, { timeout: 10_000 }, strongSel(syncWord));
+    console.log(`[stage6] manual 同步 PASS：pageA=${syncWord}(learning→strong)，pageB=${syncInflected} 同步 strong（同一 wordKey 不同词形）`);
+
+    // ---- daily 更新同步：daily 计划词（优先有屈折形式的词）----
+    await popup6.evaluate(() => { document.querySelector('.daily-start')?.click(); });
+    await popup6.waitForSelector('.question', { timeout: 10_000 });
+    const daily6 = (await readSnap6()).dailyTest;
+    if (!daily6 || daily6.questions.length !== 5) throw new Error('阶段六：每日计划异常');
+    let dailyTarget = null;
+    let dailyInflected = null;
+    for (const q of daily6.questions) {
+      const hits = Object.entries(forms6).filter(([surface, wk]) => wk === q.word && surface !== q.word);
+      if (hits.length > 0) { dailyTarget = q.word; dailyInflected = hits[0][0]; break; }
+    }
+    const assertDailySync = async (wordCore, wordSurface, page1, page2, qIdx) => {
+      await clickOption6(popup6, qIdx, daily6.questions[qIdx].correctOptionIndex);
+      await wait(200);
+      await page1.waitForFunction((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0, { timeout: 5_000 }, wordCore);
+      await page2.waitForFunction((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0, { timeout: 5_000 }, wordCore);
+      console.log(`[stage6] daily 同步 PASS：${wordCore}（core）与 ${wordSurface}（页面词形）两页作答后同步无标注`);
+    };
+    if (dailyTarget && dailyInflected) {
+      writeSyncPage('sync-d1', [dailyTarget]);
+      writeSyncPage('sync-d2', [dailyInflected]);
+      const pageD1 = await browser6.newPage();
+      pageD1.on('pageerror', (e) => pageLogs.push(`syncD1 error: ${e.message}`));
+      await gotoSafe(pageD1, `https://localhost:${PORT}/sync-d1.html`, { waitUntil: 'networkidle0' });
+      await pageD1.waitForSelector(`.avr-word[data-word="${dailyTarget}"]`, { timeout: 10_000 });
+      const pageD2 = await browser6.newPage();
+      pageD2.on('pageerror', (e) => pageLogs.push(`syncD2 error: ${e.message}`));
+      await gotoSafe(pageD2, `https://localhost:${PORT}/sync-d2.html`, { waitUntil: 'networkidle0' });
+      await pageD2.waitForSelector(`.avr-word[data-word="${dailyTarget}"]`, { timeout: 10_000 });
+      const qIdx6 = daily6.questions.findIndex((q) => q.word === dailyTarget);
+      if (qIdx6 < 0) throw new Error('阶段六：daily 目标词未在计划中');
+      await assertDailySync(dailyTarget, dailyInflected, pageD1, pageD2, qIdx6);
+    } else {
+      // 兜底：daily 计划词无屈折形式时，用同一词形跨页验证 daily 更新同步
+      // （不同词形的 manual 同步已在上面锁定）
+      const fallbackWord = daily6.questions[0].word;
+      writeSyncPage('sync-d1', [fallbackWord]);
+      writeSyncPage('sync-d2', [fallbackWord]);
+      const pageD1 = await browser6.newPage();
+      pageD1.on('pageerror', (e) => pageLogs.push(`syncD1 error: ${e.message}`));
+      await gotoSafe(pageD1, `https://localhost:${PORT}/sync-d1.html`, { waitUntil: 'networkidle0' });
+      await pageD1.waitForSelector(`.avr-word[data-word="${fallbackWord}"]`, { timeout: 10_000 });
+      const pageD2 = await browser6.newPage();
+      pageD2.on('pageerror', (e) => pageLogs.push(`syncD2 error: ${e.message}`));
+      await gotoSafe(pageD2, `https://localhost:${PORT}/sync-d2.html`, { waitUntil: 'networkidle0' });
+      await pageD2.waitForSelector(`.avr-word[data-word="${fallbackWord}"]`, { timeout: 10_000 });
+      await assertDailySync(fallbackWord, fallbackWord, pageD1, pageD2, 0);
+    }
+    console.log('E2E #3 补全 PASS: multitab_same_wordKey_diff_surface_sync=true, manual_sync=true, daily_sync=true');
+  } finally {
+    if (browser6) await browser6.close();
+    await killChrome(chrome6);
+  }
+
+  // ============================================================
+  // T5 综合验收：复核矩阵 + 放行结论
+  // ============================================================
+  console.log('==================================================');
+  console.log('T5 真浏览器综合验收：§21 场景复核矩阵（场景 → 来源 Ticket → 主责任 R-ID）');
+  const reviewMatrix = [
+    ['1', '加载真实扩展构建产物', 'T5', '—'],
+    ['2', '静态正文与 SPA 阅读标注', 'T5', '—'],
+    ['3', '屈折词形共享 wordKey（含跨标签不同词形 manual/daily 同步）', 'T2', 'R-KEY-1, R-KEY-3'],
+    ['4', '完成 50 题首测', 'T1+T2', 'R-AUD-3, R-EVD-2'],
+    ['5', '结果页点估计＋保守范围＋不外推声明', 'T3', 'R-EST-1, R-EST-6'],
+    ['6', 'manual 改提示但估计不变', 'T2+T3', 'R-EVD-1, R-EST-2'],
+    ['7', '首测未完成无每日入口、不创建 DailyTestState；完成后才出现', 'T4', 'R-DLY-5'],
+    ['8', '完成每日五题', 'T4', 'R-DLY-1, R-DLY-2'],
+    ['9', '每日答案更新状态与估计', 'T4', 'R-DLY-4'],
+    ['10', '首题前跳过零变化', 'T4', 'R-DLY-6'],
+    ['11', '同日关闭/重开 popup 暂停恢复', 'T4', 'R-DLY-7'],
+    ['12', '模拟本地日期变化（date seam 最小注入）', 'T4', 'R-DLY-8'],
+    ['13', '跨日已答保留、未答过期', 'T4', 'R-DLY-8'],
+    ['14', '真实 schema 2 fixture 经 worker/storage 升级 v3', 'T2', 'R-MIG-1~7'],
+    ['15', '重启后五项持久化（WordState/Evidence/DailyTestState/completedRoundIndex/schemaVersion=3）', 'T2+T4', 'R-MIG-7, R-EVD-2/4, R-DLY-2/7/8'],
+    ['16', 'popup 无审计入口、不恢复残留计划', 'T1', 'R-AUD-1, R-AUD-2'],
+    ['17', '阅读不被每日测试阻塞', 'T4', 'R-DLY-5'],
+  ];
+  for (const [no, desc, ticket, rid] of reviewMatrix) {
+    console.log(`  §21-${no.padStart(2, ' ')} ${desc} → ${ticket}（${rid}）`);
+  }
+  console.log('==================================================');
+  console.log('结论：可进入人工 dogfood');
+  console.log('说明：人工 dogfood 门槛（连续 7 天 / 每天至少一篇 / 累计至少 20 篇）与三项人工记录由 Ticket 06 承接；');
+  console.log('R-MIG-8 真实 profile 备份时机：T5 隔离 E2E 全绿后、T6 开始前，须用户明确授权与配合。');
+  console.log('E2E ALL PASS（T5 综合验收）');
   } finally {
     if (server) server.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

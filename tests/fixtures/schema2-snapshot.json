@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "dictVersion": "ecdict-core-1000-64eb1a402f909f7a",
+  "stateVersion": 3,
+  "installSeed": "9e7c0a11b2d34f5688aac1dd2e33ff44",
+  "words": {
+    "ability": { "status": "learning", "source": "manual", "updatedAt": 4, "version": 2 },
+    "abilities": { "status": "known", "source": "initial", "updatedAt": 5, "version": 2 },
+    "bogusword": { "status": "known", "source": "manual", "updatedAt": 1, "version": 2 }
+  },
+  "auditMarkers": {
+    "ability": {
+      "word": "ability",
+      "source": "initial-correct",
+      "planVersion": "legacy-plan",
+      "stateVersion": 2,
+      "createdAt": 3,
+      "pending": true
+    }
+  },
+  "auditLog": [
+    { "word": "able", "outcome": "verified", "bucket": "initial-correct", "planVersion": "legacy-plan", "at": 2 }
+  ],
+  "auditPlan": { "version": "legacy-plan", "planVersion": "legacy-plan", "stateVersion": 2, "seed": "legacy", "candidates": [], "questions": [], "results": [], "createdAt": 3 },
+  "initialTest": {
+    "plan": {
+      "version": "legacy-initial-plan",
+      "seed": "9e7c0a11b2d34f5688aac1dd2e33ff44",
+      "dictVersion": "ecdict-core-1000-64eb1a402f909f7a",
+      "questions": [
+        { "word": "ability", "band": 0, "options": [{ "translation": "能力" }, { "translation": "苹果" }], "correctOptionIndex": 0, "unsureIndex": 4 },
+        { "word": "able", "band": 0, "options": [{ "translation": "能够" }, { "translation": "苹果" }], "correctOptionIndex": 0, "unsureIndex": 4 },
+        { "word": "corrupt", "band": 1, "options": [], "correctOptionIndex": 0, "unsureIndex": 4 }
+      ]
+    },
+    "answers": [
+      { "kind": "option", "optionIndex": 0 },
+      { "kind": "option", "optionIndex": 1 },
+      { "kind": "option", "optionIndex": 0 }
+    ],
+    "completed": false
+  },
+  "lastUpdated": 5
+}
