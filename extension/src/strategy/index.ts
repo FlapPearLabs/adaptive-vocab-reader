@@ -37,6 +37,21 @@ import { freezeAuditPlan, settleAuditAnswer } from './audit';
 // 重新导出常量，供调用方经本模块消费（不直连 quiz.ts）
 export { INITIAL_TEST_LENGTH } from '../shared/types';
 
+// 词汇量估计纯函数 seam（R-EST-1~7）：估计只读取 AssessmentEvidence，
+// 词包大小为显式参数；调用方（popup）经本模块消费，不直连 estimate.ts。
+export {
+  WILSON_Z_95,
+  wilsonBandInterval,
+  collectBandEvidence,
+  countBandWords,
+  estimateVocabulary,
+} from './estimate';
+export type {
+  BandEstimateStats,
+  EstimateVocabularyInput,
+  VocabularyEstimateResult,
+} from './estimate';
+
 /**
  * V0.1 词汇展示与测试策略模块。
  *

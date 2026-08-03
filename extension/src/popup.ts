@@ -15,9 +15,16 @@ import type {
   InitialTestState,
   QuizAnswer,
   QuizQuestion,
+  AssessmentEvidence,
 } from './shared/types';
-import { createVocabStrategy } from './strategy/index';
+import {
+  createVocabStrategy,
+  estimateVocabulary,
+  collectBandEvidence,
+  countBandWords,
+} from './strategy/index';
 import type { VocabStrategy } from './shared/types';
+import type { VocabularyEstimateResult } from './strategy/index';
 
 interface Profile {
   installSeed: string;
@@ -203,6 +210,11 @@ async function main(): Promise<void> {
       statBlock('unsure', String(unsure), '不确定'),
     );
     screen.append(stats);
+
+    // 词汇量估计：只读取 AssessmentEvidence（RULES 双真相源）。
+    // 展示为异步：结果页打开时向 worker 请求最新证据，再计算点值/保守范围。
+    void renderEstimate(screen, strategy, core, bands);
+
     screen.append(
       el('p', 'desc', '答对的词已停止提示；答错或「不确定」的词会进入生词表并在阅读中强提示。打开任意英文网页即可看到效果。'),
     );
@@ -215,8 +227,52 @@ async function main(): Promise<void> {
     };
     screen.append(reset);
 
-
     app!.append(screen);
+  }
+
+  /**
+   * 结果页估计区块：R-EST-1（点值 + 保守范围 + 不外推声明）与 unavailable 行为。
+   * 只读取 AssessmentEvidence；manual 标记不进入估计（R-EST-2）。
+   */
+  async function renderEstimate(
+    screen: HTMLElement,
+    _strat: VocabStrategy,
+    dict: DictCore,
+    bandMap: FrequencyBands,
+  ): Promise<void> {
+    const block = el('div', 'estimate');
+
+    let estimate: VocabularyEstimateResult;
+    try {
+      const { evidence } = await sendMessage<{ evidence: Record<string, AssessmentEvidence> }>({
+        type: 'GET_ASSESSMENT_EVIDENCE',
+      });
+      const bandStats = collectBandEvidence(evidence, bandMap);
+      const bandWordCounts = countBandWords(bandMap);
+      estimate = estimateVocabulary({
+        initialTestCompleted: true,
+        bands: Object.entries(bandWordCounts).map(([band, bandWordCount]) => ({
+          knownCount: bandStats[Number(band)]?.knownCount ?? 0,
+          testedCount: bandStats[Number(band)]?.testedCount ?? 0,
+          bandWordCount,
+        })),
+        wordPackSize: Object.keys(dict).length,
+      });
+    } catch {
+      // 证据获取失败：保守降级为 unavailable，不显示 0/NaN/部分估计。
+      estimate = { status: 'unavailable' };
+    }
+
+    if (estimate.status === 'available') {
+      const pointEl = el('div', 'estimate-point', `你大概认识 ${estimate.point} 个词`);
+      const rangeEl = el('div', 'estimate-range', `保守范围 ${estimate.low}–${estimate.high}`);
+      const noteEl = el('p', 'estimate-note', `基于当前 ${Object.keys(dict).length.toLocaleString('en-US')} 词覆盖估计，不做外推`);
+      block.append(pointEl, rangeEl, noteEl);
+    } else {
+      block.append(el('p', 'estimate-unavailable', '完成或重新完成首测后可查看估计'));
+    }
+
+    screen.append(block);
   }
 
   function statBlock(kind: string, num: string, label: string): HTMLElement {

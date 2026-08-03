@@ -629,6 +629,72 @@ async function main() {
     // 场景 16 / R-AUD-1：V0.1 已切断审计用户路径——首测完成摘要不得再暴露「开始审计」入口
     if (/开始审计/.test(summaryText)) throw new Error(`场景 16 失败：重开弹窗仍暴露审计入口：${summaryText}`);
 
+    // ============================================================
+    // §21 场景 5：结果页显示点估计 + 保守范围 + 不外推声明（R-EST-1/6）
+    // ============================================================
+    // 本阶段作答模式：q0-24 答对（band0-4 全对 5/5）、q25-49 答错（band5-9 全错 0/5）。
+    // 每频段 100 词 → point = 5×100 + 0 = 500；保守范围 324–676（node 独立预计算）。
+    await popup2.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateText = await popup2.$eval('.estimate', (el) => el.textContent || '');
+    const pointMatch = estimateText.match(/你大概认识 (\d+) 个词/);
+    const rangeMatch = estimateText.match(/保守范围 (\d+)–(\d+)/);
+    if (!pointMatch || !rangeMatch) throw new Error(`场景 5 失败：结果页缺少点值或保守范围：${estimateText}`);
+    const estimatePoint = Number(pointMatch[1]);
+    const estimateLow = Number(rangeMatch[1]);
+    const estimateHigh = Number(rangeMatch[2]);
+    if (estimatePoint !== 500) throw new Error(`场景 5 失败：点估计应为 500，实际 ${estimatePoint}`);
+    if (!(estimateLow <= estimatePoint && estimatePoint <= estimateHigh)) {
+      throw new Error(`场景 5 失败：low≤point≤high 不成立（${estimateLow} ≤ ${estimatePoint} ≤ ${estimateHigh}）`);
+    }
+    if (!estimateText.includes('基于当前 1,000 词覆盖估计，不做外推')) {
+      throw new Error(`场景 5 失败：缺少「基于当前 1,000 词覆盖估计，不做外推」声明：${estimateText}`);
+    }
+    if (/90% 置信区间/.test(estimateText) || /CEFR/.test(estimateText)) {
+      throw new Error(`场景 5 失败：UI 出现禁词「90% 置信区间」或「CEFR」：${estimateText}`);
+    }
+    console.log(`E2E #5 PASS: point=${estimatePoint}, range=${estimateLow}–${estimateHigh}, no_extrapolation_declared=true, forbidden_text_absent=true`);
+
+    // ============================================================
+    // §21 场景 6：manual 改提示但估计不变（R-EST-2 / R-EVD-1）
+    // ============================================================
+    // 记录当前估计与证据 → 在真实网页对学习词执行 manual known → 页面提示变化 →
+    // 重开结果页，单点估计与保守范围必须与修改前完全一致；manual 不得改写 AssessmentEvidence。
+    const estimateBeforeManual = await popup2.$eval('.estimate', (el) => el.textContent || '');
+    const evidenceBeforeManual = (await worker2.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot)).assessmentEvidence;
+    // 选 band5 的第一个词（q25 答错 → learning → strong 提示）
+    const manualWord = plan.questions[25].word;
+    // 用 page.evaluate 点击（与阶段二一致，规避 Chrome 151 + puppeteer-core 的 ElementHandle 协议超时）
+    await page2.waitForSelector(`.avr-word[data-word="${manualWord}"]`, { timeout: 10_000 });
+    await page2.evaluate((w) => {
+      const el = document.querySelector(`.avr-word[data-word="${w}"]`);
+      el?.click();
+    }, manualWord);
+    await page2.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true });
+    await page2.evaluate(() => {
+      const btn = document.querySelector('.avr-action-menu button[data-avr-status="known"]');
+      if (btn) btn.click();
+    });
+    // 页面提示必须按 manual 动作发生变化：learning → known → 不再提示
+    await page2.waitForFunction(
+      (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
+      { timeout: 5_000 }, manualWord,
+    );
+    // 证明 manual 没有改写 AssessmentEvidence（R-EVD-1）
+    const afterManualSnapshot = (await worker2.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot));
+    if (!isDeepStrictEqual(afterManualSnapshot.assessmentEvidence, evidenceBeforeManual)) {
+      throw new Error('场景 6 失败：manual 改写了 AssessmentEvidence');
+    }
+    // 重开结果页：单点估计与保守范围必须与修改前完全一致
+    const popup3 = await browser2.newPage();
+    await gotoSafe(popup3, `chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle0' });
+    await popup3.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateAfterManual = await popup3.$eval('.estimate', (el) => el.textContent || '');
+    if (estimateAfterManual !== estimateBeforeManual) {
+      throw new Error(`场景 6 失败：manual 后估计改变：\n前=${estimateBeforeManual}\n后=${estimateAfterManual}`);
+    }
+    console.log(`E2E #6 PASS: manual_word=${manualWord}, hint_changed=true, evidence_unchanged=true, estimate_unchanged=true`);
+    await popup3.close();
+
     console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit_markers=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true, audit_entry_absent=true, residual_plan_ignored=true, worker_reloaded=true`);
   } finally {
     if (browser2) await browser2.close();

@@ -116,6 +116,28 @@ describe('reduceWorkerMessage — INITIAL_TEST_ANSWER 协调路径', () => {
   });
 });
 
+describe('reduceWorkerMessage — GET_ASSESSMENT_EVIDENCE（估计只读证据）', () => {
+  it('返回 AssessmentEvidence 且不改变快照（changed=false）', () => {
+    const word = 'apple';
+    const snapshot: VocabSnapshot = createEmptySnapshot(SEED, 'd');
+    snapshot.assessmentEvidence[word] = { outcome: 'known', source: 'initial', assessedAt: 1 };
+    snapshot.words[word] = { status: 'learning', source: 'manual', updatedAt: 2, version: 0 };
+
+    const { snapshot: next, response, changed } = reduceWorkerMessage(
+      snapshot,
+      { type: 'GET_ASSESSMENT_EVIDENCE' },
+      { id: 'ext', url: 'popup.html' },
+    );
+
+    // 估计只读取 AssessmentEvidence（RULES 双真相源）；manual WordState 不影响证据返回。
+    expect((response as { evidence?: Record<string, unknown> }).evidence).toEqual({
+      apple: { outcome: 'known', source: 'initial', assessedAt: 1 },
+    });
+    expect(changed).toBe(false);
+    expect(next).toBe(snapshot);
+  });
+});
+
 describe('reduceWorkerMessage — STATE_CHANGE 清除标记（手动覆盖优先）', () => {
   it('手动标记会 → 清除该词审计标记', () => {
     const word = 'apple';

@@ -129,6 +129,10 @@ export function reduceWorkerMessage(
     case 'GET_INITIAL_TEST':
       return { snapshot, response: { test: snapshot.initialTest }, changed: false };
 
+    case 'GET_ASSESSMENT_EVIDENCE':
+      // 估计只读取 AssessmentEvidence（RULES 双真相源）；popup 结果页展示点值/范围时经此只读消息获取。
+      return { snapshot, response: { evidence: snapshot.assessmentEvidence }, changed: false };
+
     case 'INITIAL_TEST_ANSWER': {
       const { questionIndex, answer } = message;
       const test = snapshot.initialTest;
@@ -350,6 +354,7 @@ type WorkerMessage =
   | { type: 'STATE_CHANGE'; word: string; newStatus: WordStatus }
   | { type: 'INITIAL_TEST_START'; plan: InitialTestPlan }
   | { type: 'GET_INITIAL_TEST' }
+  | { type: 'GET_ASSESSMENT_EVIDENCE' }
   | { type: 'INITIAL_TEST_ANSWER'; questionIndex: number; answer: QuizAnswer }
   | { type: 'INITIAL_TEST_RESET' }
   | { type: 'GET_AUDIT_MARKERS' }

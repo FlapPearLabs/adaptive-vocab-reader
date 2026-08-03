@@ -164,3 +164,38 @@ button.primary {
   font-size: 12px;
   color: var(--muted);
 }
+
+.estimate {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--answered);
+}
+
+.estimate-point {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.estimate-range {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.estimate-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0 0;
+  line-height: 1.5;
+}
+
+.estimate-unavailable {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.6;
+}
