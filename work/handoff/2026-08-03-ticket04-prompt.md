@@ -1,7 +1,7 @@
 # Ticket 04 — 新任务提示词（交给 Codex 实现）
 
 发送位置：新任务
-理由：Ticket 04 是 V0.1 链条上的独立实现任务，Blocked by 03 已随 `b15ddf3` 合并解除；04 与 01/02/03 无代码重叠（03 只读证据展示，04 新增每日轮写入路径），需以独立 `review/ticket-04-daily-round` 分支推进，不与当前/历史任务冲突。
+理由：01/02/03 已完成归档；Ticket 04 是独立需求目标（每日校准轮），虽需在 T2/T3 建立的共享模块（strategy/index.ts、shared/types.ts、worker/storage.ts、popup.ts、e2e-verify.cjs）上集成，但不重新取得其 Requirement 主责任，需以独立 `review/ticket-04-daily-round` 分支推进，并与 T2/T3 回归、接口兼容性一并验收。
 
 目标代理：Codex
 
@@ -10,7 +10,7 @@
 输入：
 - 交接归纳文档（本提示词的配套背景，必读）：`work/handoff/2026-08-03-ticket04.md` —— 含现状（main=`b15ddf3`、01/02/03 已归档真实验证证据）、权威来源优先级、下一步 Ticket 04 范围/非目标/验收示例、未决项与风险、安全边界、建议技能与交接输入清单。先于 Ticket 与 Spec 通读，可避免重复 01/02/03 已决事项与越界。**注意：该 handoff 仅作导航摘要，不是需求来源；任何冲突按权威顺序（RULES.md → CONTEXT.md → 当前 Spec → ADR-0004 → Ticket 04）处理，不得用归纳文档覆盖领域术语或施工规格。**
 - Ticket：`work/tickets/2026-07-31-v0.1-realign/04-daily-calibration-round.md`
-- 规格：`docs/specs/2026-07-30-V0.1-重新对齐规格.md` §20.4（R-EVD-5、R-DLY-1~9）、§21（场景 7~13、17）、§23、§24
+- 规格：`docs/specs/2026-07-30-V0.1-重新对齐规格.md` §20.2（R-EVD-5）、§20.4（R-DLY-1~9）、§21（场景 7~13、17）、§23、§24
 - 规则/术语/ADR：`RULES.md` [已确认]（重点「每日校准轮」「存储与迁移（schema 3）」）、`CONTEXT.md`（「每日校准轮」_Avoid_: 生词复测、复习计划、背词任务）、`docs/adr/0004-词汇键与测试证据分离.md`
 - 基线：main tip `b15ddf3`（已含 01/02/03；`AssessmentEvidence{outcome,source,assessedAt}` 每词最新一条，manual 不写证据；wordKey 已统一；`strategy/estimate.ts` 只读证据即可见每日新证据；schema 3 的 `dailyTest: null`、`completedRoundIndex: 0` 已由 T2 初始化）
 
