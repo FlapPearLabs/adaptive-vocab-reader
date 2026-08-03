@@ -633,7 +633,9 @@ async function main() {
     // §21 场景 5：结果页显示点估计 + 保守范围 + 不外推声明（R-EST-1/6）
     // ============================================================
     // 本阶段作答模式：q0-24 答对（band0-4 全对 5/5）、q25-49 答错（band5-9 全错 0/5）。
-    // 每频段 100 词 → point = 5×100 + 0 = 500；保守范围 324–676（node 独立预计算）。
+    // 每频段 100 词 → point = 5×100 + 0 = 500；保守范围 324–676。
+    // 期望值由独立 Wilson 计算预先得出并硬编码（见 work/handoff 与 Ticket 03 验收：
+    // known=3, tested=5 样例的公式独立推导），不得由生产估计函数生成期望值。
     await popup2.waitForSelector('.estimate-point', { timeout: 10_000 });
     const estimateText = await popup2.$eval('.estimate', (el) => el.textContent || '');
     const pointMatch = estimateText.match(/你大概认识 (\d+) 个词/);
@@ -643,6 +645,9 @@ async function main() {
     const estimateLow = Number(rangeMatch[1]);
     const estimateHigh = Number(rangeMatch[2]);
     if (estimatePoint !== 500) throw new Error(`场景 5 失败：点估计应为 500，实际 ${estimatePoint}`);
+    // 独立硬编码期望值：锁住用户实际看到的 Wilson 加权结果，而非任何包住点值的任意范围
+    if (estimateLow !== 324) throw new Error(`场景 5 失败：保守范围下界应为 324，实际 ${estimateLow}`);
+    if (estimateHigh !== 676) throw new Error(`场景 5 失败：保守范围上界应为 676，实际 ${estimateHigh}`);
     if (!(estimateLow <= estimatePoint && estimatePoint <= estimateHigh)) {
       throw new Error(`场景 5 失败：low≤point≤high 不成立（${estimateLow} ≤ ${estimatePoint} ≤ ${estimateHigh}）`);
     }
