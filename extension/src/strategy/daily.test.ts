@@ -211,19 +211,22 @@ describe('settleDailyAnswer（R-DLY-4 判定 + 复用四选一/不确定）', ()
     };
   }
 
-  it('答对 → known；答错 / 不确定 → learning（双写由 worker 经 settleAssessment 完成）', () => {
+  it('答对 → known；答错 / 不确定 → learning；change.source 固定为 daily（R-DLY-4/ADR-0004）', () => {
     const q = makeQuestion('apple', 1);
     const correct = strategy.settleDailyAnswer({ question: q, answer: { kind: 'option', optionIndex: 1 } });
     expect(correct.kind).toBe('correct');
     expect(correct.change.newStatus).toBe('known');
     expect(correct.change.word).toBe('apple');
+    expect(correct.change.source).toBe('daily'); // 领域 seam 与持久化来源一致
 
     const wrong = strategy.settleDailyAnswer({ question: q, answer: { kind: 'option', optionIndex: 0 } });
     expect(wrong.kind).toBe('wrong');
     expect(wrong.change.newStatus).toBe('learning');
+    expect(wrong.change.source).toBe('daily');
 
     const unsure = strategy.settleDailyAnswer({ question: q, answer: { kind: 'unsure' } });
     expect(unsure.kind).toBe('unsure');
     expect(unsure.change.newStatus).toBe('learning');
+    expect(unsure.change.source).toBe('daily');
   });
 });

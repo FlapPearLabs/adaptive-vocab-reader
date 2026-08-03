@@ -23,8 +23,8 @@ import type {
   DailyTestState,
   FreezeDailyTestInput,
   SettleDailyTestAnswerInput,
+  DailyAnswerResult,
   StateChange,
-  ApplyAnswerResult,
 } from '../shared/types';
 import {
   eligibleCandidates,
@@ -111,26 +111,22 @@ function pickDailyWord(
 }
 
 /**
- * 结算一道冻结的每日题（R-DLY-4 的判定部分）。
+ * 结算一道冻结的每日题（R-DLY-4 / ADR-0004）。
  * 答对 → known；答错 / 不确定 → learning（与首测同语义）；
- * 双写（WordState + AssessmentEvidence，source=daily）由调用方经 settleAssessment 完成。
- * V0.1 用户路径不产出审计标记。
+ * change 的 source 固定为 `daily`——每日领域 seam 与持久化来源必须一致；
+ * 双写（WordState + AssessmentEvidence）由调用方经 settleAssessment 完成。
+ * 不产出审计标记；这是每日专属的最小返回类型，不抽象成通用测试轮引擎。
  */
-export function settleDailyAnswerImpl(input: SettleDailyTestAnswerInput): ApplyAnswerResult {
+export function settleDailyAnswerImpl(input: SettleDailyTestAnswerInput): DailyAnswerResult {
   const { question, answer } = input;
   const correct = isAnswerCorrect(question, answer);
-  const change: StateChange<'initial'> = {
+  const change: StateChange<'daily'> = {
     word: question.word,
     newStatus: statusFromCorrectness(correct),
-    source: 'initial',
+    source: 'daily',
   };
-  if (answer.kind === 'unsure' || !correct) {
-    return {
-      kind: answer.kind === 'unsure' ? 'unsure' : 'wrong',
-      change,
-      audit: null,
-      clearMarkerWord: question.word,
-    };
-  }
-  return { kind: 'correct', change, clearMarkerWord: null };
+  return {
+    kind: answer.kind === 'unsure' ? 'unsure' : correct ? 'correct' : 'wrong',
+    change,
+  };
 }

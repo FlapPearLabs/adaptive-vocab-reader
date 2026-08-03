@@ -63,10 +63,23 @@ function selfId(): string | undefined {
   return undefined;
 }
 
+/** 本地日期（YYYY-MM-DD）；date seam 的最小生产来源（R-DLY-8），不建设时间服务。 */
+export function currentLocalDate(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 /**
  * 纯函数：消费一条消息并返回（可能更新的）快照、响应与可选的广播指令。
  * 不依赖 chrome.storage / chrome.tabs，可在单测中直接驱动「真实协调路径」。
  * 调用方（监听器）负责 load / persist / broadcast 副作用。
+ *
+ * @param today 当前本地日期（YYYY-MM-DD）。最小可测试输入（date seam）：
+ *   生产路径默认取 `currentLocalDate()`，测试注入固定日期；不建设时间服务。
+ *   每日作答/跳过/开始均以持久化 `DailyTestState.localDate` 与此值比对，
+ *   保证跨日后旧轮不可继续写入（R-DLY-8）。
  */
 export interface WorkerSender {
   tab?: { id?: number };
@@ -86,6 +99,7 @@ export function reduceWorkerMessage(
   message: WorkerMessage,
   sender: WorkerSender,
   strat: VocabStrategy = createVocabStrategy(),
+  today: string = currentLocalDate(),
 ): ReducedMessage {
   switch (message.type) {
     case 'GET_STATE':
@@ -149,6 +163,10 @@ export function reduceWorkerMessage(
       if (!snapshot.initialTest || snapshot.initialTest.completed !== true) {
         return { snapshot, response: { error: 'initial test required' }, changed: false };
       }
+      // R-DLY-8 跨日边界：计划必须归属当前本地日期（拒绝恢复/创建旧日期轮次）。
+      if (test.localDate !== today) {
+        return { snapshot, response: { error: 'daily test expired' }, changed: false };
+      }
       const existing = snapshot.dailyTest;
       // 同一本地日期已有一轮：暂停恢复同一冻结计划；已跳过则反悔（skipped→false）并复用计划。
       if (existing && existing.localDate === test.localDate) {
@@ -176,6 +194,11 @@ export function reduceWorkerMessage(
       if (!daily || daily.skipped || daily.completed) {
         return { snapshot, response: { error: 'cannot answer' }, changed: false };
       }
+      // R-DLY-8 跨日边界：持久化轮次不属于当前本地日期 → 拒绝写入（过期，零变化），
+      // 防止午夜后仍持有旧答题页的客户端继续提交并写入状态/证据/轮次。
+      if (daily.localDate !== today) {
+        return { snapshot, response: { error: 'daily test expired' }, changed: false };
+      }
       const question = daily.questions[questionIndex];
       if (!question || daily.answers[questionIndex] !== null) {
         return { snapshot, response: { error: 'cannot answer' }, changed: false };
@@ -183,10 +206,11 @@ export function reduceWorkerMessage(
       const current = snapshot.words[question.word];
       const result = strat.settleDailyAnswer({ question, answer });
       // 每日作答双写 WordState(daily) + AssessmentEvidence(daily)（R-DLY-4），估计随证据变化。
+      // change.source 由每日领域 seam 固定为 'daily'，与持久化来源一致（ADR-0004）。
       const settlement = strat.settleAssessment({
         word: result.change.word,
         outcome: result.change.newStatus as 'known' | 'learning',
-        source: 'daily',
+        source: result.change.source,
         assessedAt: Date.now(),
       });
       const answers = daily.answers.slice();
@@ -207,6 +231,10 @@ export function reduceWorkerMessage(
       const daily = snapshot.dailyTest;
       if (!daily || daily.skipped || daily.completed) {
         return { snapshot, response: { error: 'cannot skip' }, changed: false };
+      }
+      // R-DLY-8 跨日边界：旧日期轮次不得再跳过（与作答一致：过期零变化）。
+      if (daily.localDate !== today) {
+        return { snapshot, response: { error: 'daily test expired' }, changed: false };
       }
       // 仅首题前可跳过；首题前跳过 → WordState 与 AssessmentEvidence 零变化（R-DLY-6）。
       if (daily.answers.some((a) => a !== null)) {

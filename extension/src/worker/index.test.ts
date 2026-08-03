@@ -21,6 +21,8 @@ import { createVocabStrategy } from '../strategy/index';
 
 const SEED = 'seed-xyz';
 const PLAN_V = 'd:s:v1';
+/** 每日测试固定注入的「当前本地日期」（date seam 最小输入；与 makeDailyPlan 默认 localDate 一致） */
+const DAILY_TODAY = '2026-08-03';
 
 function makeCore(words: string[]): DictCore {
   const core: DictCore = {};
@@ -555,7 +557,7 @@ describe('reduceWorkerMessage — 机械应用 seam 锁死（fake strategy 注�
 
 describe('reduceWorkerMessage — DAILY_TEST_START（R-DLY-5/7/8/9）', () => {
   /** 经真实策略冻结路径生成每日计划（20 词、频段 0..9 循环，filler 落 band9 不影响偶数轮） */
-  function makeDailyPlan(roundIndex: number, evidence: Record<string, AssessmentEvidence> = {}, localDate = '2026-08-03'): DailyTestState {
+  function makeDailyPlan(roundIndex: number, evidence: Record<string, AssessmentEvidence> = {}, localDate = DAILY_TODAY): DailyTestState {
     const words = Array.from({ length: 20 }, (_, i) => `w${i}`);
     const core = makeCore(words);
     const bands = bandsFor(words);
@@ -578,6 +580,8 @@ describe('reduceWorkerMessage — DAILY_TEST_START（R-DLY-5/7/8/9）', () => {
       snap,
       { type: 'DAILY_TEST_START', test: plan },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect((response as { error?: string }).error).toContain('initial test required');
     expect(next.dailyTest).toBeNull();
@@ -587,23 +591,23 @@ describe('reduceWorkerMessage — DAILY_TEST_START（R-DLY-5/7/8/9）', () => {
   it('R-DLY-5：首测完成后首次开始 → 创建轮（roundIndex=completedRoundIndex），同日重开返回同一轮（暂停恢复）', () => {
     const snap = snapshotWithCompletedInitialTest();
     const plan = makeDailyPlan(0);
-    const first = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: plan }, { id: 'ext', url: 'popup.html' });
+    const first = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: plan }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY);
     expect((first.response as { created?: boolean }).created).toBe(true);
-    expect(first.snapshot.dailyTest).toMatchObject({ localDate: '2026-08-03', roundIndex: 0, completed: false, skipped: false });
+    expect(first.snapshot.dailyTest).toMatchObject({ localDate: DAILY_TODAY, roundIndex: 0, completed: false, skipped: false });
     expect(first.snapshot.dailyTest!.answers).toEqual([null, null, null, null, null]);
     expect(first.changed).toBe(true);
 
     // 同日再次开始（关闭 popup 后重开）：恢复同一冻结计划，不重建
     const plan2 = makeDailyPlan(0); // 同种子同证据 → 相同计划
-    const second = reduceWorkerMessage(first.snapshot, { type: 'DAILY_TEST_START', test: plan2 }, { id: 'ext', url: 'popup.html' });
+    const second = reduceWorkerMessage(first.snapshot, { type: 'DAILY_TEST_START', test: plan2 }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY);
     expect(second.snapshot.dailyTest).toBe(first.snapshot.dailyTest); // 引用相等：原样复用
     expect(second.changed).toBe(false);
   });
 
   it('R-DLY-8：跨日（localDate 不同）→ 未完成轮过期并创建新轮，不递增 completedRoundIndex', () => {
     let snap = snapshotWithCompletedInitialTest();
-    const day1 = makeDailyPlan(0, {}, '2026-08-03');
-    snap = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: day1 }, { id: 'ext', url: 'popup.html' }).snapshot;
+    const day1 = makeDailyPlan(0, {}, DAILY_TODAY);
+    snap = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: day1 }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
     // 答 2 题（部分完成）
     for (let i = 0; i < 2; i++) {
       const q = snap.dailyTest!.questions[i]!;
@@ -611,14 +615,16 @@ describe('reduceWorkerMessage — DAILY_TEST_START（R-DLY-5/7/8/9）', () => {
         snap,
         { type: 'DAILY_TEST_ANSWER', questionIndex: i, answer: { kind: 'option', optionIndex: q.correctOptionIndex } },
         { id: 'ext', url: 'popup.html' },
+        undefined,
+        DAILY_TODAY,
       ).snapshot;
     }
     const answeredWords = snap.dailyTest!.questions.slice(0, 2).map((q) => q.word);
     expect(snap.completedRoundIndex).toBe(0); // 未完成轮不递增（R-DLY-2）
 
-    // 跨日：新一天开始 → 旧轮过期（已答证据已双写保留），创建新轮
+    // 跨日：新一天（today=2026-08-04）开始 → 旧轮过期（已答证据已双写保留），创建新轮
     const day2 = makeDailyPlan(0, {}, '2026-08-04');
-    const crossed = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: day2 }, { id: 'ext', url: 'popup.html' });
+    const crossed = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: day2 }, { id: 'ext', url: 'popup.html' }, undefined, '2026-08-04');
     expect(crossed.snapshot.dailyTest!.localDate).toBe('2026-08-04');
     expect(crossed.snapshot.dailyTest!.answers).toEqual([null, null, null, null, null]);
     // 已答词的 WordState(daily) 与 Evidence(daily) 保留（R-DLY-8：已答保留、不回滚）
@@ -633,21 +639,23 @@ describe('reduceWorkerMessage — DAILY_TEST_START（R-DLY-5/7/8/9）', () => {
   it('R-DLY-9：同一本地日期最多一轮——同日重复开始不创建新轮', () => {
     const snap = snapshotWithCompletedInitialTest();
     const plan = makeDailyPlan(0);
-    const a = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: plan }, { id: 'ext', url: 'popup.html' }).snapshot;
-    const b = reduceWorkerMessage(a, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }).snapshot;
+    const a = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: plan }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
+    const b = reduceWorkerMessage(a, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
     expect(b.dailyTest).toBe(a.dailyTest); // 唯一轮次
   });
 
   it('R-DLY-6 反悔：已跳过轮再次开始 → skipped 变回 false 并复用同一冻结计划', () => {
     let snap = snapshotWithCompletedInitialTest();
-    snap = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }).snapshot;
-    const skipped = reduceWorkerMessage(snap, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }).snapshot;
+    snap = reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
+    const skipped = reduceWorkerMessage(snap, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
     expect(skipped.dailyTest!.skipped).toBe(true);
 
     const resumed = reduceWorkerMessage(
       skipped,
       { type: 'DAILY_TEST_START', test: makeDailyPlan(0) },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect(resumed.snapshot.dailyTest!.skipped).toBe(false);
     // 复用同一冻结计划：questions 不变
@@ -665,8 +673,26 @@ describe('reduceWorkerMessage — DAILY_TEST_START（R-DLY-5/7/8/9）', () => {
       snap,
       { type: 'DAILY_TEST_START', test: tampered },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect((response as { error?: string }).error).toContain('band mismatch');
+    expect(next.dailyTest).toBeNull();
+    expect(changed).toBe(false);
+  });
+
+  it('R-DLY-8 跨日边界：DAILY_TEST_START 拒绝非当前本地日期（today）的计划，即使首测已完成', () => {
+    const snap = snapshotWithCompletedInitialTest();
+    // 客户端提交昨日计划（localDate=DAILY_TODAY），但服务端 today 已过到 2026-08-04
+    const stale = makeDailyPlan(0, {}, DAILY_TODAY);
+    const { snapshot: next, response, changed } = reduceWorkerMessage(
+      snap,
+      { type: 'DAILY_TEST_START', test: stale },
+      { id: 'ext', url: 'popup.html' },
+      undefined,
+      '2026-08-04',
+    );
+    expect((response as { error?: string }).error).toContain('daily test expired');
     expect(next.dailyTest).toBeNull();
     expect(changed).toBe(false);
   });
@@ -712,7 +738,7 @@ describe('validateDailyTestPlan — 服务端权威校验', () => {
 });
 
 describe('reduceWorkerMessage — DAILY_TEST_ANSWER（R-DLY-2/4）', () => {
-  function makeDailyPlan(roundIndex: number, localDate = '2026-08-03'): DailyTestState {
+  function makeDailyPlan(roundIndex: number, localDate = DAILY_TODAY): DailyTestState {
     const words = Array.from({ length: 20 }, (_, i) => `w${i}`);
     const core = makeCore(words);
     const bands = bandsFor(words);
@@ -725,7 +751,7 @@ describe('reduceWorkerMessage — DAILY_TEST_ANSWER（R-DLY-2/4）', () => {
   function startedSnapshot(): VocabSnapshot {
     const snap = createEmptySnapshot(SEED, 'd');
     snap.initialTest = { plan: { version: PLAN_V, seed: SEED, dictVersion: 'd', questions: [] }, answers: [], completed: true };
-    return reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }).snapshot;
+    return reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
   }
 
   it('R-DLY-4：每日作答双写 WordState(daily) 与 AssessmentEvidence(daily)，并广播状态', () => {
@@ -735,6 +761,8 @@ describe('reduceWorkerMessage — DAILY_TEST_ANSWER（R-DLY-2/4）', () => {
       snap,
       { type: 'DAILY_TEST_ANSWER', questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex } },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect(next.words[q0.word]).toMatchObject({ status: 'known', source: 'daily' });
     expect(next.assessmentEvidence[q0.word]).toMatchObject({ outcome: 'known', source: 'daily' });
@@ -744,6 +772,8 @@ describe('reduceWorkerMessage — DAILY_TEST_ANSWER（R-DLY-2/4）', () => {
     expect(broadcast).toEqual({ word: q0.word, newStatus: 'known' });
     expect(changed).toBe(true);
     expect((response as { completedRoundIndex?: number }).completedRoundIndex).toBe(0);
+    // BLOCKER 5：每日领域 seam 返回的来源与持久化一致（change.source === 'daily'）
+    expect((response as { result?: { change?: { source?: string } } }).result?.change?.source).toBe('daily');
   });
 
   it('R-DLY-2：未完成整轮不递增 completedRoundIndex；completed 首次变 true 只递增一次', () => {
@@ -755,6 +785,8 @@ describe('reduceWorkerMessage — DAILY_TEST_ANSWER（R-DLY-2/4）', () => {
         snap,
         { type: 'DAILY_TEST_ANSWER', questionIndex: i, answer: { kind: 'option', optionIndex: q.correctOptionIndex } },
         { id: 'ext', url: 'popup.html' },
+        undefined,
+        DAILY_TODAY,
       ).snapshot;
       // 前 4 题完成前不递增；最后一题首次完成 → 递增一次
       const expected = i === plan.questions.length - 1 ? 1 : 0;
@@ -766,6 +798,8 @@ describe('reduceWorkerMessage — DAILY_TEST_ANSWER（R-DLY-2/4）', () => {
       snap,
       { type: 'DAILY_TEST_ANSWER', questionIndex: 0, answer: { kind: 'option', optionIndex: plan.questions[0]!.correctOptionIndex } },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect((after.response as { error?: string }).error).toContain('cannot answer');
     expect(after.snapshot.completedRoundIndex).toBe(1);
@@ -778,28 +812,66 @@ describe('reduceWorkerMessage — DAILY_TEST_ANSWER（R-DLY-2/4）', () => {
       snap,
       { type: 'DAILY_TEST_ANSWER', questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex } },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     ).snapshot;
     const dup = reduceWorkerMessage(
       first,
       { type: 'DAILY_TEST_ANSWER', questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex } },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect((dup.response as { error?: string }).error).toContain('cannot answer');
 
     // 已跳过轮（未答任何题的轮先跳过）→ 任何作答被拒绝
-    const skippedSnap = reduceWorkerMessage(snap, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }).snapshot;
+    const skippedSnap = reduceWorkerMessage(snap, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
     expect(skippedSnap.dailyTest!.skipped).toBe(true);
     const onSkipped = reduceWorkerMessage(
       skippedSnap,
       { type: 'DAILY_TEST_ANSWER', questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex } },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect((onSkipped.response as { error?: string }).error).toContain('cannot answer');
+  });
+
+  it('R-DLY-8 跨日边界：持久化轮次 localDate 已过期（today 前进）时，作答被拒绝且状态/证据/进度/轮次零变化', () => {
+    let snap = startedSnapshot();
+    // 答 2 题（部分完成），模拟午夜前打开的答题页
+    for (let i = 0; i < 2; i++) {
+      const q = snap.dailyTest!.questions[i]!;
+      snap = reduceWorkerMessage(
+        snap,
+        { type: 'DAILY_TEST_ANSWER', questionIndex: i, answer: { kind: 'option', optionIndex: q.correctOptionIndex } },
+        { id: 'ext', url: 'popup.html' },
+        undefined,
+        DAILY_TODAY,
+      ).snapshot;
+    }
+    const before = JSON.stringify(snap); // 跨日前的完整状态（含已答 2 词）
+
+    // 本地日期已前进到 2026-08-04：仍持有旧答题页的客户端继续提交 → 必须拒绝
+    const { snapshot: next, response, changed, broadcast } = reduceWorkerMessage(
+      snap,
+      { type: 'DAILY_TEST_ANSWER', questionIndex: 2, answer: { kind: 'option', optionIndex: snap.dailyTest!.questions[2]!.correctOptionIndex } },
+      { id: 'ext', url: 'popup.html' },
+      undefined,
+      '2026-08-04',
+    );
+    expect((response as { error?: string }).error).toContain('daily test expired');
+    expect(changed).toBe(false);
+    expect(broadcast).toBeUndefined();
+    // 零变化：WordState / AssessmentEvidence / DailyTestState 已答进度 / completedRoundIndex 全部不变
+    expect(JSON.stringify(next)).toBe(before);
+    expect(next).toBe(snap);
+    expect(next.completedRoundIndex).toBe(0);
   });
 });
 
 describe('reduceWorkerMessage — DAILY_TEST_SKIP（R-DLY-6）', () => {
-  function makeDailyPlan(roundIndex: number, localDate = '2026-08-03'): DailyTestState {
+  function makeDailyPlan(roundIndex: number, localDate = DAILY_TODAY): DailyTestState {
     const words = Array.from({ length: 20 }, (_, i) => `w${i}`);
     const core = makeCore(words);
     const bands = bandsFor(words);
@@ -812,7 +884,7 @@ describe('reduceWorkerMessage — DAILY_TEST_SKIP（R-DLY-6）', () => {
   function startedSnapshot(): VocabSnapshot {
     const snap = createEmptySnapshot(SEED, 'd');
     snap.initialTest = { plan: { version: PLAN_V, seed: SEED, dictVersion: 'd', questions: [] }, answers: [], completed: true };
-    return reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }).snapshot;
+    return reduceWorkerMessage(snap, { type: 'DAILY_TEST_START', test: makeDailyPlan(0) }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
   }
 
   it('R-DLY-6：首题前跳过 → WordState 与 AssessmentEvidence 零变化，skipped=true', () => {
@@ -821,6 +893,8 @@ describe('reduceWorkerMessage — DAILY_TEST_SKIP（R-DLY-6）', () => {
       snap,
       { type: 'DAILY_TEST_SKIP' },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     );
     expect((response as { success?: boolean }).success).toBe(true);
     expect(next.dailyTest!.skipped).toBe(true);
@@ -838,19 +912,37 @@ describe('reduceWorkerMessage — DAILY_TEST_SKIP（R-DLY-6）', () => {
       snap,
       { type: 'DAILY_TEST_ANSWER', questionIndex: 0, answer: { kind: 'option', optionIndex: q0.correctOptionIndex } },
       { id: 'ext', url: 'popup.html' },
+      undefined,
+      DAILY_TODAY,
     ).snapshot;
-    const { response } = reduceWorkerMessage(answered, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' });
+    const { response } = reduceWorkerMessage(answered, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY);
     expect((response as { error?: string }).error).toContain('cannot skip after first answer');
   });
 
   it('无活跃轮 / 已完成轮 / 已跳过轮 → 拒绝', () => {
     const snap = startedSnapshot();
-    const noRound = reduceWorkerMessage(createEmptySnapshot(SEED, 'd'), { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' });
+    const noRound = reduceWorkerMessage(createEmptySnapshot(SEED, 'd'), { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY);
     expect((noRound.response as { error?: string }).error).toContain('cannot skip');
 
-    const skipped = reduceWorkerMessage(snap, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }).snapshot;
-    const again = reduceWorkerMessage(skipped, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' });
+    const skipped = reduceWorkerMessage(snap, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY).snapshot;
+    const again = reduceWorkerMessage(skipped, { type: 'DAILY_TEST_SKIP' }, { id: 'ext', url: 'popup.html' }, undefined, DAILY_TODAY);
     expect((again.response as { error?: string }).error).toContain('cannot skip');
+  });
+
+  it('R-DLY-8 跨日边界：持久化轮次 localDate 已过期（today 前进）时，跳过被拒绝且零变化', () => {
+    const snap = startedSnapshot();
+    const before = JSON.stringify(snap);
+    const { snapshot: next, response, changed } = reduceWorkerMessage(
+      snap,
+      { type: 'DAILY_TEST_SKIP' },
+      { id: 'ext', url: 'popup.html' },
+      undefined,
+      '2026-08-04',
+    );
+    expect((response as { error?: string }).error).toContain('daily test expired');
+    expect(changed).toBe(false);
+    expect(JSON.stringify(next)).toBe(before);
+    expect(next.dailyTest!.skipped).toBe(false); // 未被跳过
   });
 });
 

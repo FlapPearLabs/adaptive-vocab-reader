@@ -910,6 +910,8 @@ async function main() {
     if (dailyAfter2.dailyTest.answers.filter((a) => a !== null).length !== 2) {
       throw new Error('场景 11 前置：未答满 2 题');
     }
+    const answeredWords4 = dailyPlan4.questions.slice(0, 2).map((q) => q.word);
+    const unAnsweredWords4 = dailyPlan4.questions.slice(2).map((q) => q.word);
     await popup4.close();
     popup4 = await openPopup4();
     await popup4.waitForSelector('.daily-progress', { timeout: 10_000 });
@@ -924,53 +926,28 @@ async function main() {
     }
     console.log('[stage4] 场景 11 PASS：同日关闭/重开 popup 暂停恢复同一冻结计划（2/5）');
 
-    // ---- 继续答完剩余 3 题 → 每日五题完成 ----
-    await popup4.click('.daily-resume');
-    await popup4.waitForSelector('.question', { timeout: 10_000 });
-    for (let i = 2; i < 5; i++) {
-      const q = dailyPlan4.questions[i];
-      await clickOption4(popup4, i, q.correctOptionIndex);
-      await wait(50);
-    }
-    await popup4.waitForSelector('.daily-complete', { timeout: 10_000 });
-    const snapAfterDaily = await readSnap4();
-    if (!snapAfterDaily.dailyTest.completed) throw new Error('场景 8 失败：每日五题未标记完成');
-    if (snapAfterDaily.completedRoundIndex !== 1) {
-      throw new Error(`场景 8 失败：completedRoundIndex 应为 1，实际 ${snapAfterDaily.completedRoundIndex}`);
-    }
-    console.log('[stage4] 场景 8 PASS：完成每日五题，completedRoundIndex=1');
-
-    // ---- §21 场景 9：每日答案更新状态与估计（双写 WordState(daily) + Evidence(daily)）----
-    for (const w of dailyWords4) {
-      if (snapAfterDaily.words[w]?.source !== 'daily') throw new Error(`场景 9 失败：${w} 的 WordState.source 应为 daily`);
-      if (snapAfterDaily.assessmentEvidence[w]?.source !== 'daily') throw new Error(`场景 9 失败：${w} 的 Evidence.source 应为 daily`);
-    }
-    popup4 = await openPopup4();
-    await popup4.waitForSelector('.estimate-point', { timeout: 10_000 });
-    const estimateAfterDaily = await popup4.$eval('.estimate', (el) => el.textContent || '');
-    if (estimateAfterDaily === estimateBeforeDaily) {
-      throw new Error(`场景 9 失败：每日后估计未变化：\n前=${estimateBeforeDaily}\n后=${estimateAfterDaily}`);
-    }
-    await popup4.waitForSelector('.daily-complete', { timeout: 10_000 });
-    console.log('[stage4] 场景 9 PASS：每日双写后状态与估计均变化');
-
-    // ---- §21 场景 17：每日轮进行中阅读不被阻塞 ----
+    // ---- §21 场景 17：每日轮「进行中」（completed=false，2/5）阅读不被阻塞 ----
+    // 阅读页验证必须在轮次未完成（1~2 题已答、completed=false）阶段执行，
+    // 证明真实网页在每日测试进行中仍正常标注（BLOCKER 3 修复）。
     const readPage4 = await browser4.newPage();
     readPage4.on('pageerror', (e) => pageLogs.push(`stage4 read error: ${e.message}`));
     await gotoSafe(readPage4, `https://localhost:${PORT}/long-read.html`, { waitUntil: 'networkidle0' });
     await readPage4.waitForSelector('.avr-word', { timeout: 15_000 });
     const readAnnotations = await readPage4.$$eval('.avr-word', (els) => els.length);
     if (readAnnotations === 0) throw new Error('场景 17 失败：每日轮进行中阅读未被标注（阅读被阻塞）');
+    const snapDuringRead = await readSnap4();
+    if (snapDuringRead.dailyTest.completed !== false) throw new Error('场景 17 前置：阅读验证应在每日轮未完成状态执行');
     await readPage4.close();
-    console.log(`[stage4] 场景 17 PASS：每日轮进行中阅读正常标注（annotations=${readAnnotations}）`);
+    console.log(`[stage4] 场景 17 PASS：每日轮进行中（completed=false，2/5）阅读正常标注（annotations=${readAnnotations}）`);
 
-    // ---- §21 场景 12/13：跨日（date seam 最小注入：改写 storage localDate + 同 profile 重启）----
+    // ---- §21 场景 12/13：未完成轮跨日（date seam 最小注入：改写 storage localDate + 同 profile 重启）----
     // 生产无时间服务；本地日期变化通过持久化 dailyTest.localDate 模拟（重启走真实 loadSnapshot 路径）。
+    // 此处必须是「未完成轮」（2/5）：验证已答保留、未答零变化、不递增轮次（BLOCKER 2 修复）。
     const yesterday4 = localDateString(new Date(Date.now() - 24 * 3600 * 1000));
     await worker4.evaluate((snap, y) => {
       snap.dailyTest.localDate = y; // 仅改日期字段，模拟"昨天创建的计划"
       return chrome.storage.local.set({ avr_vocab_snapshot: snap });
-    }, snapAfterDaily, yesterday4);
+    }, dailyAfterReopen, yesterday4);
     ({ chrome: chrome4, browser: browser4 } = await restartChromeOnSameProfile(path.join(tempDir, 'profile-4'), chromeForTesting, browser4, chrome4));
     extId = extensionIdFromTargets(browser4);
     if (!extId) throw new Error('阶段四：跨日重启后无法解析扩展 ID');
@@ -980,30 +957,59 @@ async function main() {
     popup4 = await openPopup4();
     await popup4.waitForSelector('.daily-expired', { timeout: 10_000 });
     const expiredText = await popup4.$eval('.daily-expired', (el) => el.textContent || '');
-    if (!/已过期/.test(expiredText)) throw new Error(`场景 12 失败：未显示跨日过期：${expiredText}`);
-    // 跨日：已答证据保留、不回滚；未完成轮不递增轮次（此处旧轮已完成，递增早已发生，仍为 1）
+    if (!/已过期/.test(expiredText)) throw new Error(`场景 12 失败：未完成轮跨日未显示过期提示：${expiredText}`);
+    // 跨日：已答 2 词 WordState/Evidence 保留（不回滚）；未答 3 词零变化；未完成轮不递增。
     const snapExpired = await readSnap4();
-    for (const w of dailyWords4) {
-      if (snapExpired.assessmentEvidence[w]?.source !== 'daily') throw new Error(`场景 13 失败：跨日后 ${w} 已答证据丢失`);
+    for (const w of answeredWords4) {
+      if (snapExpired.words[w]?.source !== 'daily') throw new Error(`场景 13 失败：跨日后已答词 ${w} WordState 丢失`);
+      if (snapExpired.assessmentEvidence[w]?.source !== 'daily') throw new Error(`场景 13 失败：跨日后已答词 ${w} Evidence 丢失`);
     }
-    if (snapExpired.completedRoundIndex !== 1) {
-      throw new Error(`场景 13 失败：跨日后 completedRoundIndex 不应变化，实际 ${snapExpired.completedRoundIndex}`);
+    for (const w of unAnsweredWords4) {
+      if (snapExpired.words[w]) throw new Error(`场景 13 失败：跨日后未答词 ${w} 被错误写入 WordState`);
+      if (snapExpired.assessmentEvidence[w]) throw new Error(`场景 13 失败：跨日后未答词 ${w} 被错误写入 Evidence`);
     }
-    console.log('[stage4] 场景 12/13 PASS：跨日过期展示 + 已答证据保留 + 不递增轮次');
+    if (snapExpired.completedRoundIndex !== 0) {
+      throw new Error(`场景 13 失败：未完成轮跨日后 completedRoundIndex 应为 0，实际 ${snapExpired.completedRoundIndex}`);
+    }
+    console.log('[stage4] 场景 12/13 PASS：未完成轮（2/5）跨日过期展示 + 已答保留 + 未答零变化 + 不递增轮次');
 
-    // ---- 跨日后新一天：按当前 completedRoundIndex=1 取奇数频段 1/3/5/7/9 ----
+    // ---- §21 场景 12/13 + BLOCKER 1：跨日后 worker 拒绝继续作答/跳过（真实消息路径）----
+    // 保持旧轮（localDate=昨天）仍在 storage：仍持有旧答题页的客户端提交 DAILY_TEST_ANSWER / DAILY_TEST_SKIP，
+    // worker 的跨日边界必须拒绝，且状态/证据/进度/轮次零变化（R-DLY-8）。
+    const beforeReject = await readSnap4();
+    const answerReject = await popup4.evaluate(() => chrome.runtime.sendMessage({
+      type: 'DAILY_TEST_ANSWER', questionIndex: 2, answer: { kind: 'unsure' },
+    }));
+    const skipReject = await popup4.evaluate(() => chrome.runtime.sendMessage({ type: 'DAILY_TEST_SKIP' }));
+    if (!answerReject || !/daily test expired/.test(answerReject.error || '')) {
+      throw new Error(`场景 12 失败：跨日后作答未被拒绝：${JSON.stringify(answerReject)}`);
+    }
+    if (!skipReject || !/daily test expired/.test(skipReject.error || '')) {
+      throw new Error(`场景 12 失败：跨日后跳过未被拒绝：${JSON.stringify(skipReject)}`);
+    }
+    const afterReject = await readSnap4();
+    if (JSON.stringify(afterReject) !== JSON.stringify(beforeReject)) {
+      throw new Error('场景 12 失败：跨日拒绝后状态/证据/进度/轮次发生变化');
+    }
+    console.log('[stage4] 场景 12/13 BLOCKER-1 PASS：跨日后 DAILY_TEST_ANSWER / DAILY_TEST_SKIP 被 worker 拒绝且零变化');
+
+    // ---- 跨日后新一天：未完成轮不递增（completedRoundIndex=0）→ 新轮仍偶数频段 0/2/4/6/8 ----
     await popup4.click('.daily-start');
     await popup4.waitForSelector('.question', { timeout: 10_000 });
     const newDaySnap = await readSnap4();
     const newBands = newDaySnap.dailyTest.questions.map((q) => q.band).sort((a, b) => a - b);
-    if (JSON.stringify(newBands) !== JSON.stringify([1, 3, 5, 7, 9])) {
-      throw new Error(`场景 13 失败：新一天应按 completedRoundIndex=1 取奇数频段 1/3/5/7/9，实际 ${newBands}`);
+    if (JSON.stringify(newBands) !== JSON.stringify([0, 2, 4, 6, 8])) {
+      throw new Error(`场景 13 失败：未完成轮跨日后新一天应继续偶数频段 0/2/4/6/8（completedRoundIndex=0），实际 ${newBands}`);
     }
     if (newDaySnap.dailyTest.localDate !== localDateString()) {
       throw new Error(`场景 13 失败：新计划 localDate 应为今天 ${localDateString()}，实际 ${newDaySnap.dailyTest.localDate}`);
     }
+    if (newDaySnap.completedRoundIndex !== 0) {
+      throw new Error(`场景 13 失败：未完成轮跨日后新一天 completedRoundIndex 应仍为 0，实际 ${newDaySnap.completedRoundIndex}`);
+    }
     if (newDaySnap.dailyTest.answers.some((a) => a !== null)) throw new Error('场景 13 失败：新计划不应继承旧轮作答');
-    console.log('[stage4] 场景 13 PASS：新一天按当前 completedRoundIndex 选奇数频段创建新轮');
+    console.log('[stage4] 场景 13 PASS：新一天按原 completedRoundIndex=0 继续偶数频段创建新轮');
+    const newDailyPlan4 = newDaySnap.dailyTest;
 
     // ---- §21 场景 10：首题前跳过零变化；答后跳过入口消失 ----
     await popup4.waitForSelector('.daily-skip', { timeout: 10_000 });
@@ -1016,7 +1022,7 @@ async function main() {
     if (!snapAfterSkip.dailyTest.skipped) throw new Error('场景 10 失败：跳过未生效');
     if (JSON.stringify(snapAfterSkip.words) !== wordsBeforeSkip) throw new Error('场景 10 失败：跳过改写了 WordState');
     if (JSON.stringify(snapAfterSkip.assessmentEvidence) !== evidenceBeforeSkip) throw new Error('场景 10 失败：跳过改写了 AssessmentEvidence');
-    if (snapAfterSkip.completedRoundIndex !== 1) throw new Error('场景 10 失败：跳过递增了 completedRoundIndex');
+    if (snapAfterSkip.completedRoundIndex !== 0) throw new Error('场景 10 失败：跳过递增了 completedRoundIndex');
     console.log('[stage4] 场景 10 PASS（前半）：首题前跳过 → 状态与证据零变化');
 
     // 跳过后重开 popup：主入口不突出，保留次级"今天仍可开始"
@@ -1039,7 +1045,54 @@ async function main() {
     if (skipVisibleAfterAnswer !== 0) throw new Error('场景 10 失败：答第一题后跳过入口仍可见');
     console.log('[stage4] 场景 10 PASS：跳过后次级入口、反悔复用冻结计划、答第一题后跳过入口消失');
 
-    console.log(`E2E #4 PASS: daily_round=5q, bands_even=0/2/4/6/8, bands_odd=1/3/5/7/9, round_index=1, skip_zero_change=true, pause_resume=true, cross_day_expired=true, evidence_kept=true, reading_unblocked=true`);
+    // ---- §21 场景 8：完成每日五题（答完剩余 4 题；completed 首次变 true 时递增一次）----
+    for (let i = 1; i < newDailyPlan4.questions.length; i++) {
+      const q = newDailyPlan4.questions[i];
+      await clickOption4(popup4, i, q.correctOptionIndex);
+      await wait(50);
+    }
+    await popup4.waitForSelector('.daily-complete', { timeout: 10_000 });
+    const snapAfterDaily = await readSnap4();
+    if (!snapAfterDaily.dailyTest.completed) throw new Error('场景 8 失败：每日五题未标记完成');
+    if (snapAfterDaily.completedRoundIndex !== 1) {
+      throw new Error(`场景 8 失败：completedRoundIndex 应为 1（首次完成递增一次），实际 ${snapAfterDaily.completedRoundIndex}`);
+    }
+    const dailyWordsCompleted = newDailyPlan4.questions.map((q) => q.word);
+    console.log('[stage4] 场景 8 PASS：完成每日五题，completedRoundIndex=1');
+
+    // ---- §21 场景 9：每日答案更新状态与估计（双写 WordState(daily) + Evidence(daily)）----
+    for (const w of dailyWordsCompleted) {
+      if (snapAfterDaily.words[w]?.source !== 'daily') throw new Error(`场景 9 失败：${w} 的 WordState.source 应为 daily`);
+      if (snapAfterDaily.assessmentEvidence[w]?.source !== 'daily') throw new Error(`场景 9 失败：${w} 的 Evidence.source 应为 daily`);
+    }
+    popup4 = await openPopup4();
+    await popup4.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateAfterDaily = await popup4.$eval('.estimate', (el) => el.textContent || '');
+    if (estimateAfterDaily === estimateBeforeDaily) {
+      throw new Error(`场景 9 失败：每日后估计未变化：\n前=${estimateBeforeDaily}\n后=${estimateAfterDaily}`);
+    }
+    await popup4.waitForSelector('.daily-complete', { timeout: 10_000 });
+    console.log('[stage4] 场景 9 PASS：每日双写后状态与估计均变化');
+
+    // ---- BLOCKER 4：已完成轮跨日 → 不显示"昨日未完成"过期提示，直接提供今日入口 ----
+    const yesterdayDone = localDateString(new Date(Date.now() - 24 * 3600 * 1000));
+    await worker4.evaluate((snap, y) => {
+      snap.dailyTest.localDate = y; // 已完成轮次改为旧日期
+      return chrome.storage.local.set({ avr_vocab_snapshot: snap });
+    }, snapAfterDaily, yesterdayDone);
+    ({ chrome: chrome4, browser: browser4 } = await restartChromeOnSameProfile(path.join(tempDir, 'profile-4'), chromeForTesting, browser4, chrome4));
+    extId = extensionIdFromTargets(browser4);
+    worker4 = await waitForWorker(browser4);
+    if (!worker4) throw new Error('阶段四：已完成轮跨日重启后未找到 Service Worker');
+    popup4 = await openPopup4();
+    await popup4.waitForSelector('.daily-start', { timeout: 10_000 });
+    const expiredCountAfterDone = await popup4.evaluate(() => document.querySelectorAll('.daily-expired').length);
+    if (expiredCountAfterDone !== 0) {
+      throw new Error(`场景 12 失败：已完成轮跨日不应显示「昨日未完成」过期提示：${await popup4.evaluate(() => document.body.innerText || '')}`);
+    }
+    console.log('[stage4] BLOCKER-4 PASS：已完成轮跨日不显示「昨日未完成」过期提示，直接提供今日入口');
+
+    console.log(`E2E #4 PASS: daily_round=5q, bands_even=0/2/4/6/8, incomplete_round_cross_day=true, answered_kept=true, unanswered_zero_change=true, round_index_kept=0, expired_write_rejected=true, skip_zero_change=true, pause_resume=true, reading_in_progress_unblocked=true`);
   } finally {
     if (browser4) await browser4.close();
     await killChrome(chrome4);

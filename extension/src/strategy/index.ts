@@ -33,6 +33,7 @@ import type {
   DailyTestState,
   FreezeDailyTestInput,
   SettleDailyTestAnswerInput,
+  DailyAnswerResult,
 } from '../shared/types';
 import { buildInitialTestPlan, applyAnswer } from './quiz';
 import { freezeAuditPlan, settleAuditAnswer } from './audit';
@@ -45,7 +46,12 @@ export { INITIAL_TEST_LENGTH } from '../shared/types';
 // 调用方（popup/worker）经本模块消费，不直连 daily.ts。
 export { DAILY_TEST_LENGTH } from '../shared/types';
 export { dailyBandsForRound } from './daily';
-export type { DailyTestState, FreezeDailyTestInput, SettleDailyTestAnswerInput } from '../shared/types';
+export type {
+  DailyTestState,
+  FreezeDailyTestInput,
+  SettleDailyTestAnswerInput,
+  DailyAnswerResult,
+} from '../shared/types';
 
 // 词汇量估计纯函数 seam（R-EST-1~7）：估计只读取 AssessmentEvidence，
 // 词包大小为显式参数；调用方（popup）经本模块消费，不直连 estimate.ts。
@@ -136,7 +142,7 @@ export function createVocabStrategy(): VocabStrategy {
       return buildDailyTestState(input, localDate);
     },
 
-    settleDailyAnswer(input: SettleDailyTestAnswerInput): ApplyAnswerResult {
+    settleDailyAnswer(input: SettleDailyTestAnswerInput): DailyAnswerResult {
       return settleDailyAnswerImpl(input);
     },
 

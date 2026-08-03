@@ -311,7 +311,8 @@ async function main(): Promise<void> {
     block.append(el('h2', 'daily-title', '每日校准'));
 
     if (!daily || daily.localDate !== today) {
-      if (daily && daily.localDate !== today) {
+      // 仅「未完成」的旧日期轮次显示跨日过期提示（R-DLY-8）；已完成轮直接提供今日入口。
+      if (daily && daily.localDate !== today && !daily.completed) {
         block.append(el('p', 'daily-expired', '昨日未完成的计划已过期，已答结果已保留。'));
       }
       const start = el('button', 'primary daily-start', '开始今日五题') as HTMLButtonElement;
@@ -339,6 +340,15 @@ async function main(): Promise<void> {
     screen.append(block);
   }
 
+  /** 重新拉取每日状态（worker 拒绝过期写入后刷新本地视图，回到结果页显示过期）。 */
+  async function refreshDaily(): Promise<void> {
+    const state = await sendMessage<{ test: DailyTestState | null; completedRoundIndex: number }>({
+      type: 'GET_DAILY_TEST',
+    });
+    daily = state.test;
+    dailyCompletedRoundIndex = state.completedRoundIndex;
+  }
+
   /** 冻结并开始今日计划（首测完成后、无活跃轮或跨日过期时调用）。 */
   async function startDaily(): Promise<void> {
     const today = todayLocalDate();
@@ -357,7 +367,14 @@ async function main(): Promise<void> {
       },
       today,
     );
-    const resp = await sendMessage<{ test: DailyTestState }>({ type: 'DAILY_TEST_START', test: plan });
+    const resp = await sendMessage<{ test: DailyTestState; error?: string }>({ type: 'DAILY_TEST_START', test: plan });
+    if (resp.error) {
+      // 服务端拒绝（如跨日/首测未完成）：刷新真实状态并回到结果页展示。
+      await refreshDaily();
+      dailyView = false;
+      render();
+      return;
+    }
     daily = resp.test;
     dailyView = true;
     render();
@@ -366,7 +383,13 @@ async function main(): Promise<void> {
   /** 反悔跳过：同日 DAILY_TEST_START → worker 置 skipped=false 并复用同一冻结计划（R-DLY-6）。 */
   async function resumeDaily(): Promise<void> {
     if (!daily) return;
-    const resp = await sendMessage<{ test: DailyTestState }>({ type: 'DAILY_TEST_START', test: daily });
+    const resp = await sendMessage<{ test: DailyTestState; error?: string }>({ type: 'DAILY_TEST_START', test: daily });
+    if (resp.error) {
+      await refreshDaily();
+      dailyView = false;
+      render();
+      return;
+    }
     daily = resp.test;
     dailyView = true;
     render();
@@ -395,11 +418,18 @@ async function main(): Promise<void> {
   /** 每日作答：双写由 worker 完成；完成后回到结果页并刷新估计（R-DLY-4）。 */
   async function dailySubmit(index: number, answer: QuizAnswer): Promise<void> {
     if (!daily) return;
-    const resp = await sendMessage<{ test: DailyTestState; completedRoundIndex: number }>({
+    const resp = await sendMessage<{ test: DailyTestState; completedRoundIndex: number; error?: string }>({
       type: 'DAILY_TEST_ANSWER',
       questionIndex: index,
       answer,
     });
+    if (resp.error) {
+      // 跨日边界：worker 拒绝过期写入 → 刷新真实状态并回到结果页显示过期（R-DLY-8）。
+      await refreshDaily();
+      dailyView = false;
+      render();
+      return;
+    }
     daily = resp.test;
     dailyCompletedRoundIndex = resp.completedRoundIndex;
     render();
@@ -407,7 +437,13 @@ async function main(): Promise<void> {
 
   /** 首题前跳过：WordState 与 AssessmentEvidence 零变化（R-DLY-6）。 */
   async function skipDaily(): Promise<void> {
-    const resp = await sendMessage<{ test: DailyTestState }>({ type: 'DAILY_TEST_SKIP' });
+    const resp = await sendMessage<{ test: DailyTestState; error?: string }>({ type: 'DAILY_TEST_SKIP' });
+    if (resp.error) {
+      await refreshDaily();
+      dailyView = false;
+      render();
+      return;
+    }
     daily = resp.test;
     dailyView = false;
     render();

@@ -158,6 +158,18 @@ export interface SettleDailyTestAnswerInput {
   readonly answer: QuizAnswer;
 }
 
+/**
+ * 每日单题结算结果（R-DLY-4 / ADR-0004）：答对→会、答错/不确定→不会。
+ * 来源固定为 `daily`——每日领域 seam 与持久化写入的来源必须一致，
+ * 不得借用首测的 `StateChange<'initial'>` 再在 worker 侧重建。
+ * 不携带审计字段（V0.1 用户路径已切断审计）；这是每日专属的最小返回类型，
+ * 不抽象成通用测试轮引擎。
+ */
+export type DailyAnswerResult =
+  | { readonly kind: 'correct'; readonly change: StateChange<'daily'> }
+  | { readonly kind: 'wrong'; readonly change: StateChange<'daily'> }
+  | { readonly kind: 'unsure'; readonly change: StateChange<'daily'> };
+
 /** 单次答对的待审计标记（非用户可见的第四种状态） */
 export interface AuditMarker {
   readonly word: string;
@@ -431,8 +443,8 @@ export interface VocabStrategy {
    */
   freezeDailyTest(input: FreezeDailyTestInput, localDate: string): DailyTestState;
 
-  /** 结算一道冻结的每日题：答对→会、答错/不确定→不会；双写由调用方经 settleAssessment 完成。 */
-  settleDailyAnswer(input: SettleDailyTestAnswerInput): ApplyAnswerResult;
+  /** 结算一道冻结的每日题：答对→会、答错/不确定→不会；change.source 固定为 daily（R-DLY-4/ADR-0004）。 */
+  settleDailyAnswer(input: SettleDailyTestAnswerInput): DailyAnswerResult;
 
   /**
    * 首测开始生命周期 transition：策略据首测计划、当前标记与状态版本计算并交付
