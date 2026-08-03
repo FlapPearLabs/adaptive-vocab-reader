@@ -39,12 +39,13 @@ function makeBands(words: string[]): FrequencyBands {
 describe('VocabStrategy seam（深 Module Interface 行为）', () => {
   const strategy: VocabStrategy = createVocabStrategy();
 
-  it('暴露且仅暴露 10 个领域动作方法（含初测/每日共用测试结算）', () => {
+  it('暴露且仅暴露 12 个领域动作方法（含初测/每日共用测试结算与每日冻结/结算）', () => {
     // 行为断言：strategy 对象恰好具备这些方法（非内部函数浅转发清单）
     const methods = Object.keys(strategy).sort();
     expect(methods).toEqual(
       [
         'freezeAuditPlan',
+        'freezeDailyTest',
         'freezeInitialTestPlan',
         'getDisplayDecision',
         'markKnown',
@@ -52,6 +53,7 @@ describe('VocabStrategy seam（深 Module Interface 行为）', () => {
         'resetInitialTest',
         'settleAssessment',
         'settleAuditAnswer',
+        'settleDailyAnswer',
         'settleInitialTestAnswer',
         'startInitialTest',
       ].sort(),

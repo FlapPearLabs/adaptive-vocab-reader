@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { VocabSnapshot, WordState } from '../shared/types';
+import type { VocabSnapshot, WordState, DailyTestState } from '../shared/types';
 import { SCHEMA_VERSION } from '../shared/types';
 import {
   createEmptySnapshot,
   mergeStateChange,
   mergeAssessment,
+  mergeDailyTest,
   getWords,
   generateInstallSeed,
   addAuditMarker,
@@ -514,5 +515,70 @@ describe('storage', () => {
       expect(snap.assessmentEvidence).toEqual({ valid: { outcome: 'known', source: 'initial', assessedAt: 0 } });
       expect(migrateSnapshot(snap)).toBe(snap);
     });
+  });
+});
+
+describe('mergeDailyTest（R-DLY-2：completedRoundIndex 递增时机）', () => {
+  function makeTest(partial: Partial<DailyTestState> = {}): DailyTestState {
+    return {
+      localDate: '2026-08-03',
+      roundIndex: 0,
+      questions: [],
+      answers: [null, null, null, null, null],
+      completed: false,
+      skipped: false,
+      ...partial,
+    };
+  }
+
+  it('completed 首次变 true → completedRoundIndex 递增一次', () => {
+    const snap = createEmptySnapshot('s', 'd');
+    const next = mergeDailyTest(snap, makeTest({ completed: true }));
+    expect(next.completedRoundIndex).toBe(1);
+    expect(next.dailyTest!.completed).toBe(true);
+  });
+
+  it('未完成轮（completed=false，含部分作答）→ 不递增', () => {
+    const snap = createEmptySnapshot('s', 'd');
+    const partial = mergeDailyTest(snap, makeTest({ answers: [{ kind: 'unsure' }, null, null, null, null] }));
+    expect(partial.completedRoundIndex).toBe(0);
+    expect(mergeDailyTest(snap, makeTest()).completedRoundIndex).toBe(0);
+  });
+
+  it('skipped=true（answers 全 null）→ 不递增', () => {
+    const snap = createEmptySnapshot('s', 'd');
+    const next = mergeDailyTest(snap, makeTest({ skipped: true }));
+    expect(next.completedRoundIndex).toBe(0);
+    expect(next.dailyTest!.skipped).toBe(true);
+  });
+
+  it('已完成轮再次传入 completed=true → 不二次递增（幂等）', () => {
+    const snap = createEmptySnapshot('s', 'd');
+    const completedOnce = mergeDailyTest(snap, makeTest({ completed: true }));
+    expect(completedOnce.completedRoundIndex).toBe(1);
+    const completedTwice = mergeDailyTest(completedOnce, makeTest({ completed: true }));
+    expect(completedTwice.completedRoundIndex).toBe(1);
+  });
+
+  it('跨日替换旧轮（新轮 completed=false）→ 不递增；旧轮已完成时其递增早已发生', () => {
+    // 旧轮已完成：递增已发生（index=1）
+    const snap = mergeDailyTest(createEmptySnapshot('s', 'd'), makeTest({ completed: true }));
+    expect(snap.completedRoundIndex).toBe(1);
+    // 跨日新轮（localDate 不同、completed=false）→ 替换且不递增
+    const nextDay = mergeDailyTest(snap, makeTest({ localDate: '2026-08-04' }));
+    expect(nextDay.completedRoundIndex).toBe(1);
+    expect(nextDay.dailyTest!.localDate).toBe('2026-08-04');
+    // 新轮完成 → 递增到 2
+    const nextDayDone = mergeDailyTest(nextDay, makeTest({ localDate: '2026-08-04', completed: true }));
+    expect(nextDayDone.completedRoundIndex).toBe(2);
+  });
+
+  it('返回新对象（不可变）且更新 lastUpdated', () => {
+    const snap = createEmptySnapshot('s', 'd');
+    const before = snap.lastUpdated;
+    const next = mergeDailyTest(snap, makeTest());
+    expect(next).not.toBe(snap);
+    expect(next.dailyTest).not.toBe(snap.dailyTest);
+    expect(next.lastUpdated).toBeGreaterThanOrEqual(before);
   });
 });

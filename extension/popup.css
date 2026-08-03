@@ -199,3 +199,41 @@ button.primary {
   margin: 0;
   line-height: 1.6;
 }
+
+/* ---- 每日校准轮 ---- */
+
+.daily {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+
+.daily-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.daily-expired,
+.daily-progress,
+.daily-complete {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.daily-skip {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.daily-secondary {
+  align-self: flex-start;
+  color: var(--muted);
+  border-style: dashed;
+}

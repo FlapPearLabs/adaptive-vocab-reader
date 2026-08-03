@@ -16,6 +16,7 @@ import type {
   AuditEvent,
   AuditPlan,
   FormsMap,
+  DailyTestState,
 } from '../shared/types';
 import { SCHEMA_VERSION } from '../shared/types';
 
@@ -204,6 +205,26 @@ export function mergeAssessment(snapshot: VocabSnapshot, settlement: AssessmentS
     [settlement.change.word]: settlement.evidence,
   };
   return { ...snapshot, words, assessmentEvidence, lastUpdated: settlement.evidence.assessedAt };
+}
+
+/**
+ * 写入每日测试状态并协调 completedRoundIndex 递增时机（R-DLY-2）。
+ * - completed 首次变 true 时把 completedRoundIndex 递增一次；
+ * - 未完成轮（completed=false）绝不递增；
+ * - 已完成轮再次传入 completed=true（防御性）不二次递增（幂等）；
+ * - 跨日替换旧轮（新轮 completed=false）不递增——旧轮若已完成，其递增早已发生。
+ */
+export function mergeDailyTest(snapshot: VocabSnapshot, test: DailyTestState): VocabSnapshot {
+  const wasCompleted = snapshot.dailyTest?.completed === true;
+  const nowCompleted = test.completed === true;
+  const completedRoundIndex =
+    nowCompleted && !wasCompleted ? snapshot.completedRoundIndex + 1 : snapshot.completedRoundIndex;
+  return {
+    ...snapshot,
+    dailyTest: test,
+    completedRoundIndex,
+    lastUpdated: Date.now(),
+  };
 }
 
 /**

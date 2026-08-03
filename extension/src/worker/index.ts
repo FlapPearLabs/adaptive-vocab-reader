@@ -23,12 +23,14 @@ import type {
   AuditPlan,
   VocabStrategy,
   FormsMap,
+  DailyTestState,
 } from '../shared/types';
 import { SCHEMA_VERSION } from '../shared/types';
 import {
   createEmptySnapshot,
   mergeStateChange,
   mergeAssessment,
+  mergeDailyTest,
   getWords,
   generateInstallSeed,
   setInitialTest,
@@ -37,7 +39,7 @@ import {
   recordAuditEvent,
   migrateSnapshot,
 } from './storage';
-import { createVocabStrategy, INITIAL_TEST_LENGTH } from '../strategy/index';
+import { createVocabStrategy, INITIAL_TEST_LENGTH, DAILY_TEST_LENGTH, dailyBandsForRound } from '../strategy/index';
 import { validateAuditAnswerRequest, validateFrozenAuditPlan } from './auditValidation';
 
 const STORAGE_KEY = 'avr_vocab_snapshot';
@@ -132,6 +134,87 @@ export function reduceWorkerMessage(
     case 'GET_ASSESSMENT_EVIDENCE':
       // 估计只读取 AssessmentEvidence（RULES 双真相源）；popup 结果页展示点值/范围时经此只读消息获取。
       return { snapshot, response: { evidence: snapshot.assessmentEvidence }, changed: false };
+
+    // ============================================================
+    // 每日校准轮（Ticket 04）：只读/开始/跳过/作答
+    // ============================================================
+
+    case 'GET_DAILY_TEST':
+      // 返回当前轮（可能为 null）与已完成轮次；popup 每日入口/进度/跨日过期展示依赖此消息。
+      return { snapshot, response: { test: snapshot.dailyTest, completedRoundIndex: snapshot.completedRoundIndex }, changed: false };
+
+    case 'DAILY_TEST_START': {
+      const { test } = message;
+      // 入口前置（R-DLY-5）：每日轮只在首测完成后可进入；首测未完成绝不创建 DailyTestState。
+      if (!snapshot.initialTest || snapshot.initialTest.completed !== true) {
+        return { snapshot, response: { error: 'initial test required' }, changed: false };
+      }
+      const existing = snapshot.dailyTest;
+      // 同一本地日期已有一轮：暂停恢复同一冻结计划；已跳过则反悔（skipped→false）并复用计划。
+      if (existing && existing.localDate === test.localDate) {
+        if (existing.completed) {
+          return { snapshot, response: { test: existing }, changed: false };
+        }
+        if (existing.skipped) {
+          const resumed: DailyTestState = { ...existing, skipped: false };
+          return { snapshot: mergeDailyTest(snapshot, resumed), response: { test: resumed, resumed: true }, changed: true };
+        }
+        return { snapshot, response: { test: existing }, changed: false };
+      }
+      // 新计划（首次或跨日）：服务端权威校验结构，不信任客户端计划内容（防伪造频段/题数/轮次）。
+      const validation = validateDailyTestPlan(test, snapshot.completedRoundIndex);
+      if (!validation.ok) {
+        return { snapshot, response: { error: validation.error }, changed: false };
+      }
+      return { snapshot: mergeDailyTest(snapshot, test), response: { test, created: true }, changed: true };
+    }
+
+    case 'DAILY_TEST_ANSWER': {
+      const { questionIndex, answer } = message;
+      const daily = snapshot.dailyTest;
+      // 无活跃轮/已跳过/已完成/题号越界/该题已答 → 拒绝（防重复作答与轮次外作答）。
+      if (!daily || daily.skipped || daily.completed) {
+        return { snapshot, response: { error: 'cannot answer' }, changed: false };
+      }
+      const question = daily.questions[questionIndex];
+      if (!question || daily.answers[questionIndex] !== null) {
+        return { snapshot, response: { error: 'cannot answer' }, changed: false };
+      }
+      const current = snapshot.words[question.word];
+      const result = strat.settleDailyAnswer({ question, answer });
+      // 每日作答双写 WordState(daily) + AssessmentEvidence(daily)（R-DLY-4），估计随证据变化。
+      const settlement = strat.settleAssessment({
+        word: result.change.word,
+        outcome: result.change.newStatus as 'known' | 'learning',
+        source: 'daily',
+        assessedAt: Date.now(),
+      });
+      const answers = daily.answers.slice();
+      answers[questionIndex] = answer;
+      const completed = answers.every((a) => a !== null);
+      let next = mergeAssessment(snapshot, settlement);
+      // completed 首次变 true 时仅递增一次 completedRoundIndex（R-DLY-2），由 storage 纯函数收口。
+      next = mergeDailyTest(next, { ...daily, answers, completed });
+      return {
+        snapshot: next,
+        response: { result, test: next.dailyTest, completedRoundIndex: next.completedRoundIndex },
+        broadcast: { word: result.change.word, newStatus: result.change.newStatus },
+        changed: true,
+      };
+    }
+
+    case 'DAILY_TEST_SKIP': {
+      const daily = snapshot.dailyTest;
+      if (!daily || daily.skipped || daily.completed) {
+        return { snapshot, response: { error: 'cannot skip' }, changed: false };
+      }
+      // 仅首题前可跳过；首题前跳过 → WordState 与 AssessmentEvidence 零变化（R-DLY-6）。
+      if (daily.answers.some((a) => a !== null)) {
+        return { snapshot, response: { error: 'cannot skip after first answer' }, changed: false };
+      }
+      const skipped: DailyTestState = { ...daily, skipped: true };
+      return { snapshot: mergeDailyTest(snapshot, skipped), response: { success: true, test: skipped }, changed: true };
+    }
 
     case 'INITIAL_TEST_ANSWER': {
       const { questionIndex, answer } = message;
@@ -357,11 +440,63 @@ type WorkerMessage =
   | { type: 'GET_ASSESSMENT_EVIDENCE' }
   | { type: 'INITIAL_TEST_ANSWER'; questionIndex: number; answer: QuizAnswer }
   | { type: 'INITIAL_TEST_RESET' }
+  | { type: 'GET_DAILY_TEST' }
+  | { type: 'DAILY_TEST_START'; test: DailyTestState }
+  | { type: 'DAILY_TEST_ANSWER'; questionIndex: number; answer: QuizAnswer }
+  | { type: 'DAILY_TEST_SKIP' }
   | { type: 'GET_AUDIT_MARKERS' }
   | { type: 'FREEZE_AUDIT_PLAN'; plan: AuditPlan }
   | { type: 'GET_AUDIT_PLAN' }
   | { type: 'AUDIT_ANSWER'; auditPlanVersion: string; index: number; answer: QuizAnswer }
   | { type: 'CLEAR_AUDIT_PLAN' };
+
+/**
+ * 服务端权威校验 popup 提交的每日计划结构（不信任客户端计划内容）：
+ * - 恰好 5 题；每个选中频段（按 completedRoundIndex 奇偶）恰好一题；
+ * - 同轮不重复（不同频段词池互斥，此处再防御断言）；
+ * - answers 全为 null、completed=false、skipped=false、roundIndex 与当前轮次一致。
+ */
+export function validateDailyTestPlan(
+  test: unknown,
+  completedRoundIndex: number,
+): { ok: true } | { ok: false; error: string } {
+  if (!test || typeof test !== 'object' || Array.isArray(test)) {
+    return { ok: false, error: 'invalid daily test' };
+  }
+  const t = test as DailyTestState;
+  if (!Array.isArray(t.questions) || t.questions.length !== DAILY_TEST_LENGTH) {
+    return { ok: false, error: 'daily test must have exactly 5 questions' };
+  }
+  if (!Array.isArray(t.answers) || t.answers.length !== t.questions.length || t.answers.some((a) => a !== null)) {
+    return { ok: false, error: 'daily test answers must all be null' };
+  }
+  if (t.completed !== false || t.skipped !== false) {
+    return { ok: false, error: 'daily test must start incomplete and unskipped' };
+  }
+  if (t.roundIndex !== completedRoundIndex) {
+    return { ok: false, error: 'daily test round index mismatch' };
+  }
+  const expected = dailyBandsForRound(completedRoundIndex);
+  const seenBands = new Set<number>();
+  const seenWords = new Set<string>();
+  for (const q of t.questions) {
+    if (!q || typeof q !== 'object' || typeof q.word !== 'string' || q.word.length === 0 || !Number.isInteger(q.band)) {
+      return { ok: false, error: 'daily test question malformed' };
+    }
+    if (!expected.includes(q.band) || seenBands.has(q.band)) {
+      return { ok: false, error: 'daily test band mismatch' };
+    }
+    seenBands.add(q.band);
+    if (seenWords.has(q.word)) {
+      return { ok: false, error: 'daily test duplicate word' };
+    }
+    seenWords.add(q.word);
+  }
+  if (seenBands.size !== DAILY_TEST_LENGTH) {
+    return { ok: false, error: 'daily test must cover each selected band once' };
+  }
+  return { ok: true };
+}
 
 // 仅在扩展运行时（chrome 可用）注册消息监听与启动副作用；
 // 测试环境无 chrome 时跳过，使 reduceWorkerMessage 可在单测中直接驱动。

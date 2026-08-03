@@ -68,7 +68,7 @@ export function createRng(seed: string, salt: string): () => number {
 }
 
 /** Fisher–Yates 洗牌（不修改入参），使用给定 PRNG */
-function shuffle<T>(input: readonly T[], rng: () => number): T[] {
+export function shuffle<T>(input: readonly T[], rng: () => number): T[] {
   const arr = input.slice();
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));

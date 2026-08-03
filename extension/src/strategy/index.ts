@@ -30,12 +30,22 @@ import type {
   AuditMarker,
   AssessmentSettlement,
   AssessmentSettlementInput,
+  DailyTestState,
+  FreezeDailyTestInput,
+  SettleDailyTestAnswerInput,
 } from '../shared/types';
 import { buildInitialTestPlan, applyAnswer } from './quiz';
 import { freezeAuditPlan, settleAuditAnswer } from './audit';
+import { buildDailyTestState, settleDailyAnswerImpl, dailyBandsForRound } from './daily';
 
 // 重新导出常量，供调用方经本模块消费（不直连 quiz.ts）
 export { INITIAL_TEST_LENGTH } from '../shared/types';
+
+// 每日校准轮（Ticket 04）：选题/结算纯函数 seam（R-DLY-1~9 / R-EVD-5）。
+// 调用方（popup/worker）经本模块消费，不直连 daily.ts。
+export { DAILY_TEST_LENGTH } from '../shared/types';
+export { dailyBandsForRound } from './daily';
+export type { DailyTestState, FreezeDailyTestInput, SettleDailyTestAnswerInput } from '../shared/types';
 
 // 词汇量估计纯函数 seam（R-EST-1~7）：估计只读取 AssessmentEvidence，
 // 词包大小为显式参数；调用方（popup）经本模块消费，不直连 estimate.ts。
@@ -119,6 +129,15 @@ export function createVocabStrategy(): VocabStrategy {
         change: { word: input.word, newStatus: input.outcome, source: input.source },
         evidence: { outcome: input.outcome, source: input.source, assessedAt: input.assessedAt },
       };
+    },
+
+    // ---- 每日校准轮：冻结计划 + 结算单题 ----
+    freezeDailyTest(input: FreezeDailyTestInput, localDate: string): DailyTestState {
+      return buildDailyTestState(input, localDate);
+    },
+
+    settleDailyAnswer(input: SettleDailyTestAnswerInput): ApplyAnswerResult {
+      return settleDailyAnswerImpl(input);
     },
 
     // ---- 首测开始/重置：策略生成的完整生命周期 transition（worker 机械应用）----

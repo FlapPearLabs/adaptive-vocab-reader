@@ -16,6 +16,7 @@ import type {
   QuizAnswer,
   QuizQuestion,
   AssessmentEvidence,
+  DailyTestState,
 } from './shared/types';
 import {
   createVocabStrategy,
@@ -83,16 +84,35 @@ async function main(): Promise<void> {
   if (!app) return;
 
   const strategy: VocabStrategy = createVocabStrategy();
-  const [{ core, forms, bands }, profile, initialTest] = await Promise.all([
+  const [{ core, forms, bands }, profile, initialTest, dailyState] = await Promise.all([
     loadDict(),
     sendMessage<Profile>({ type: 'GET_PROFILE' }),
     sendMessage<{ test: InitialTestState | null }>({ type: 'GET_INITIAL_TEST' }).then((r) => r.test),
+    sendMessage<{ test: DailyTestState | null; completedRoundIndex: number }>({ type: 'GET_DAILY_TEST' }),
   ]);
 
   let test: InitialTestState | null = initialTest ?? null;
+  let daily: DailyTestState | null = dailyState.test;
+  let dailyCompletedRoundIndex = dailyState.completedRoundIndex;
+  /** 当前是否处于每日答题视图（进行中且未跳过）；其余视图由首测状态决定。 */
+  let dailyView = false;
+
+  /** 本地日期（YYYY-MM-DD）；date seam 的最小生产来源，不建设时间服务。 */
+  function todayLocalDate(): string {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
 
   function render(): void {
     app!.innerHTML = '';
+    if (dailyView && daily && !daily.completed && !daily.skipped) {
+      renderDailyQuestions();
+      return;
+    }
+    dailyView = false;
     if (!test) {
       renderStart();
     } else if (test.completed) {
@@ -147,7 +167,7 @@ async function main(): Promise<void> {
 
     const list = el('div', 'questions');
     test.plan.questions.forEach((q, i) => {
-      list.append(renderQuestion(q, i, test!.answers[i] !== null));
+      list.append(renderQuestion(q, i, test!.answers[i] !== null, submit));
     });
     app!.append(list);
   }
@@ -156,6 +176,7 @@ async function main(): Promise<void> {
     q: QuizQuestion,
     index: number,
     answered: boolean,
+    onSubmit: (index: number, answer: QuizAnswer) => void,
   ): HTMLElement {
     const card = el('div', 'question');
     if (answered) card.classList.add('answered');
@@ -165,12 +186,12 @@ async function main(): Promise<void> {
     q.options.forEach((opt, oi) => {
       const b = el('button', 'option', opt.translation) as HTMLButtonElement;
       if (answered) b.disabled = true;
-      b.onclick = () => void submit(index, { kind: 'option', optionIndex: oi });
+      b.onclick = () => onSubmit(index, { kind: 'option', optionIndex: oi });
       opts.append(b);
     });
     const unsure = el('button', 'option unsure', '不确定') as HTMLButtonElement;
     if (answered) unsure.disabled = true;
-    unsure.onclick = () => void submit(index, { kind: 'unsure' });
+    unsure.onclick = () => onSubmit(index, { kind: 'unsure' });
     opts.append(unsure);
 
     card.append(opts);
@@ -214,6 +235,9 @@ async function main(): Promise<void> {
     // 词汇量估计：只读取 AssessmentEvidence（RULES 双真相源）。
     // 展示为异步：结果页打开时向 worker 请求最新证据，再计算点值/保守范围。
     void renderEstimate(screen, strategy, core, bands);
+
+    // 每日校准入口：仅首测完成后出现（R-DLY-5）。
+    renderDailySection(screen);
 
     screen.append(
       el('p', 'desc', '答对的词已停止提示；答错或「不确定」的词会进入生词表并在阅读中强提示。打开任意英文网页即可看到效果。'),
@@ -273,6 +297,120 @@ async function main(): Promise<void> {
     }
 
     screen.append(block);
+  }
+
+  /**
+   * 每日校准区块（R-DLY-5~9）。仅首测完成后渲染；无计划/跨日过期 → 开始入口；
+   * 同日进行中 → 暂停恢复同一冻结计划；首题前已跳过 → 次级「今天仍可开始」（反悔复用计划）；
+   * 已完成 → 只读提示。跨日过期时旧轮已答证据保留、未答零变化、不回滚、不递增轮次。
+   */
+  function renderDailySection(screen: HTMLElement): void {
+    if (!test?.completed) return; // R-DLY-5：首测未完成绝不显示每日入口
+    const today = todayLocalDate();
+    const block = el('div', 'daily');
+    block.append(el('h2', 'daily-title', '每日校准'));
+
+    if (!daily || daily.localDate !== today) {
+      if (daily && daily.localDate !== today) {
+        block.append(el('p', 'daily-expired', '昨日未完成的计划已过期，已答结果已保留。'));
+      }
+      const start = el('button', 'primary daily-start', '开始今日五题') as HTMLButtonElement;
+      start.onclick = () => void startDaily();
+      block.append(start);
+    } else if (daily.completed) {
+      block.append(el('p', 'daily-complete', '今日五题已完成。'));
+    } else if (daily.skipped) {
+      // 跳过后不突出主入口，保留次级入口（R-DLY-6）
+      const secondary = el('button', 'daily-secondary', '今天仍可开始') as HTMLButtonElement;
+      secondary.onclick = () => void resumeDaily();
+      block.append(secondary);
+    } else {
+      const answered = daily.answers.filter((a) => a !== null).length;
+      block.append(
+        el('p', 'daily-progress', `进行中 ${answered} / ${daily.questions.length}；同日关闭可继续同一计划。`),
+      );
+      const resume = el('button', 'primary daily-resume', '继续') as HTMLButtonElement;
+      resume.onclick = () => {
+        dailyView = true;
+        render();
+      };
+      block.append(resume);
+    }
+    screen.append(block);
+  }
+
+  /** 冻结并开始今日计划（首测完成后、无活跃轮或跨日过期时调用）。 */
+  async function startDaily(): Promise<void> {
+    const today = todayLocalDate();
+    const { evidence } = await sendMessage<{ evidence: Record<string, AssessmentEvidence> }>({
+      type: 'GET_ASSESSMENT_EVIDENCE',
+    });
+    const plan: DailyTestState = strategy.freezeDailyTest(
+      {
+        core,
+        forms,
+        bands,
+        seed: profile.installSeed,
+        dictVersion: profile.dictVersion,
+        completedRoundIndex: dailyCompletedRoundIndex,
+        evidence,
+      },
+      today,
+    );
+    const resp = await sendMessage<{ test: DailyTestState }>({ type: 'DAILY_TEST_START', test: plan });
+    daily = resp.test;
+    dailyView = true;
+    render();
+  }
+
+  /** 反悔跳过：同日 DAILY_TEST_START → worker 置 skipped=false 并复用同一冻结计划（R-DLY-6）。 */
+  async function resumeDaily(): Promise<void> {
+    if (!daily) return;
+    const resp = await sendMessage<{ test: DailyTestState }>({ type: 'DAILY_TEST_START', test: daily });
+    daily = resp.test;
+    dailyView = true;
+    render();
+  }
+
+  /** 每日答题视图：5 题 + 首题前的「今天跳过」入口（答第一题后入口消失，R-DLY-6）。 */
+  function renderDailyQuestions(): void {
+    if (!daily) return;
+    const answered = daily.answers.filter((a) => a !== null).length;
+    const header = el('div', 'test-header');
+    header.append(el('h1', 'title', `今日校准 ${answered} / ${daily.questions.length}`));
+    if (answered === 0) {
+      const skip = el('button', 'daily-skip', '今天跳过') as HTMLButtonElement;
+      skip.onclick = () => void skipDaily();
+      header.append(skip);
+    }
+    app!.append(header);
+
+    const list = el('div', 'questions');
+    daily.questions.forEach((q, i) => {
+      list.append(renderQuestion(q, i, daily!.answers[i] !== null, dailySubmit));
+    });
+    app!.append(list);
+  }
+
+  /** 每日作答：双写由 worker 完成；完成后回到结果页并刷新估计（R-DLY-4）。 */
+  async function dailySubmit(index: number, answer: QuizAnswer): Promise<void> {
+    if (!daily) return;
+    const resp = await sendMessage<{ test: DailyTestState; completedRoundIndex: number }>({
+      type: 'DAILY_TEST_ANSWER',
+      questionIndex: index,
+      answer,
+    });
+    daily = resp.test;
+    dailyCompletedRoundIndex = resp.completedRoundIndex;
+    render();
+  }
+
+  /** 首题前跳过：WordState 与 AssessmentEvidence 零变化（R-DLY-6）。 */
+  async function skipDaily(): Promise<void> {
+    const resp = await sendMessage<{ test: DailyTestState }>({ type: 'DAILY_TEST_SKIP' });
+    daily = resp.test;
+    dailyView = false;
+    render();
   }
 
   function statBlock(kind: string, num: string, label: string): HTMLElement {

@@ -107,6 +107,57 @@ export interface InitialTestState {
   readonly completed: boolean;
 }
 
+// ============================================================
+// 每日校准轮（每日五题）
+// ============================================================
+
+/**
+ * 每日五题校准轮的最小持久化状态；只承载当前本地日期的一轮。
+ * 不建调度器/队列/提醒；不保存历史轮次；不做状态机框架或事务回滚。
+ *
+ * 状态约束（Spec §8 / RULES「每日校准轮」）：
+ * - `localDate`：创建计划时的本地日期（YYYY-MM-DD）。最小可测试输入（date seam），
+ *   生产路径取本地日期字符串，测试注入固定日期；不建设时间服务。
+ * - `roundIndex`：创建时的 `completedRoundIndex`（奇偶轮换频段的依据）。
+ * - `questions`：冻结的 5 道题（奇偶频段轮换、每段一题），作答前冻结。
+ * - `answers`：与 `questions` 等长；未答位置为 `null`。
+ * - `completed`：仅当五题全部作答时为 `true`。
+ * - `skipped`：仅当 `answers` 全为 `null` 时可 `true`（首题前跳过）；
+ *   用户从次级入口反悔开始时变回 `false` 并复用同一冻结计划；
+ *   第一题作答后不得再变为 `skipped`。
+ * - `completedRoundIndex` 只在 `completed` 首次变 `true` 时递增一次（worker/storage 协调）。
+ */
+export interface DailyTestState {
+  readonly localDate: string;
+  readonly roundIndex: number;
+  readonly questions: readonly QuizQuestion[];
+  readonly answers: readonly (QuizAnswer | null)[];
+  readonly completed: boolean;
+  readonly skipped: boolean;
+}
+
+/** 冻结每日五题计划的输入：受控词典视图 + 安装种子 + 当前轮次 + 测试证据（只读） */
+export interface FreezeDailyTestInput {
+  readonly core: DictCore;
+  readonly forms: FormsMap;
+  readonly bands: FrequencyBands;
+  readonly seed: string;
+  readonly dictVersion: string;
+  /** 创建计划时的 completedRoundIndex（奇偶轮换频段） */
+  readonly completedRoundIndex: number;
+  /**
+   * 选词与「最久未测」只读取 AssessmentEvidence（R-EVD-5）；
+   * 不读取 WordState，也不能通过过滤 `WordState.source` 模拟。
+   */
+  readonly evidence: Record<string, AssessmentEvidence>;
+}
+
+/** 结算一道冻结每日题的输入：冻结题 + 作答（无审计产物） */
+export interface SettleDailyTestAnswerInput {
+  readonly question: QuizQuestion;
+  readonly answer: QuizAnswer;
+}
+
 /** 单次答对的待审计标记（非用户可见的第四种状态） */
 export interface AuditMarker {
   readonly word: string;
@@ -298,8 +349,8 @@ export interface VocabSnapshot {
   auditPlan: AuditPlan | null;
   /** 首测冻结计划与作答进度；null 表示尚未开始 */
   initialTest: InitialTestState | null;
-  /** schema 3 的正式每日轮默认槽位；结构与行为均由 Ticket 04 接入。 */
-  dailyTest: null;
+  /** 当前一天的每日五题校准轮；null 表示当前本地日期尚未开始（schema 3 正式字段）。 */
+  dailyTest: DailyTestState | null;
   /** 已完成每日轮数；schema 3 首次安装为 0。 */
   completedRoundIndex: number;
   /** 最后更新时间戳 */
@@ -367,6 +418,21 @@ export interface VocabStrategy {
 
   /** 初测与每日共用的测试结算领域动作；手动标记不调用此动作。 */
   settleAssessment(input: AssessmentSettlementInput): AssessmentSettlement;
+
+  // ============================================================
+  // 每日校准轮：冻结计划 + 结算单题（每日五题）
+  // ============================================================
+
+  /**
+   * 冻结每日五题计划：按 `completedRoundIndex` 奇偶轮换频段（偶数 0/2/4/6/8，
+   * 奇数 1/3/5/7/9，每段一题）；段内优先无 AssessmentEvidence 的 wordKey、
+   * 同轮不重复、install seed 确定性排序、耗尽后取 assessedAt 最早的旧词（R-EVD-5）。
+   * `localDate` 为最小可测试输入（date seam），不建时间服务。
+   */
+  freezeDailyTest(input: FreezeDailyTestInput, localDate: string): DailyTestState;
+
+  /** 结算一道冻结的每日题：答对→会、答错/不确定→不会；双写由调用方经 settleAssessment 完成。 */
+  settleDailyAnswer(input: SettleDailyTestAnswerInput): ApplyAnswerResult;
 
   /**
    * 首测开始生命周期 transition：策略据首测计划、当前标记与状态版本计算并交付
@@ -443,5 +509,8 @@ export interface SettleAuditResult {
 
 /** 固定首测题数（十频段 × 五题） */
 export const INITIAL_TEST_LENGTH = 50;
+
+/** 每日校准轮固定题数（奇偶频段轮换，每段一题，共五题） */
+export const DAILY_TEST_LENGTH = 5;
 
 export const SCHEMA_VERSION = 3;
