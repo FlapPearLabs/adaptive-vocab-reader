@@ -26,7 +26,14 @@ const PORT = 18923;
  * 映射与 §21 复核矩阵一致；T5 不持有任何 R-* 主责任。
  */
 const FAILURE_TABLE = {
-  '1': { no: '1/2', desc: '加载真实扩展构建产物 + 静态正文阅读标注（含屈折词形共享 wordKey 基线）', ticket: 'T5', rids: '—' },
+  // 构建与运行环境前置（BLOCKER-3 余项）：进入任何编号阶段前的 Chrome/dist/词包/
+  // OpenSSL/HTTPS 服务器检查失败也必须有完整归责字段。
+  'env': { no: '环境', desc: '构建与运行环境前置检查（Chrome/dist/词包/OpenSSL/HTTPS 服务器）', ticket: 'T5', rids: '—' },
+  // 阶段一内部按责任归属细分（BLOCKER-3 余项）：同一阶段跨越不同 Requirement 时切换，
+  // 避免 wordKey/证据断言被错误归责为 T5。
+  '1a': { no: '1/2', desc: '加载真实扩展构建产物 + 静态正文阅读标注（基线）', ticket: 'T5', rids: '—' },
+  '1b': { no: '1', desc: '手动标记与 WordState 持久化（learning/known 覆盖、刷新保留；manual 不改写证据 R-EVD-1）', ticket: 'T2', rids: 'R-EVD-1' },
+  '1c': { no: '3', desc: '屈折词形共享 wordKey（abilities→ability 标记同步；manual 不改写证据 R-EVD-1）', ticket: 'T2', rids: 'R-KEY-1, R-KEY-3, R-EVD-1' },
   '1B': { no: '14', desc: '真实 schema 2 fixture 经真实 worker/storage 路径升级 v3', ticket: 'T2', rids: 'R-MIG-1~7' },
   '2': { no: '4/5/6/16', desc: '50 题首测 + 估计展示 + manual 不改估计 + popup 无审计入口', ticket: 'T1+T2+T3', rids: 'R-AUD-1/2/3, R-EVD-1/2, R-EST-1/2/6' },
   '3': { no: '2', desc: 'SPA 动态插入/路由切换与性能观测', ticket: 'T5', rids: '—' },
@@ -35,8 +42,12 @@ const FAILURE_TABLE = {
   '6': { no: '补全', desc: '§21 持久化补全：两标签页同 wordKey 不同词形 manual/daily 更新后同步', ticket: 'T2+T4', rids: 'R-KEY-1/3, R-DLY-4' },
 };
 
-/** 当前执行场景（失败定位用）；每阶段开头设置 */
-let currentScenario = null;
+/**
+ * 当前执行场景（失败定位用）。初始即为「构建与运行环境」前置场景（BLOCKER-3 余项），
+ * 保证 Chrome/dist/词包/OpenSSL/服务器等前置检查失败时同样输出完整归责字段，
+ * 永不落入「未知/缺字段」路径。
+ */
+let currentScenario = FAILURE_TABLE['env'];
 
 function findChromeForTesting() {
   if (process.env.CHROME_FOR_TESTING) return process.env.CHROME_FOR_TESTING;
@@ -267,7 +278,7 @@ async function main() {
   let browser1;
   let chrome1;
   try {
-    currentScenario = FAILURE_TABLE['1'];
+    currentScenario = FAILURE_TABLE['1a'];
     ({ chrome: chrome1, browser: browser1 } = await launchChrome(path.join(tempDir, 'profile-1'), chromeForTesting));
     // 复用 connect 后已存在的初始页面（其主帧已就绪），规避 Chrome 151 + puppeteer-core 的 newPage 竞态
     const page = (await browser1.pages())[0] || (await browser1.newPage());
@@ -291,6 +302,8 @@ async function main() {
     if (initial.forbiddenInNav || initial.forbiddenInCode || initial.forbiddenInComment) throw new Error(`扫描了应跳过区域：${JSON.stringify(initial)}`);
     if (!initial.challengesFormHit) throw new Error(`词形映射/wordKey 合并未在真实页面命中：${JSON.stringify(initial)}`);
 
+    // ---- 手动标记与 WordState 持久化（R-EVD-1：manual 只改提示、不改写 AssessmentEvidence）----
+    currentScenario = FAILURE_TABLE['1b'];
     const challenge = await page.$('.avr-word[data-word="challenge"]');
     if (!challenge) throw new Error('fixture 中 challenge / challenged 未被本地词典与词形映射命中');
     await challenge.click();
@@ -338,6 +351,7 @@ async function main() {
 
     // §21 场景 3（局部）：form-only "abilities" 与 core "ability" 共享 wordKey。
     // 此固定 1,000 词包没有 go/went；用产物中实际存在的单复数对验证同一行为。
+    currentScenario = FAILURE_TABLE['1c'];
     const abilitySpans = await page.$$('.avr-word[data-word="ability"]');
     let abilities;
     for (const span of abilitySpans) {
@@ -1486,14 +1500,13 @@ async function main() {
 main().catch((error) => {
   // BLOCKER-3 修复：集中失败出口必须输出「结论：不可进入人工 dogfood」，
   // 并携带失败场景、主责任 R-ID、责任 Ticket 与可复现错误，保持非零退出码。
+  // currentScenario 初始即环境场景且任何路径都不会为 null；兜底分支防御性输出
+  // 环境场景的完整归责字段，不得缺 R-ID / 责任 Ticket。
   console.error('E2E FAIL');
-  if (currentScenario) {
-    console.error(`失败场景：${currentScenario.no} ${currentScenario.desc}`);
-    console.error(`主责任 R-ID：${currentScenario.rids}`);
-    console.error(`责任 Ticket：${currentScenario.ticket}`);
-  } else {
-    console.error('失败场景：未知（未进入任何已编号阶段）');
-  }
+  const sc = currentScenario || FAILURE_TABLE['env'];
+  console.error(`失败场景：${sc.no} ${sc.desc}`);
+  console.error(`主责任 R-ID：${sc.rids}`);
+  console.error(`责任 Ticket：${sc.ticket}`);
   console.error('结论：不可进入人工 dogfood');
   console.error(`复现错误：${error.stack || error.message}`);
   process.exitCode = 1;
