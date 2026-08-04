@@ -300,7 +300,12 @@ async function main() {
     }));
     if (initial.annotations === 0 || initial.unknown === 0) throw new Error(`未获得未知词轻提示：${JSON.stringify(initial)}`);
     if (initial.forbiddenInNav || initial.forbiddenInCode || initial.forbiddenInComment) throw new Error(`扫描了应跳过区域：${JSON.stringify(initial)}`);
+    // 场景 3（局部）wordKey 断言：challenges → challenge 共享 wordKey，
+    // 失败必须归责 T2/R-KEY-1,3（BLOCKER-3 三轮修复），不得留在 1a/T5 上下文。
+    currentScenario = FAILURE_TABLE['1c'];
     if (!initial.challengesFormHit) throw new Error(`词形映射/wordKey 合并未在真实页面命中：${JSON.stringify(initial)}`);
+    // 断言通过：切回手动标记与 WordState 持久化路径（R-EVD-1 → T2）
+    currentScenario = FAILURE_TABLE['1b'];
 
     // ---- 手动标记与 WordState 持久化（R-EVD-1：manual 只改提示、不改写 AssessmentEvidence）----
     currentScenario = FAILURE_TABLE['1b'];
