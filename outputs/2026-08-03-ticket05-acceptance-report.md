@@ -1,7 +1,7 @@
 # T5 真浏览器综合验收报告（2026-08-03 / 复审修订 2026-08-04）
 
 - **分支**：`review/ticket-05-acceptance-gate`（基于 `main` tip `0f402fc`）
-- **提交**：`fe2cde7`（初版）+ 追加修复提交（CODE 审查 3 项 BLOCKER）— 见「七、复审记录」
+- **提交**：`fe2cde7`（初版）+ `c919c19`（3 项 BLOCKER 修复）+ `7667866`（复审 BLOCKER-3 余项：失败归责细化）— 见「七、复审记录」
 - **Compare**：https://github.com/FlapPearLabs/adaptive-vocab-reader/compare/main...review/ticket-05-acceptance-gate
 - **结论**：✅ **T5 隔离验收通过；完成 R-MIG-8 真实备份门后可进入人工 dogfood**
 
@@ -114,6 +114,16 @@ NEXT_AGENT_PROMPT: 若 TARGET 非「无」，按如下固定格式给出可原�
 
 另采纳 NON_BLOCKING 建议：成功结论改为「T5 隔离验收通过；完成 R-MIG-8 真实备份门后可进入人工 dogfood」，避免前置条件后置表述。
 修复提交：`e2e-verify.cjs`（176+/89-），未触碰 `extension/src/**`；`npm run typecheck` / `npm test`（267）/ `npm run build` / `npm run test:e2e`（真实 Chrome）四绿。
+
+## 八、二轮复审记录（2026-08-04，CODE 复审 CHANGES_REQUESTED → BLOCKER-3 余项修复 `7667866`）
+
+二轮复审确认 BLOCKER 1（daily 不同词形真路径）、BLOCKER 2（复核矩阵 T2/T4 映射）与成功结论措辞均已落实；剩余 1 项 BLOCKER 为本轮修复：
+
+| BLOCKER 余项 | 问题 | 修复 |
+|---|---|---|
+| 3 | `currentScenario` 初始为 null，Chrome/dist/词包/OpenSSL 等前置检查失败只输出「失败场景：未知」，缺 R-ID 与责任 Ticket；阶段一统一映射 T5/—，其中场景 3 的 wordKey 屈折词形断言与 R-EVD-1 断言失败会被错误归责 T5 | ① `currentScenario` 初始化为「构建与运行环境」前置场景（T5/—），前置检查失败输出完整归责字段（负向验证：`失败场景：环境 … / 主责任 R-ID：— / 责任 Ticket：T5 / 结论：不可进入人工 dogfood`）；② 阶段一内部按责任归属切换：`1a` 阅读标注基线（T5/—）、`1b` 手动标记与 WordState 持久化（T2 / R-EVD-1）、`1c` 屈折词形共享 wordKey（T2 / R-KEY-1, R-KEY-3, R-EVD-1）；③ 失败出口兜底分支始终打印主责任 R-ID 与责任 Ticket（`currentScenario \|\| FAILURE_TABLE['env']`），保持非零退出码 |
+
+复验：`npm run typecheck` / `npm test`（267）/ `npm run build` / `npm run test:e2e`（真实 Chrome）四绿；manual=academic/academics、daily=out/outed；矩阵与 BLOCKER 1/2 实现保持不变。
 
 ## 结论
 
