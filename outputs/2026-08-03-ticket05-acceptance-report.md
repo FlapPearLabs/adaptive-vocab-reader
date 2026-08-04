@@ -1,7 +1,7 @@
 # T5 真浏览器综合验收报告（2026-08-03 / 复审修订 2026-08-04）
 
 - **分支**：`review/ticket-05-acceptance-gate`（基于 `main` tip `0f402fc`）
-- **提交**：`fe2cde7`（初版）+ `c919c19`（3 项 BLOCKER 修复）+ `7667866`（复审 BLOCKER-3 余项：失败归责细化）— 见「七、复审记录」
+- **提交**：`fe2cde7`（初版）+ `c919c19`（3 项 BLOCKER）+ `7667866`（二轮 BLOCKER-3 余项）+ `10da619`（三轮 challengesFormHit 归责细化）— 见「七~九、复审记录」
 - **Compare**：https://github.com/FlapPearLabs/adaptive-vocab-reader/compare/main...review/ticket-05-acceptance-gate
 - **结论**：✅ **T5 隔离验收通过；完成 R-MIG-8 真实备份门后可进入人工 dogfood**
 
@@ -124,6 +124,17 @@ NEXT_AGENT_PROMPT: 若 TARGET 非「无」，按如下固定格式给出可原�
 | 3 | `currentScenario` 初始为 null，Chrome/dist/词包/OpenSSL 等前置检查失败只输出「失败场景：未知」，缺 R-ID 与责任 Ticket；阶段一统一映射 T5/—，其中场景 3 的 wordKey 屈折词形断言与 R-EVD-1 断言失败会被错误归责 T5 | ① `currentScenario` 初始化为「构建与运行环境」前置场景（T5/—），前置检查失败输出完整归责字段（负向验证：`失败场景：环境 … / 主责任 R-ID：— / 责任 Ticket：T5 / 结论：不可进入人工 dogfood`）；② 阶段一内部按责任归属切换：`1a` 阅读标注基线（T5/—）、`1b` 手动标记与 WordState 持久化（T2 / R-EVD-1）、`1c` 屈折词形共享 wordKey（T2 / R-KEY-1, R-KEY-3, R-EVD-1）；③ 失败出口兜底分支始终打印主责任 R-ID 与责任 Ticket（`currentScenario \|\| FAILURE_TABLE['env']`），保持非零退出码 |
 
 复验：`npm run typecheck` / `npm test`（267）/ `npm run build` / `npm run test:e2e`（真实 Chrome）四绿；manual=academic/academics、daily=out/outed；矩阵与 BLOCKER 1/2 实现保持不变。
+
+## 九、三轮复审记录（2026-08-04，CODE 复审 CHANGES_REQUESTED → challengesFormHit 归责细化 `10da619`）
+
+三轮复审确认环境前置归责、失败出口固定字段、BLOCKER 1/2 与范围边界均已落实；剩余 1 项 BLOCKER 为本轮修复：
+
+| BLOCKER | 问题 | 修复 |
+|---|---|---|
+| challengesFormHit 归责 | `initial.challengesFormHit`（`challenges → challenge` 共享 wordKey）断言在 `currentScenario=1a（T5/—）` 时执行，失败会错误归责 T5 而非 `T2 / R-KEY-1, R-KEY-3` | 静态标注数量与跳过区域断言保持 `1a`；`challengesFormHit` 断言前切换 `1c`（T2 / R-KEY-1, R-KEY-3, R-EVD-1），断言通过后切回 `1b`（T2 / R-EVD-1）执行 manual/WordState 路径；后续 abilities/ability 路径继续使用 `1c` |
+
+负向归责验证（临时副本强制 `challengesFormHit` 失败）输出：`失败场景：3 屈折词形共享 wordKey（abilities→ability 标记同步；manual 不改写证据 R-EVD-1）` / `主责任 R-ID：R-KEY-1, R-KEY-3, R-EVD-1` / `责任 Ticket：T2` / `结论：不可进入人工 dogfood` / 复现错误，非零退出码。
+复验：`npm run typecheck` / `npm test`（267）/ `npm run build` / `npm run test:e2e`（真实 Chrome）四绿；BLOCKER 1/2 与矩阵保持不变。
 
 ## 结论
 
