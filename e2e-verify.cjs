@@ -20,6 +20,24 @@ const FIXTURE = path.join(ROOT, 'tests/fixtures/test-page.html');
 const SCHEMA2_FIXTURE_PATH = path.join(ROOT, 'tests/fixtures/schema2-snapshot.json');
 const PORT = 18923;
 
+/**
+ * T5 失败定位表（BLOCKER-3）：任一阶段失败时，统一失败出口输出
+ * 「结论：不可进入人工 dogfood」+ 失败场景/R-ID/责任 Ticket/复现错误。
+ * 映射与 §21 复核矩阵一致；T5 不持有任何 R-* 主责任。
+ */
+const FAILURE_TABLE = {
+  '1': { no: '1/2', desc: '加载真实扩展构建产物 + 静态正文阅读标注（含屈折词形共享 wordKey 基线）', ticket: 'T5', rids: '—' },
+  '1B': { no: '14', desc: '真实 schema 2 fixture 经真实 worker/storage 路径升级 v3', ticket: 'T2', rids: 'R-MIG-1~7' },
+  '2': { no: '4/5/6/16', desc: '50 题首测 + 估计展示 + manual 不改估计 + popup 无审计入口', ticket: 'T1+T2+T3', rids: 'R-AUD-1/2/3, R-EVD-1/2, R-EST-1/2/6' },
+  '3': { no: '2', desc: 'SPA 动态插入/路由切换与性能观测', ticket: 'T5', rids: '—' },
+  '4': { no: '7~13/17', desc: '每日校准轮全场景（入口/五题/跳过/暂停/跨日/不阻塞阅读）', ticket: 'T4', rids: 'R-DLY-1~9' },
+  '5': { no: '15', desc: '重启后五项持久化并查（WordState/Evidence/DailyTestState/completedRoundIndex/schemaVersion=3）', ticket: 'T2+T4', rids: 'R-MIG-7, R-EVD-2/4, R-DLY-2/7/8' },
+  '6': { no: '补全', desc: '§21 持久化补全：两标签页同 wordKey 不同词形 manual/daily 更新后同步', ticket: 'T2+T4', rids: 'R-KEY-1/3, R-DLY-4' },
+};
+
+/** 当前执行场景（失败定位用）；每阶段开头设置 */
+let currentScenario = null;
+
 function findChromeForTesting() {
   if (process.env.CHROME_FOR_TESTING) return process.env.CHROME_FOR_TESTING;
   const chromeRoot = path.join(ROOT, '.cache', 'puppeteer', 'chrome');
@@ -249,6 +267,7 @@ async function main() {
   let browser1;
   let chrome1;
   try {
+    currentScenario = FAILURE_TABLE['1'];
     ({ chrome: chrome1, browser: browser1 } = await launchChrome(path.join(tempDir, 'profile-1'), chromeForTesting));
     // 复用 connect 后已存在的初始页面（其主帧已就绪），规避 Chrome 151 + puppeteer-core 的 newPage 竞态
     const page = (await browser1.pages())[0] || (await browser1.newPage());
@@ -361,6 +380,7 @@ async function main() {
   let browserMigration;
   let chromeMigration;
   try {
+    currentScenario = FAILURE_TABLE['1B'];
     const migrationProfile = path.join(tempDir, 'profile-migration');
     ({ chrome: chromeMigration, browser: browserMigration } = await launchChrome(migrationProfile, chromeForTesting));
     let workerMigration = await waitForWorker(browserMigration);
@@ -420,6 +440,7 @@ async function main() {
   let browser2;
   let chrome2;
   try {
+    currentScenario = FAILURE_TABLE['2'];
     ({ chrome: chrome2, browser: browser2 } = await launchChrome(path.join(tempDir, 'profile-2'), chromeForTesting));
     await wait(1_000);
 
@@ -732,6 +753,7 @@ async function main() {
   let browser3;
   let chrome3;
   try {
+    currentScenario = FAILURE_TABLE['3'];
     ({ chrome: chrome3, browser: browser3 } = await launchChrome(path.join(tempDir, 'profile-3'), chromeForTesting));
     await wait(1_000);
     const spa = await browser3.newPage();
@@ -843,6 +865,7 @@ async function main() {
   let browser4;
   let chrome4;
   try {
+    currentScenario = FAILURE_TABLE['4'];
     ({ chrome: chrome4, browser: browser4 } = await launchChrome(path.join(tempDir, 'profile-4'), chromeForTesting));
     await wait(1_000);
     let extId = extensionIdFromTargets(browser4);
@@ -1118,6 +1141,7 @@ async function main() {
   let browser5;
   let chrome5;
   try {
+    currentScenario = FAILURE_TABLE['5'];
     const profile5 = path.join(tempDir, 'profile-5');
     ({ chrome: chrome5, browser: browser5 } = await launchChrome(profile5, chromeForTesting));
     await wait(1_000);
@@ -1226,11 +1250,14 @@ async function main() {
 
   // ============================================================
   // 阶段六：两个真实标签页含同一 wordKey 不同词形时，
-  // manual / daily 更新后同步（§21 持久化验收补全；R-KEY-3/R-DLY-4）
+  // manual / daily 更新后同步（§21 持久化验收补全；R-KEY-1/3、R-DLY-4）
+  // 用隔离测试状态（注入受控 v3 快照）+ 确定性 installSeed + 证据布置，
+  // 保证每日计划必含「有屈折形式的词」；不允许同词形兜底（BLOCKER-1 修复）。
   // ============================================================
   let browser6;
   let chrome6;
   try {
+    currentScenario = FAILURE_TABLE['6'];
     const profile6 = path.join(tempDir, 'profile-6');
     ({ chrome: chrome6, browser: browser6 } = await launchChrome(profile6, chromeForTesting));
     await wait(1_000);
@@ -1257,112 +1284,157 @@ async function main() {
         `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>sync</title></head><body><article><p>${words.join(' ')}</p></article></body></html>`,
       );
     };
+    // learning 后「同页首现」span 的 class 是 avr-strong-first（行内中文），
+    // `.avr-strong` 选择器不匹配它，必须同时匹配两个 class。
+    const strongSel = (w) => `.avr-word[data-word="${w}"].avr-strong, .avr-word[data-word="${w}"].avr-strong-first`;
+    const waitNoAnnot = (page, w) =>
+      page.waitForFunction((ww) => document.querySelectorAll(`.avr-word[data-word="${ww}"]`).length === 0, { timeout: 10_000 }, w);
 
-    // 完成 50 题首测（获得每日入口）
-    let popup6 = await openPopup6();
-    await popup6.waitForSelector('button.primary', { timeout: 10_000 });
-    await popup6.evaluate(() => { document.querySelector('button.primary')?.click(); });
-    await popup6.waitForSelector('.question', { timeout: 10_000 });
-    const plan6 = (await readSnap6()).initialTest.plan;
-    if (plan6.questions.length !== 50) throw new Error(`阶段六首测计划异常：${plan6.questions.length}`);
-    for (let i = 0; i < plan6.questions.length; i++) {
-      const q = plan6.questions[i];
-      const target = i < 25 ? q.correctOptionIndex : (q.correctOptionIndex === 0 ? 1 : 0);
-      await clickOption6(popup6, i, target);
-      await wait(20);
-    }
-    await popup6.waitForSelector('.summary', { timeout: 10_000 });
-    await popup6.waitForSelector('.estimate-point', { timeout: 10_000 });
-
-    // ---- manual 更新同步：pageA=core 词形，pageB=屈折词形（同一 wordKey）----
-    // 选词不依赖首测结果：从 1,000 词包中选一个「不在首测 50 题内、forms 有屈折映射」的
-    // 词，保证其在首测后仍为未知（unknown → light），两页稳定标注。
+    // ---- 构造受控 v3 快照（隔离测试状态 + 确定性 seed + 证据布置）----
     const core6 = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'dict-core.json'), 'utf8'));
     const forms6 = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'forms.json'), 'utf8'));
-    const planWords6 = new Set(plan6.questions.map((q) => q.word));
-    let syncWord = null;
-    let syncInflected = null;
-    for (const w of Object.keys(core6)) {
-      if (planWords6.has(w)) continue;
-      const hits = Object.entries(forms6).filter(([surface, wk]) => wk === w && surface !== w);
-      if (hits.length > 0) { syncWord = w; syncInflected = hits[0][0]; break; }
+    const bands6 = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'frequency-bands.json'), 'utf8'));
+    const evenBands = [0, 2, 4, 6, 8]; // completedRoundIndex=0（偶数轮）选频段（R-DLY-1）
+
+    // 屈折候选：core 词有 forms 屈折映射、且该屈折形式不是 core 主词条。
+    // （若屈折形式本身是 core 词，页面将解析为其自身 wordKey，无法验证共享键。）
+    const hasValidInflected = (w) => {
+      const inf = Object.entries(forms6).find(([surface, wk]) => wk === w && surface !== w);
+      return !!inf && !Object.prototype.hasOwnProperty.call(core6, inf[0]);
+    };
+    const inflectedCore = Object.keys(core6).filter(hasValidInflected);
+    const dailyCandidates = inflectedCore.filter((w) => evenBands.includes(bands6[w] ?? 9));
+    if (dailyCandidates.length === 0) {
+      throw new Error('场景补全失败（BLOCKER-1）：词包偶数频段无带合法屈折形式的 core 词，无法构造 daily 不同词形同步，禁止降级');
     }
-    if (!syncWord || !syncInflected) throw new Error('阶段六：词包中未找到可用于跨标签同步的词形对');
-    writeSyncPage('sync-a', [syncWord]);
-    writeSyncPage('sync-b', [syncInflected]);
+    const candidateWords = new Set(dailyCandidates);
+
+    // 首测计划：50 题（不含 daily 候选与 manual 候选，保持其无证据/无状态 → unknown），
+    // answers 全答 → initialTest.completed=true（每日入口前置 R-DLY-5）。
+    const manualCandidates = inflectedCore.filter((w) => !evenBands.includes(bands6[w] ?? 9));
+    const reservedWords = new Set([...candidateWords, ...manualCandidates]);
+    const questions6 = [];
+    const answers6 = [];
+    const planPool6 = Object.keys(core6).filter((w) => !reservedWords.has(w));
+    if (planPool6.length < 50) throw new Error('场景补全失败（BLOCKER-1）：词包不足以构造首测计划');
+    for (let i = 0; i < 50; i++) {
+      const w = planPool6[i];
+      questions6.push({
+        word: w,
+        band: bands6[w] ?? 9,
+        options: [
+          { translation: `义${i}a`, isCorrect: true },
+          { translation: `义${i}b`, isCorrect: false },
+          { translation: `义${i}c`, isCorrect: false },
+          { translation: `义${i}d`, isCorrect: false },
+        ],
+        correctOptionIndex: 0,
+        unsureIndex: 4,
+      });
+      answers6.push({ kind: 'option', optionIndex: 0 });
+    }
+
+    // 证据布置：每个偶数频段内，非 daily 候选的 core 词全部布置证据 →
+    // daily 候选是该频段唯一无证据词 → 真实 freezeDailyTest 必选候选（R-DLY-3 无证据优先）。
+    const evidence6 = {};
+    for (const w of Object.keys(core6)) {
+      const band = bands6[w] ?? 9;
+      if (evenBands.includes(band) && !candidateWords.has(w)) {
+        evidence6[w] = { outcome: 'learning', source: 'initial', assessedAt: 0 };
+      }
+    }
+
+    // manual 同步词 M：奇数频段、有合法屈折形式（与 daily 候选互斥，验证互不干扰）
+    const M = manualCandidates[0];
+    const Minflected = M ? Object.entries(forms6).find(([surface, wk]) => wk === M && surface !== M)[0] : null;
+    if (!M || !Minflected) {
+      throw new Error('场景补全失败（BLOCKER-1）：无法构造 manual 不同词形同步（词包缺奇数频段屈折候选），禁止降级');
+    }
+
+    const live6 = await readSnap6();
+    const controlledSnapshot = {
+      schemaVersion: 3,
+      dictVersion: live6.dictVersion,
+      stateVersion: 1,
+      installSeed: '5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a',
+      words: {},
+      assessmentEvidence: evidence6,
+      auditMarkers: {},
+      auditLog: [],
+      auditPlan: null,
+      initialTest: {
+        plan: { version: 't5-controlled-plan', seed: '5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a', dictVersion: live6.dictVersion, questions: questions6 },
+        answers: answers6,
+        completed: true,
+      },
+      dailyTest: null,
+      completedRoundIndex: 0,
+      lastUpdated: Date.now(),
+    };
+    // 注入并同 profile 重启：新 Service Worker 经真实 loadSnapshot 读 storage（v3 恒等返回），
+    // popup 打开即见已完成首测摘要与每日入口。
+    await worker6.evaluate((snap) => chrome.storage.local.set({ avr_vocab_snapshot: snap }), controlledSnapshot);
+    ({ chrome: chrome6, browser: browser6 } = await restartChromeOnSameProfile(profile6, chromeForTesting, browser6, chrome6));
+    extId6 = extensionIdFromTargets(browser6);
+    if (!extId6) throw new Error('阶段六：重启后无法解析扩展 ID');
+    worker6 = await waitForWorker(browser6);
+    if (!worker6) throw new Error('阶段六：重启后未找到 Service Worker');
+
+    let popup6 = await openPopup6();
+    await popup6.waitForSelector('.summary', { timeout: 10_000 });
+    await popup6.waitForSelector('.daily-start', { timeout: 10_000 });
+
+    // ---- manual 更新同步：pageA=M（core），pageB=Minflected（屈折），同一 wordKey ----
+    writeSyncPage('sync-a', [M]);
+    writeSyncPage('sync-b', [Minflected]);
     const pageA = await browser6.newPage();
     pageA.on('pageerror', (e) => pageLogs.push(`syncA error: ${e.message}`));
     await gotoSafe(pageA, `https://localhost:${PORT}/sync-a.html`, { waitUntil: 'networkidle0' });
-    await pageA.waitForSelector(`.avr-word[data-word="${syncWord}"]`, { timeout: 10_000 });
+    await pageA.waitForSelector(`.avr-word[data-word="${M}"]`, { timeout: 10_000 });
     const pageB = await browser6.newPage();
     pageB.on('pageerror', (e) => pageLogs.push(`syncB error: ${e.message}`));
     await gotoSafe(pageB, `https://localhost:${PORT}/sync-b.html`, { waitUntil: 'networkidle0' });
-    await pageB.waitForSelector(`.avr-word[data-word="${syncWord}"]`, { timeout: 10_000 });
-    const preA = await pageA.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, syncWord);
-    const preB = await pageB.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, syncWord);
+    await pageB.waitForSelector(`.avr-word[data-word="${M}"]`, { timeout: 10_000 });
+    const preA = await pageA.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, M);
+    const preB = await pageB.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, M);
     if (preA !== 1 || preB !== 1) {
-      throw new Error(`跨标签前置失败：两页应各 1 个 light（A=${preA}, B=${preB}，word=${syncWord}）`);
+      throw new Error(`跨标签前置失败：两页应各 1 个 light（A=${preA}, B=${preB}，word=${M}）`);
     }
-
-    // pageA 手动标记 learning（不会）→ worker 广播 → pageB 的屈折词形同步 strong
-    // 注意：learning 后「同页首现」span 的 class 是 avr-strong-first（行内中文），
-    // `.avr-strong` 选择器不匹配它，必须同时匹配两个 class。
-    const strongSel = (w) => `.avr-word[data-word="${w}"].avr-strong, .avr-word[data-word="${w}"].avr-strong-first`;
-    await pageA.evaluate((w) => { document.querySelector(`.avr-word[data-word="${w}"]`)?.click(); }, syncWord);
+    await pageA.evaluate((w) => { document.querySelector(`.avr-word[data-word="${w}"]`)?.click(); }, M);
     await pageA.waitForSelector('.avr-action-menu button[data-avr-status="learning"]', { visible: true });
     await pageA.evaluate(() => { document.querySelector('.avr-action-menu button[data-avr-status="learning"]')?.click(); });
-    await pageA.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, { timeout: 10_000 }, strongSel(syncWord));
-    await pageB.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, { timeout: 10_000 }, strongSel(syncWord));
-    console.log(`[stage6] manual 同步 PASS：pageA=${syncWord}(learning→strong)，pageB=${syncInflected} 同步 strong（同一 wordKey 不同词形）`);
+    await pageA.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, { timeout: 10_000 }, strongSel(M));
+    await pageB.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, { timeout: 10_000 }, strongSel(M));
+    console.log(`[stage6] manual 同步 PASS：pageA=${M}(learning→strong)，pageB=${Minflected} 同步 strong（同一 wordKey 不同词形）`);
 
-    // ---- daily 更新同步：daily 计划词（优先有屈折形式的词）----
+    // ---- daily 更新同步：受控计划必含偶数频段屈折候选词（BLOCKER-1 无兜底）----
     await popup6.evaluate(() => { document.querySelector('.daily-start')?.click(); });
     await popup6.waitForSelector('.question', { timeout: 10_000 });
     const daily6 = (await readSnap6()).dailyTest;
     if (!daily6 || daily6.questions.length !== 5) throw new Error('阶段六：每日计划异常');
-    let dailyTarget = null;
-    let dailyInflected = null;
-    for (const q of daily6.questions) {
-      const hits = Object.entries(forms6).filter(([surface, wk]) => wk === q.word && surface !== q.word);
-      if (hits.length > 0) { dailyTarget = q.word; dailyInflected = hits[0][0]; break; }
+    const qIdxX = daily6.questions.findIndex((q) => candidateWords.has(q.word));
+    if (qIdxX < 0) {
+      throw new Error(`场景补全失败（BLOCKER-1）：证据布置失效——daily 计划未包含屈折候选词（计划=${daily6.questions.map((q) => q.word).join(',')}），禁止降级`);
     }
-    const assertDailySync = async (wordCore, wordSurface, page1, page2, qIdx) => {
-      await clickOption6(popup6, qIdx, daily6.questions[qIdx].correctOptionIndex);
-      await wait(200);
-      await page1.waitForFunction((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0, { timeout: 5_000 }, wordCore);
-      await page2.waitForFunction((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0, { timeout: 5_000 }, wordCore);
-      console.log(`[stage6] daily 同步 PASS：${wordCore}（core）与 ${wordSurface}（页面词形）两页作答后同步无标注`);
-    };
-    if (dailyTarget && dailyInflected) {
-      writeSyncPage('sync-d1', [dailyTarget]);
-      writeSyncPage('sync-d2', [dailyInflected]);
-      const pageD1 = await browser6.newPage();
-      pageD1.on('pageerror', (e) => pageLogs.push(`syncD1 error: ${e.message}`));
-      await gotoSafe(pageD1, `https://localhost:${PORT}/sync-d1.html`, { waitUntil: 'networkidle0' });
-      await pageD1.waitForSelector(`.avr-word[data-word="${dailyTarget}"]`, { timeout: 10_000 });
-      const pageD2 = await browser6.newPage();
-      pageD2.on('pageerror', (e) => pageLogs.push(`syncD2 error: ${e.message}`));
-      await gotoSafe(pageD2, `https://localhost:${PORT}/sync-d2.html`, { waitUntil: 'networkidle0' });
-      await pageD2.waitForSelector(`.avr-word[data-word="${dailyTarget}"]`, { timeout: 10_000 });
-      const qIdx6 = daily6.questions.findIndex((q) => q.word === dailyTarget);
-      if (qIdx6 < 0) throw new Error('阶段六：daily 目标词未在计划中');
-      await assertDailySync(dailyTarget, dailyInflected, pageD1, pageD2, qIdx6);
-    } else {
-      // 兜底：daily 计划词无屈折形式时，用同一词形跨页验证 daily 更新同步
-      // （不同词形的 manual 同步已在上面锁定）
-      const fallbackWord = daily6.questions[0].word;
-      writeSyncPage('sync-d1', [fallbackWord]);
-      writeSyncPage('sync-d2', [fallbackWord]);
-      const pageD1 = await browser6.newPage();
-      pageD1.on('pageerror', (e) => pageLogs.push(`syncD1 error: ${e.message}`));
-      await gotoSafe(pageD1, `https://localhost:${PORT}/sync-d1.html`, { waitUntil: 'networkidle0' });
-      await pageD1.waitForSelector(`.avr-word[data-word="${fallbackWord}"]`, { timeout: 10_000 });
-      const pageD2 = await browser6.newPage();
-      pageD2.on('pageerror', (e) => pageLogs.push(`syncD2 error: ${e.message}`));
-      await gotoSafe(pageD2, `https://localhost:${PORT}/sync-d2.html`, { waitUntil: 'networkidle0' });
-      await pageD2.waitForSelector(`.avr-word[data-word="${fallbackWord}"]`, { timeout: 10_000 });
-      await assertDailySync(fallbackWord, fallbackWord, pageD1, pageD2, 0);
-    }
+    const X = daily6.questions[qIdxX].word;
+    const Xinflected = Object.entries(forms6).find(([surface, wk]) => wk === X && surface !== X)[0];
+    if (!Xinflected) throw new Error(`场景补全失败（BLOCKER-1）：daily 目标词 ${X} 缺合法屈折形式，禁止降级`);
+    writeSyncPage('sync-d1', [X]);
+    writeSyncPage('sync-d2', [Xinflected]);
+    const pageD1 = await browser6.newPage();
+    pageD1.on('pageerror', (e) => pageLogs.push(`syncD1 error: ${e.message}`));
+    await gotoSafe(pageD1, `https://localhost:${PORT}/sync-d1.html`, { waitUntil: 'networkidle0' });
+    await pageD1.waitForSelector(`.avr-word[data-word="${X}"]`, { timeout: 10_000 });
+    const pageD2 = await browser6.newPage();
+    pageD2.on('pageerror', (e) => pageLogs.push(`syncD2 error: ${e.message}`));
+    await gotoSafe(pageD2, `https://localhost:${PORT}/sync-d2.html`, { waitUntil: 'networkidle0' });
+    await pageD2.waitForSelector(`.avr-word[data-word="${X}"]`, { timeout: 10_000 });
+    // 经 popup 提交真实 daily 答案（DAILY_TEST_ANSWER → 双写 WordState+Evidence → worker 广播）
+    await clickOption6(popup6, qIdxX, daily6.questions[qIdxX].correctOptionIndex);
+    await wait(200);
+    await waitNoAnnot(pageD1, X);
+    await waitNoAnnot(pageD2, X);
+    console.log(`[stage6] daily 同步 PASS：${X}（core）与 ${Xinflected}（屈折）两页经 popup 真实作答后同步无标注`);
     console.log('E2E #3 补全 PASS: multitab_same_wordKey_diff_surface_sync=true, manual_sync=true, daily_sync=true');
   } finally {
     if (browser6) await browser6.close();
@@ -1377,7 +1449,7 @@ async function main() {
   const reviewMatrix = [
     ['1', '加载真实扩展构建产物', 'T5', '—'],
     ['2', '静态正文与 SPA 阅读标注', 'T5', '—'],
-    ['3', '屈折词形共享 wordKey（含跨标签不同词形 manual/daily 同步）', 'T2', 'R-KEY-1, R-KEY-3'],
+    ['3', '屈折词形共享 wordKey（标记屈折形式，同 wordKey 其他词形提示一致）', 'T2', 'R-KEY-1, R-KEY-3'],
     ['4', '完成 50 题首测', 'T1+T2', 'R-AUD-3, R-EVD-2'],
     ['5', '结果页点估计＋保守范围＋不外推声明', 'T3', 'R-EST-1, R-EST-6'],
     ['6', 'manual 改提示但估计不变', 'T2+T3', 'R-EVD-1, R-EST-2'],
@@ -1392,12 +1464,16 @@ async function main() {
     ['15', '重启后五项持久化（WordState/Evidence/DailyTestState/completedRoundIndex/schemaVersion=3）', 'T2+T4', 'R-MIG-7, R-EVD-2/4, R-DLY-2/7/8'],
     ['16', 'popup 无审计入口、不恢复残留计划', 'T1', 'R-AUD-1, R-AUD-2'],
     ['17', '阅读不被每日测试阻塞', 'T4', 'R-DLY-5'],
+    // §21 持久化验收补全（BLOCKER-2）：跨标签不同词形同步同时依赖
+    // 词形共享键（T2/R-KEY-1/3）与 daily 写入-广播链路（T4/R-DLY-4），
+    // 单独列行避免失败时错误定位责任；T5 仍不持有任何 R-* 主责任。
+    ['补全', '§21 持久化补全：两标签页同 wordKey 不同词形 manual/daily 更新后同步', 'T2+T4', 'R-KEY-1/3, R-DLY-4'],
   ];
   for (const [no, desc, ticket, rid] of reviewMatrix) {
     console.log(`  §21-${no.padStart(2, ' ')} ${desc} → ${ticket}（${rid}）`);
   }
   console.log('==================================================');
-  console.log('结论：可进入人工 dogfood');
+  console.log('结论：T5 隔离验收通过（§21 场景 1~17 + 持久化补全）；完成 R-MIG-8 真实备份门后可进入人工 dogfood');
   console.log('说明：人工 dogfood 门槛（连续 7 天 / 每天至少一篇 / 累计至少 20 篇）与三项人工记录由 Ticket 06 承接；');
   console.log('R-MIG-8 真实 profile 备份时机：T5 隔离 E2E 全绿后、T6 开始前，须用户明确授权与配合。');
   console.log('E2E ALL PASS（T5 综合验收）');
@@ -1408,6 +1484,17 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`E2E FAIL: ${error.stack || error.message}`);
+  // BLOCKER-3 修复：集中失败出口必须输出「结论：不可进入人工 dogfood」，
+  // 并携带失败场景、主责任 R-ID、责任 Ticket 与可复现错误，保持非零退出码。
+  console.error('E2E FAIL');
+  if (currentScenario) {
+    console.error(`失败场景：${currentScenario.no} ${currentScenario.desc}`);
+    console.error(`主责任 R-ID：${currentScenario.rids}`);
+    console.error(`责任 Ticket：${currentScenario.ticket}`);
+  } else {
+    console.error('失败场景：未知（未进入任何已编号阶段）');
+  }
+  console.error('结论：不可进入人工 dogfood');
+  console.error(`复现错误：${error.stack || error.message}`);
   process.exitCode = 1;
 });
