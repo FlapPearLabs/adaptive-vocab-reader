@@ -8,7 +8,7 @@
 
 **Blocked by**：无（T-UX-2 依赖本票的 `WordState=learning` 数据源，但两票文件边界不同，T-UX-2 可在 T-UX-1 后或并行施工）
 
-**Status:** draft（待 DOCUMENT 复审 PASS 后转 ready-for-agent）
+**Status:** ready-for-agent（DOCUMENT 复审 PASS，2026-08-05）
 
 **用户可见收益**：悬停一个不认识/未测的词，立刻看到 词形、音标、词性、中文释义；拖选任意命中词即可一键加入生词本，不用先下划线再点。
 

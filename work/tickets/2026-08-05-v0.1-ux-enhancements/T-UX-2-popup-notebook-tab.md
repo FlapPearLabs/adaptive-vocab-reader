@@ -8,7 +8,7 @@
 
 **Blocked by**：T-UX-1（依赖 `WordState=learning` 的既有数据源与 `STATE_CHANGE` 写入路径；但两票文件边界不同，可并行或先后施工）
 
-**Status:** draft（待 DOCUMENT 复审 PASS 后转 ready-for-agent）
+**Status:** ready-for-agent（DOCUMENT 复审 PASS，2026-08-05）
 
 **用户可见收益**：打开 popup 即可看到「当前确认不会」的完整清单与释义，随时一键改回「已掌握」，页面提示同步撤除。
 
