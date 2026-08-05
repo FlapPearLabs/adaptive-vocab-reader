@@ -216,7 +216,7 @@ async function waitForWorker(browser, timeoutMs = 10_000) {
  * 这是对「终止并重新启动 Service Worker」的最强真实验证（整进程重启 + 真实启动路径）。
  */
 async function restartChromeOnSameProfile(userDataDir, chromeForTesting, browser, chrome) {
-  await browser.close();
+  browser.disconnect();
   await killChrome(chrome);
   await wait(500);
   const relaunched = await launchChrome(userDataDir, chromeForTesting);
@@ -419,7 +419,7 @@ async function main() {
 
     console.log(`E2E #1 PASS: annotations=${initial.annotations}, unknown=${initial.unknown}, challenge_first=${persisted.first}, challenge_repeats=${persisted.repeats}, form_merge=abilities→ability(wordKey), local_snapshot=minimal`);
   } finally {
-    if (browser1) await browser1.close();
+    if (browser1) browser1.disconnect();
     await killChrome(chrome1);
   }
 
@@ -511,7 +511,7 @@ async function main() {
     }
     console.log('E2E UX1 PASS: R-UX-T1~T4=true, R-UX-S1~S5=true, abilities→ability=true, selection_text_persisted=false');
   } finally {
-    if (browserUx1) await browserUx1.close();
+    if (browserUx1) browserUx1.disconnect();
     await killChrome(chromeUx1);
   }
 
@@ -571,7 +571,7 @@ async function main() {
     if (!isDeepStrictEqual(migratedTwice, migratedOnce)) throw new Error('R-MIG-7 失败：schema 3 重启后不再恒等');
     console.log('E2E #1B PASS: schema2_fixture→v3=true, forms_merge=abilities→ability, conflict_arbitration=updatedAt_newer, unmapable_key_kept=true, evidence_rebuilt=true, corrupt_skipped=true, audit_cleared=true, persisted_idempotent=true');
   } finally {
-    if (browserMigration) await browserMigration.close();
+    if (browserMigration) browserMigration.disconnect();
     await killChrome(chromeMigration);
   }
 
@@ -745,8 +745,6 @@ async function main() {
     const afterA = await countWord(pageA);
     const afterB = await countWord(pageB);
     if (afterA !== 0 || afterB !== 0) throw new Error(`多标签页未同步更新：${word0}（A=${afterA}, B=${afterB}）`);
-    await pageA.close();
-    await pageB.close();
 
     // 逐题作答剩余 49 题：第 1–24 题答对，第 25–49 题答错（第 0 题已在上一步答对）
     // 用 page.evaluate 点击（同上，规避 ElementHandle.click 协议超时）
@@ -880,12 +878,141 @@ async function main() {
       throw new Error(`场景 6 失败：manual 后估计改变：\n前=${estimateBeforeManual}\n后=${estimateAfterManual}`);
     }
     console.log(`E2E #6 PASS: manual_word=${manualWord}, hint_changed=true, evidence_unchanged=true, estimate_unchanged=true`);
-    await popup3.close();
 
     console.log(`E2E #2 PASS: questions=${qCount}, known=${knownCount}, learning=${learningCount}, audit_markers=${auditCount}, plan_frozen=true, page_updated=true, multitab_synced=true, reopen_recovered=true, audit_entry_absent=true, residual_plan_ignored=true, worker_reloaded=true`);
   } finally {
-    if (browser2) await browser2.close();
+    if (browser2) browser2.disconnect();
     await killChrome(chrome2);
+  }
+
+  // ============================================================
+  // 阅读体验增强 T-UX-2：popup 生词本（R-UX-N1~N5）
+  // ============================================================
+  let browserUx2;
+  let chromeUx2;
+  try {
+    ({ chrome: chromeUx2, browser: browserUx2 } = await launchChrome(path.join(tempDir, 'profile-ux2'), chromeForTesting));
+    await wait(1_000);
+    let extensionIdUx2 = extensionIdFromTargets(browserUx2);
+    if (!extensionIdUx2) throw new Error('R-UX-N1 失败：无法解析扩展 ID');
+    let workerUx2 = await getWorker(browserUx2);
+    if (!workerUx2) throw new Error('R-UX-N1 失败：未找到 Service Worker');
+    const openPopupUx2 = async () => {
+      const popup = await browserUx2.newPage();
+      await gotoSafe(popup, `chrome-extension://${extensionIdUx2}/popup.html`, { waitUntil: 'networkidle0' });
+      return popup;
+    };
+    const readSnapshotUx2 = () => workerUx2.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+
+    let popupUx2 = await openPopupUx2();
+    await popupUx2.waitForSelector('button.primary', { timeout: 10_000 });
+    await popupUx2.click('button.primary');
+    await popupUx2.waitForSelector('.question', { timeout: 10_000 });
+    const ux2Plan = (await readSnapshotUx2()).initialTest.plan;
+    for (let i = 0; i < ux2Plan.questions.length; i++) {
+      const question = ux2Plan.questions[i];
+      const optionIndex = i < 25 ? question.correctOptionIndex : (question.correctOptionIndex === 0 ? 1 : 0);
+      await popupUx2.evaluate((qIndex, selectedOption) => {
+        const card = document.querySelectorAll('.question')[qIndex];
+        const options = card.querySelectorAll('.option:not(.unsure)');
+        (options[selectedOption] || options[0]).click();
+      }, i, optionIndex);
+      await wait(20);
+    }
+    await popupUx2.waitForSelector('.summary', { timeout: 10_000 });
+    await popupUx2.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateBeforeNotebook = await popupUx2.$eval('.estimate', (el) => el.textContent || '');
+    const evidenceBeforeNotebook = (await readSnapshotUx2()).assessmentEvidence;
+    const planWords = new Set(ux2Plan.questions.map((question) => question.word));
+    const manualWord = Object.keys(dictCore).find((word) => !planWords.has(word));
+    if (!manualWord) throw new Error('R-UX-N3 前置失败：无法从真实词包找到首测计划外词');
+
+    // 首测完成后经真实选区入口执行 manual learning：证据和估计必须保持不变。
+    fs.writeFileSync(path.join(tempDir, 'plan-words.html'), `<!DOCTYPE html><html><body><article><p><span id="ux2-manual-word">${manualWord}</span></p></article></body></html>`);
+    const readingUx2 = await browserUx2.newPage();
+    await gotoSafe(readingUx2, `https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
+    await readingUx2.waitForSelector(`.avr-light[data-word="${manualWord}"]`, { timeout: 10_000 });
+    await selectElementText(readingUx2, '#ux2-manual-word');
+    await readingUx2.waitForSelector('.avr-selection-action', { visible: true, timeout: 5_000 });
+    await readingUx2.evaluate(() => document.querySelector('.avr-selection-action')?.click());
+    await readingUx2.waitForSelector(`.avr-strong-first[data-word="${manualWord}"]`, { timeout: 5_000 });
+    const afterManualLearning = await readSnapshotUx2();
+    if (!isDeepStrictEqual(afterManualLearning.assessmentEvidence, evidenceBeforeNotebook)) {
+      throw new Error('R-UX-N3 失败：首测完成后 manual learning 改写了 AssessmentEvidence');
+    }
+    const popupAfterLearning = await openPopupUx2();
+    await popupAfterLearning.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateAfterLearning = await popupAfterLearning.$eval('.estimate', (el) => el.textContent || '');
+    if (estimateAfterLearning !== estimateBeforeNotebook) throw new Error('R-UX-N3 失败：manual learning 改变了点估计或保守范围');
+
+    // R-UX-N4：仅注入已存储的旧 key fixture，不伪造或改写 core/forms；重启使真实 worker 重新加载快照。
+    const withLegacyKey = await readSnapshotUx2();
+    withLegacyKey.words.bogusword = { status: 'learning', source: 'manual', updatedAt: Date.now() + 1, version: 0 };
+    await workerUx2.evaluate((snapshot) => chrome.storage.local.set({ avr_vocab_snapshot: snapshot }), withLegacyKey);
+    ({ chrome: chromeUx2, browser: browserUx2 } = await restartChromeOnSameProfile(path.join(tempDir, 'profile-ux2'), chromeForTesting, browserUx2, chromeUx2));
+    extensionIdUx2 = extensionIdFromTargets(browserUx2);
+    workerUx2 = await waitForWorker(browserUx2);
+    if (!extensionIdUx2 || !workerUx2) throw new Error('R-UX-N4 失败：重启后扩展未就绪');
+    popupUx2 = await openPopupUx2();
+    await popupUx2.waitForSelector('.notebook-tab', { timeout: 10_000 });
+    await popupUx2.click('.notebook-tab');
+    await popupUx2.waitForSelector('.notebook-list', { timeout: 10_000 });
+    const snapshotWithLegacy = await readSnapshotUx2();
+    if (!snapshotWithLegacy.words.bogusword) throw new Error('R-UX-N4 失败：无法映射旧 key 未保留在 storage');
+    const expectedNotebookWords = Object.entries(snapshotWithLegacy.words)
+      .filter(([word, state]) => state.status === 'learning' && dictCore[word])
+      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
+      .map(([word]) => word);
+    const displayedNotebookWords = await popupUx2.$$eval('.notebook-row', (rows) => rows.map((row) => row.getAttribute('data-word')));
+    if (JSON.stringify(displayedNotebookWords) !== JSON.stringify(expectedNotebookWords) || displayedNotebookWords.includes('bogusword')) {
+      throw new Error(`R-UX-N1/N4 失败：生词本排序或旧 key 排除错误：${JSON.stringify(displayedNotebookWords)}`);
+    }
+    const firstWord = expectedNotebookWords[0];
+    if (!firstWord) throw new Error('R-UX-N1 失败：预期至少一个合法 learning 词');
+    const firstMetadata = await popupUx2.$eval(`.notebook-row[data-word="${firstWord}"]`, (row) => ({
+      phonetic: row.querySelector('.notebook-phonetic')?.textContent,
+      pos: row.querySelector('.notebook-pos')?.textContent,
+      translation: row.querySelector('.notebook-translation')?.textContent,
+    }));
+    const [expectedPhonetic, expectedPos, expectedTranslation] = dictCore[firstWord];
+    if (JSON.stringify(firstMetadata) !== JSON.stringify({ phonetic: expectedPhonetic, pos: expectedPos, translation: expectedTranslation })) {
+      throw new Error(`R-UX-N1 失败：生词本元数据不匹配：${JSON.stringify(firstMetadata)}`);
+    }
+
+    // R-UX-N5：页签切回仍保留首测、每日和估计入口。
+    await popupUx2.click('.popup-tab:not(.notebook-tab)');
+    await popupUx2.waitForSelector('.summary', { timeout: 10_000 });
+    await popupUx2.waitForSelector('.estimate-point', { timeout: 10_000 });
+    await popupUx2.waitForSelector('.daily-start', { timeout: 10_000 });
+    await popupUx2.click('.notebook-tab');
+    await popupUx2.waitForSelector(`.notebook-row[data-word="${manualWord}"]`, { timeout: 10_000 });
+
+    // R-UX-N2/N3：popup 写 manual known，页面经既有 STATE_UPDATED 广播撤除，并保持证据/估计不变。
+    const readingAfterRestart = await browserUx2.newPage();
+    await gotoSafe(readingAfterRestart, `https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
+    await readingAfterRestart.waitForSelector(`.avr-strong-first[data-word="${manualWord}"]`, { timeout: 10_000 });
+    await popupUx2.evaluate((word) => {
+      document.querySelector(`.notebook-row[data-word="${word}"] .notebook-known`)?.click();
+    }, manualWord);
+    await readingAfterRestart.waitForFunction((word) => document.querySelectorAll(`.avr-word[data-word="${word}"]`).length === 0, { timeout: 10_000 }, manualWord);
+    const afterManualKnown = await readSnapshotUx2();
+    if (afterManualKnown.words?.[manualWord]?.status !== 'known' || afterManualKnown.words?.[manualWord]?.source !== 'manual') {
+      throw new Error(`R-UX-N2 失败：popup 未写入 manual known：${JSON.stringify(afterManualKnown.words?.[manualWord])}`);
+    }
+    if (!isDeepStrictEqual(afterManualKnown.assessmentEvidence, evidenceBeforeNotebook)) {
+      throw new Error('R-UX-N3 失败：popup manual known 改写了 AssessmentEvidence');
+    }
+    if (await popupUx2.$$eval(`.notebook-row[data-word="${manualWord}"]`, (rows) => rows.length)) {
+      throw new Error('R-UX-N2 失败：已掌握词未移出生词本');
+    }
+    const popupAfterKnown = await openPopupUx2();
+    await popupAfterKnown.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateAfterKnown = await popupAfterKnown.$eval('.estimate', (el) => el.textContent || '');
+    if (estimateAfterKnown !== estimateBeforeNotebook) throw new Error('R-UX-N3 失败：popup manual known 改变了点估计或保守范围');
+    console.log('E2E UX2 PASS: R-UX-N1~N5=true, manual_learning_known_evidence_unchanged=true, estimate_unchanged=true, state_updated_broadcast=true, unmappable_key_kept_hidden=true');
+  } finally {
+    if (browserUx2) browserUx2.disconnect();
+    await killChrome(chromeUx2);
   }
 
   // ============================================================
@@ -973,7 +1100,6 @@ async function main() {
       const p = await readPerf(longPage);
       assertPerfShape(p, `long-read#${s}`);
       samples.push(p);
-      await longPage.close();
     }
 
     // SPA 页一次性能观测（新 schema；与长文一致调用 assertPerfShape 做 schema 断言，非仅记录）
@@ -996,7 +1122,7 @@ async function main() {
     }));
     console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, perf_samples=${JSON.stringify(perfSummary)}, spa_perf=${spaPerf ? JSON.stringify(spaPerf) : 'n/a'}`);
   } finally {
-    if (browser3) await browser3.close();
+    if (browser3) browser3.disconnect();
     await killChrome(chrome3);
   }
 
@@ -1088,7 +1214,6 @@ async function main() {
     }
     const answeredWords4 = dailyPlan4.questions.slice(0, 2).map((q) => q.word);
     const unAnsweredWords4 = dailyPlan4.questions.slice(2).map((q) => q.word);
-    await popup4.close();
     popup4 = await openPopup4();
     await popup4.waitForSelector('.daily-progress', { timeout: 10_000 });
     const progressText = await popup4.$eval('.daily-progress', (el) => el.textContent || '');
@@ -1113,7 +1238,6 @@ async function main() {
     if (readAnnotations === 0) throw new Error('场景 17 失败：每日轮进行中阅读未被标注（阅读被阻塞）');
     const snapDuringRead = await readSnap4();
     if (snapDuringRead.dailyTest.completed !== false) throw new Error('场景 17 前置：阅读验证应在每日轮未完成状态执行');
-    await readPage4.close();
     console.log(`[stage4] 场景 17 PASS：每日轮进行中（completed=false，2/5）阅读正常标注（annotations=${readAnnotations}）`);
 
     // ---- §21 场景 12/13：未完成轮跨日（date seam 最小注入：改写 storage localDate + 同 profile 重启）----
@@ -1270,7 +1394,7 @@ async function main() {
 
     console.log(`E2E #4 PASS: daily_round=5q, bands_even=0/2/4/6/8, incomplete_round_cross_day=true, answered_kept=true, unanswered_zero_change=true, round_index_kept=0, expired_write_rejected=true, skip_zero_change=true, pause_resume=true, reading_in_progress_unblocked=true`);
   } finally {
-    if (browser4) await browser4.close();
+    if (browser4) browser4.disconnect();
     await killChrome(chrome4);
   }
 
@@ -1385,7 +1509,7 @@ async function main() {
     }
     console.log(`E2E #15 PASS: restart_persistence=true, schemaVersion=3, words=${Object.keys(fiveAfter.words).length}, evidence=${Object.keys(fiveAfter.evidence).length}, dailyTest_completed=true, completedRoundIndex=${fiveAfter.completedRoundIndex}`);
   } finally {
-    if (browser5) await browser5.close();
+    if (browser5) browser5.disconnect();
     await killChrome(chrome5);
   }
 
@@ -1578,7 +1702,7 @@ async function main() {
     console.log(`[stage6] daily 同步 PASS：${X}（core）与 ${Xinflected}（屈折）两页经 popup 真实作答后同步无标注`);
     console.log('E2E #3 补全 PASS: multitab_same_wordKey_diff_surface_sync=true, manual_sync=true, daily_sync=true');
   } finally {
-    if (browser6) await browser6.close();
+    if (browser6) browser6.disconnect();
     await killChrome(chrome6);
   }
 

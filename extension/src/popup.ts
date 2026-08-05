@@ -84,16 +84,19 @@ async function main(): Promise<void> {
   if (!app) return;
 
   const strategy: VocabStrategy = createVocabStrategy();
-  const [{ core, forms, bands }, profile, initialTest, dailyState] = await Promise.all([
+  const [{ core, forms, bands }, profile, initialTest, dailyState, initialWords] = await Promise.all([
     loadDict(),
     sendMessage<Profile>({ type: 'GET_PROFILE' }),
     sendMessage<{ test: InitialTestState | null }>({ type: 'GET_INITIAL_TEST' }).then((r) => r.test),
     sendMessage<{ test: DailyTestState | null; completedRoundIndex: number }>({ type: 'GET_DAILY_TEST' }),
+    sendMessage<{ words: Record<string, { status: 'known' | 'learning'; updatedAt: number }> }>({ type: 'GET_STATE' }).then((r) => r.words),
   ]);
 
   let test: InitialTestState | null = initialTest ?? null;
   let daily: DailyTestState | null = dailyState.test;
   let dailyCompletedRoundIndex = dailyState.completedRoundIndex;
+  let words = initialWords;
+  let activeTab: 'main' | 'notebook' = 'main';
   /** 当前是否处于每日答题视图（进行中且未跳过）；其余视图由首测状态决定。 */
   let dailyView = false;
 
@@ -108,6 +111,11 @@ async function main(): Promise<void> {
 
   function render(): void {
     app!.innerHTML = '';
+    renderTabs();
+    if (activeTab === 'notebook') {
+      renderNotebook();
+      return;
+    }
     if (dailyView && daily && !daily.completed && !daily.skipped) {
       renderDailyQuestions();
       return;
@@ -120,6 +128,65 @@ async function main(): Promise<void> {
     } else {
       renderQuestions();
     }
+  }
+
+  function renderTabs(): void {
+    const tabs = el('div', 'popup-tabs');
+    const mainTab = el('button', activeTab === 'main' ? 'popup-tab active' : 'popup-tab', '测评') as HTMLButtonElement;
+    mainTab.type = 'button';
+    mainTab.onclick = () => {
+      activeTab = 'main';
+      render();
+    };
+    const notebookTab = el('button', activeTab === 'notebook' ? 'popup-tab notebook-tab active' : 'popup-tab notebook-tab', '生词本') as HTMLButtonElement;
+    notebookTab.type = 'button';
+    notebookTab.onclick = () => {
+      activeTab = 'notebook';
+      render();
+    };
+    tabs.append(mainTab, notebookTab);
+    app!.append(tabs);
+  }
+
+  /** 生词本只消费 WordState；wordKey 必须是当前 core 主词条，无法映射旧 key 保留在 storage 但不展示。 */
+  function renderNotebook(): void {
+    const screen = el('div', 'screen notebook');
+    screen.append(el('h1', 'title', '生词本'));
+    const learningWords = Object.entries(words)
+      .filter(([word, state]) => state.status === 'learning' && core[word] !== undefined)
+      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt);
+    if (learningWords.length === 0) {
+      screen.append(el('p', 'notebook-empty', '暂无生词。'));
+      app!.append(screen);
+      return;
+    }
+
+    const list = el('div', 'notebook-list');
+    for (const [word, state] of learningWords) {
+      const entry = core[word]!;
+      const row = el('div', 'notebook-row');
+      row.dataset.word = word;
+      row.append(
+        el('div', 'notebook-word', word),
+        el('div', 'notebook-phonetic', entry.phonetic),
+        el('div', 'notebook-pos', entry.pos),
+        el('div', 'notebook-translation', entry.translation),
+      );
+      const known = el('button', 'notebook-known', '已掌握') as HTMLButtonElement;
+      known.type = 'button';
+      known.onclick = () => void markNotebookWordKnown(word);
+      row.append(known);
+      list.append(row);
+    }
+    screen.append(list);
+    app!.append(screen);
+  }
+
+  async function markNotebookWordKnown(word: string): Promise<void> {
+    await sendMessage({ type: 'STATE_CHANGE', word, newStatus: 'known' });
+    // worker 是状态真相源：成功与拒绝均重新读取，避免 popup 自行臆断。
+    words = (await sendMessage<{ words: typeof words }>({ type: 'GET_STATE' })).words;
+    render();
   }
 
   // ============================================================
