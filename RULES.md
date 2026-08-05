@@ -42,11 +42,11 @@
 - **[已确认]** 活跃生词表是“当前确认不会”的显示与状态核验清单，不是学习计划或按时间到期的复习队列。
 - **[已确认]** 内容脚本只根据 `wordKey` 对应的 `WordState` 决定提示，不读取 `AssessmentEvidence`。
 
-## 阅读体验增强（2026-08-04 用户真实试用反馈新增）
+## 阅读体验增强（2026-08-04 用户真实试用反馈新增；2026-08-05 按 DOCUMENT 审查补全语义）
 
-- **[已确认]** 轻提示 tooltip 内容升级：unknown 词悬停显示 单词、音标、词性、简短中文释义 四行；下划线样式维持轻提示（浅灰虚线）。learning 强提示的行内中文行为不变。
-- **[已确认]** 新增手动标记入口「选区加词」：拖选文本后，若所选词形命中词典，选区旁弹出「加入生词本」浮动按钮；点击写入该 wordKey 的 `WordState=learning`（source=manual，不写 `AssessmentEvidence`，不改估计）；未命中词典的选区静默不弹。同 wordKey 已 learning 或 known 时不重复弹出。
-- **[已确认]** popup 新增「生词本」页签：列出所有 `WordState=learning` 的 wordKey（含音标、词性、释义），提供一键「已掌握」→ 标记 known 并移出列表；该页签只读 `WordState`，不读 `AssessmentEvidence`；不改首测/每日/估计入口。
+- **[已确认]** 轻提示 tooltip 内容升级：unknown 词悬停显示四行——第一行为页面实际词形（surfaceForm，保留原文大小写），其余元数据（音标、词性、简短中文释义）统一取自该词形解析出的 `wordKey` 对应的 core 词条。屈折词形（如页面 `went`）第一行显示 `went`，音标/词性/释义取 `go` 的条目；`wordKey` 与 `entryKey` 恒等（core 优先规则下二者相同）。下划线样式维持轻提示（浅灰虚线）；learning 强提示的行内中文行为不变。
+- **[已确认]** 新增手动标记入口「选区加词」：拖选文本后，选区文本经归一化（trim、去首尾标点、小写）后**作为一个整体**解析——若命中 core 主词条或 forms 词形映射，则唯一解析为该 `wordKey`，并在选区旁弹出「加入生词本」浮动按钮；点击写入该 `wordKey` 的 `WordState=learning`（source=manual，不写 `AssessmentEvidence`，不改估计）。选区含空白/多词、部分词形（整体未命中）、未收录词、纯空白或纯数字 → 无法唯一解析 → 静默不弹。同 `wordKey` 已 learning 或 known 时不重复弹出。选区文本仅瞬时本地用于解析，不持久化、不记录、不进快照。
+- **[已确认]** popup 新增「生词本」页签：数据源只读 `WordState`，筛选 `status=learning` 且 key 可解析为当前词包内合法 `wordKey` 的词条，按 `updatedAt` 降序显示（wordKey + 音标 + 词性 + 释义）；「已掌握」= 对该 `wordKey` 写入 `WordState=known`（source=manual，不写 `AssessmentEvidence`、不改估计）并移出列表；该页签不读 `AssessmentEvidence`；不改首测/每日/估计入口。schema 3 迁移中无法映射到 core/forms 的旧 key 在存储中保守保留，但**不进入生词本列表**（无元数据可展示，也不删除该存储键）。
 
 ## 首测
 
