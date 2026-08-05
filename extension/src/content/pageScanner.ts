@@ -12,7 +12,7 @@ import type { WordState } from '../shared/types';
 import { createVocabStrategy } from '../strategy/index';
 import type { Dictionary } from './dictionary';
 import { extractWordsFromText, isContentNode } from './scanner';
-import { annotateTextNode, updateWordDisplay, type WordAnnotation } from './annotator';
+import { annotateTextNode, hideAnnotationActionMenu, updateWordDisplay, type WordAnnotation } from './annotator';
 
 /** 非持久化性能观测（仅内存，绝不写入 storage；不含 URL/正文/句子/DOM 内容） */
 export interface PerfReport {
@@ -98,6 +98,64 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   // 标注器生成的节点（span 与文本碎片）统一登记，observer 与 processTextNode 据此彻底跳过，
   // 杜绝 MutationObserver 因自身注入节点而触发的重复扫描（自触发）。
   const generatedNodes: WeakSet<Node> = new WeakSet<Node>();
+  let selectionActionEl: HTMLButtonElement | null = null;
+
+  function hideSelectionAction(): void {
+    selectionActionEl?.remove();
+    selectionActionEl = null;
+  }
+
+  function normalizedSelectedWord(): string | null {
+    const selected = window.getSelection()?.toString() ?? '';
+    const normalized = selected.trim().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '').toLowerCase();
+    if (!normalized || /\s/u.test(normalized) || /^\d+$/u.test(normalized)) return null;
+    return normalized;
+  }
+
+  function showSelectionAction(word: string, x: number, y: number): void {
+    hideSelectionAction();
+    hideAnnotationActionMenu();
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'avr-selection-action';
+    button.textContent = '加入生词本';
+    button.dataset.word = word;
+    button.style.left = `${x}px`;
+    button.style.top = `${y + 6}px`;
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const selectedWord = button.dataset.word;
+      hideSelectionAction();
+      window.getSelection()?.removeAllRanges();
+      if (selectedWord) handleUserAction(selectedWord, 'learning');
+    });
+    document.body.appendChild(button);
+    selectionActionEl = button;
+  }
+
+  document.addEventListener('mouseup', (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('.avr-selection-action')) return;
+
+    const selectedWord = normalizedSelectedWord();
+    const lookup = selectedWord ? deps.dictionary.lookup(selectedWord) : null;
+    const status = lookup ? vocabState[lookup.wordKey]?.status : undefined;
+    if (!lookup || status === 'learning' || status === 'known') {
+      hideSelectionAction();
+      return;
+    }
+
+    const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
+    const rect = range?.getBoundingClientRect();
+    showSelectionAction(lookup.wordKey, rect?.left ?? event.clientX, rect?.bottom ?? event.clientY);
+  });
+
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.avr-selection-action')) hideSelectionAction();
+  });
 
   // 真实布局偏移（Layout Instability API）：累计 layout-shift 条目值（排除近期用户输入）。
   // 与 scrollHeight 差（heightDeltaPx）区分——后者只反映高度变化，不一定是位移。
@@ -236,6 +294,8 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       if (result.decision !== 'none') {
         annotations.push({
           result,
+          phonetic: lookup.entry.phonetic,
+          pos: lookup.entry.pos,
           startIndex: occ.startIndex,
           endIndex: occ.endIndex,
         });

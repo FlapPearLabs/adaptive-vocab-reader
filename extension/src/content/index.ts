@@ -11,6 +11,7 @@
 
 import type { WordState } from '../shared/types';
 import { createDictionary, Dictionary } from './dictionary';
+import { initAnnotator } from './annotator';
 import { createPageScanner, type PageScanner } from './pageScanner';
 
 // ============================================================
@@ -64,6 +65,7 @@ function saveStateChange(word: string, newStatus: WordState['status']): void {
 // ============================================================
 
 async function main(): Promise<void> {
+  initAnnotator();
   // 并行加载词典和状态
   const [dict, state] = await Promise.all([loadDictionary(), loadState()]);
   dictionary = dict;

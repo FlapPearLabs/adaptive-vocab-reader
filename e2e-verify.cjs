@@ -84,6 +84,28 @@ function localDateString(d = new Date()) {
   return `${y}-${m}-${day}`;
 }
 
+/** 与 content/dictionary.ts 相同的 core 优先查词规则；只读取真实构建词包，不注入测试映射。 */
+function lookupPack(surface, core, forms) {
+  const form = surface.toLowerCase();
+  if (core[form]) return { wordKey: form, entry: core[form] };
+  const wordKey = forms[form];
+  return wordKey && core[wordKey] ? { wordKey, entry: core[wordKey] } : null;
+}
+
+/** 以真实浏览器 Selection + mouseup 路径选择一个元素的完整文本。 */
+async function selectElementText(page, selector) {
+  await page.evaluate((targetSelector) => {
+    const element = document.querySelector(targetSelector);
+    if (!element || !element.firstChild) throw new Error(`未找到可选区元素：${targetSelector}`);
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 24, clientY: 24 }));
+  }, selector);
+}
+
 /**
  * 对 page.goto 加重试：Chrome for Testing 151 经 puppeteer-core connect 后，
  * 首帧偶尔未就绪会抛「Requesting main frame too early」，短暂等待后重试即可。
@@ -253,6 +275,14 @@ async function main() {
           return;
         }
       }
+      if (request.url === '/ux-reading.html') {
+        const f = path.join(tempDir, 'ux-reading.html');
+        if (fs.existsSync(f)) {
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          response.end(fs.readFileSync(f, 'utf8'));
+          return;
+        }
+      }
       // T5 跨标签同步页（sync-*.html）：由测试动态写入 tempDir，同一 wordKey 不同词形分页。
       const syncHit = /^\/sync-([a-z0-9-]+)\.html$/.exec(request.url || '');
       if (syncHit) {
@@ -391,6 +421,98 @@ async function main() {
   } finally {
     if (browser1) await browser1.close();
     await killChrome(chrome1);
+  }
+
+  // ============================================================
+  // 阅读体验增强 T-UX-1：tooltip 四行 + 选区加词（R-UX-T1~T4 / S1~S5）
+  // ============================================================
+  let browserUx1;
+  let chromeUx1;
+  try {
+    ({ chrome: chromeUx1, browser: browserUx1 } = await launchChrome(path.join(tempDir, 'profile-ux1'), chromeForTesting));
+    await wait(1_000);
+    const abilityLookup = lookupPack('abilities', dictCore, forms);
+    if (!abilityLookup || abilityLookup.wordKey !== 'ability') {
+      throw new Error(`R-UX-T2 前置失败：lookup(abilities) 应为 ability，实际 ${JSON.stringify(abilityLookup)}`);
+    }
+    const absentWord = 'zznotinthecorepack';
+    if (lookupPack(absentWord, dictCore, forms) !== null) {
+      throw new Error(`R-UX-S3 前置失败：未收录词 ${absentWord} 意外命中真实词包`);
+    }
+    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><article><p><span id="ability-word">abilities</span> <span id="selection-word">challenge</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article></body></html>`);
+    const uxPage = await browserUx1.newPage();
+    uxPage.on('pageerror', (error) => pageLogs.push(`ux1 pageerror: ${error.message}`));
+    await gotoSafe(uxPage, `https://localhost:${PORT}/ux-reading.html`, { waitUntil: 'networkidle0' });
+    await uxPage.waitForSelector('.avr-light[data-word="ability"]', { timeout: 10_000 });
+
+    // R-UX-T1/T2：tooltip 固定四行；surfaceForm=abilities，三项元数据逐项来自 ability core 条目。
+    await uxPage.evaluate(() => document.querySelector('.avr-light[data-word="ability"]')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    await uxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.style.display === 'block', { timeout: 5_000 });
+    const tooltipLines = await uxPage.$$eval('.avr-tooltip > div', (rows) => rows.map((row) => row.textContent || ''));
+    const [abilityPhonetic, abilityPos, abilityTranslation] = dictCore.ability;
+    if (JSON.stringify(tooltipLines) !== JSON.stringify(['abilities', abilityPhonetic, abilityPos, abilityTranslation])) {
+      throw new Error(`R-UX-T1/T2 失败：tooltip 四行或 ability 元数据不匹配：${JSON.stringify(tooltipLines)}`);
+    }
+
+    const workerUx1 = await getWorker(browserUx1);
+    if (!workerUx1) throw new Error('R-UX-S2 失败：未找到 Service Worker');
+    const evidenceBeforeManual = (await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot)).assessmentEvidence;
+
+    // R-UX-S1/S2/T3：整体选中命中 → 浮条 → manual learning，且同页即时强提示。
+    await selectElementText(uxPage, '#selection-word');
+    await uxPage.waitForSelector('.avr-selection-action', { visible: true, timeout: 5_000 });
+    await uxPage.evaluate(() => document.querySelector('.avr-selection-action')?.click());
+    await uxPage.waitForSelector('.avr-strong-first[data-word="challenge"]', { timeout: 5_000 });
+    const afterLearning = (await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot));
+    if (afterLearning.words?.challenge?.status !== 'learning' || afterLearning.words?.challenge?.source !== 'manual') {
+      throw new Error(`R-UX-S2 失败：challenge 未写为 manual learning：${JSON.stringify(afterLearning.words?.challenge)}`);
+    }
+    if (!isDeepStrictEqual(afterLearning.assessmentEvidence, evidenceBeforeManual)) {
+      throw new Error('R-UX-S2 失败：manual learning 改写了 AssessmentEvidence');
+    }
+    const strongCount = await uxPage.$$eval('.avr-strong[data-word="challenge"], .avr-strong-first[data-word="challenge"]', (els) => els.length);
+    if (strongCount < 2) throw new Error(`R-UX-T3 失败：learning 强提示的首次/重复显示被破坏（${strongCount}）`);
+
+    // R-UX-S3：所有非整体命中选区静默不弹且零写入。
+    const snapshotBeforeNegative = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    for (const selector of ['#negative-unrecorded', '#negative-multi', '#negative-partial', '#negative-blank', '#negative-number']) {
+      await selectElementText(uxPage, selector);
+      await wait(80);
+      const actionCount = await uxPage.$$eval('.avr-selection-action', (els) => els.length);
+      if (actionCount !== 0) throw new Error(`R-UX-S3 失败：${selector} 不应出现加入生词本浮条`);
+      const afterNegative = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+      if (!isDeepStrictEqual(afterNegative, snapshotBeforeNegative)) throw new Error(`R-UX-S3 失败：${selector} 产生了存储写入`);
+    }
+
+    // R-UX-S4：learning 与 known 两态均不重复弹。
+    await selectElementText(uxPage, '#selection-word');
+    await wait(80);
+    if (await uxPage.$$eval('.avr-selection-action', (els) => els.length)) throw new Error('R-UX-S4 失败：learning 词仍出现加入生词本浮条');
+    await uxPage.evaluate(() => document.querySelector('.avr-word[data-word="challenge"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await uxPage.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true, timeout: 5_000 });
+    await uxPage.evaluate(() => document.querySelector('.avr-action-menu button[data-avr-status="known"]')?.click());
+    await uxPage.waitForFunction(() => document.querySelectorAll('.avr-word[data-word="challenge"]').length === 0, { timeout: 5_000 });
+    const afterKnown = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (afterKnown.words?.challenge?.status !== 'known' || afterKnown.words?.challenge?.source !== 'manual') {
+      throw new Error(`R-UX-S4 失败：challenge 未写为 manual known：${JSON.stringify(afterKnown.words?.challenge)}`);
+    }
+    if (!isDeepStrictEqual(afterKnown.assessmentEvidence, evidenceBeforeManual)) {
+      throw new Error('R-UX-S4 失败：manual known 改写了 AssessmentEvidence');
+    }
+    await selectElementText(uxPage, '#selection-word');
+    await wait(80);
+    if (await uxPage.$$eval('.avr-selection-action', (els) => els.length)) throw new Error('R-UX-S4 失败：known 词仍出现加入生词本浮条');
+
+    // R-UX-T4/S5：仅使用既有快照字段；选区文本没有持久化位置。
+    const snapshotKeys = Object.keys(afterKnown).sort();
+    const expectedSnapshotKeys = ['assessmentEvidence', 'auditLog', 'auditMarkers', 'auditPlan', 'completedRoundIndex', 'dailyTest', 'dictVersion', 'initialTest', 'installSeed', 'lastUpdated', 'schemaVersion', 'stateVersion', 'words'];
+    if (JSON.stringify(snapshotKeys) !== JSON.stringify(expectedSnapshotKeys)) {
+      throw new Error(`R-UX-T4/S5 失败：快照出现新增字段：${JSON.stringify(snapshotKeys)}`);
+    }
+    console.log('E2E UX1 PASS: R-UX-T1~T4=true, R-UX-S1~S5=true, abilities→ability=true, selection_text_persisted=false');
+  } finally {
+    if (browserUx1) await browserUx1.close();
+    await killChrome(chromeUx1);
   }
 
   // ============================================================
