@@ -140,7 +140,8 @@ async function main(): Promise<void> {
     };
     const notebookTab = el('button', activeTab === 'notebook' ? 'popup-tab notebook-tab active' : 'popup-tab notebook-tab', '生词本') as HTMLButtonElement;
     notebookTab.type = 'button';
-    notebookTab.onclick = () => {
+    notebookTab.onclick = async () => {
+      words = (await sendMessage<{ words: typeof words }>({ type: 'GET_STATE' })).words;
       activeTab = 'notebook';
       render();
     };

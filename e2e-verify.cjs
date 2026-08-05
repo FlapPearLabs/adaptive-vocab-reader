@@ -439,7 +439,7 @@ async function main() {
     if (lookupPack(absentWord, dictCore, forms) !== null) {
       throw new Error(`R-UX-S3 前置失败：未收录词 ${absentWord} 意外命中真实词包`);
     }
-    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><article><p><span id="ability-word">abilities</span> <span id="selection-word">challenge</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article></body></html>`);
+    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><article><p><span id="ability-word">abilities</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article></body></html>`);
     const uxPage = await browserUx1.newPage();
     uxPage.on('pageerror', (error) => pageLogs.push(`ux1 pageerror: ${error.message}`));
     await gotoSafe(uxPage, `https://localhost:${PORT}/ux-reading.html`, { waitUntil: 'networkidle0' });
@@ -473,9 +473,23 @@ async function main() {
     const strongCount = await uxPage.$$eval('.avr-strong[data-word="challenge"], .avr-strong-first[data-word="challenge"]', (els) => els.length);
     if (strongCount < 2) throw new Error(`R-UX-T3 失败：learning 强提示的首次/重复显示被破坏（${strongCount}）`);
 
+    // 审查阻塞项：learning 的后续 `.avr-strong` 仍须可悬停查看同一 core 释义。
+    const [, , challengeTranslation] = dictCore.challenge;
+    await uxPage.hover('.avr-strong[data-word="challenge"]');
+    await uxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.style.display === 'block', { timeout: 5_000 });
+    const strongTooltipText = await uxPage.$eval('.avr-tooltip', (tip) => tip.textContent || '');
+    if (!strongTooltipText.includes(challengeTranslation)) {
+      throw new Error(`R-UX-T3 失败：learning 后续下划线悬停释义不可用：${JSON.stringify(strongTooltipText)}`);
+    }
+
+    // 首尾 Unicode 标点与混合大小写应整体命中；数字不是标点，不得被归一化删除。
+    await selectElementText(uxPage, '#selection-punctuation');
+    await uxPage.waitForSelector('.avr-selection-action[data-word="ability"]', { visible: true, timeout: 5_000 });
+    await uxPage.evaluate(() => document.body.click());
+
     // R-UX-S3：所有非整体命中选区静默不弹且零写入。
     const snapshotBeforeNegative = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
-    for (const selector of ['#negative-unrecorded', '#negative-multi', '#negative-partial', '#negative-blank', '#negative-number']) {
+    for (const selector of ['#negative-leading-number', '#negative-trailing-number', '#negative-numbered-context', '#negative-unrecorded', '#negative-multi', '#negative-partial', '#negative-blank', '#negative-number']) {
       await selectElementText(uxPage, selector);
       await wait(80);
       const actionCount = await uxPage.$$eval('.avr-selection-action', (els) => els.length);
@@ -940,9 +954,12 @@ async function main() {
     if (!isDeepStrictEqual(afterManualLearning.assessmentEvidence, evidenceBeforeNotebook)) {
       throw new Error('R-UX-N3 失败：首测完成后 manual learning 改写了 AssessmentEvidence');
     }
-    const popupAfterLearning = await openPopupUx2();
-    await popupAfterLearning.waitForSelector('.estimate-point', { timeout: 10_000 });
-    const estimateAfterLearning = await popupAfterLearning.$eval('.estimate', (el) => el.textContent || '');
+    // 审查阻塞项：不重开 popup，切入生词本时必须重新 GET_STATE 并看到刚产生的 learning 词。
+    await popupUx2.evaluate(() => document.querySelector('.notebook-tab')?.click());
+    await popupUx2.waitForSelector(`.notebook-row[data-word="${manualWord}"]`, { timeout: 10_000 });
+    await popupUx2.evaluate(() => document.querySelector('.popup-tab:not(.notebook-tab)')?.click());
+    await popupUx2.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateAfterLearning = await popupUx2.$eval('.estimate', (el) => el.textContent || '');
     if (estimateAfterLearning !== estimateBeforeNotebook) throw new Error('R-UX-N3 失败：manual learning 改变了点估计或保守范围');
 
     // R-UX-N4：仅注入已存储的旧 key fixture，不伪造或改写 core/forms；重启使真实 worker 重新加载快照。

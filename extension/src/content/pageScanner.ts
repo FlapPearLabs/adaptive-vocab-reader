@@ -107,7 +107,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
 
   function normalizedSelectedWord(): string | null {
     const selected = window.getSelection()?.toString() ?? '';
-    const normalized = selected.trim().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '').toLowerCase();
+    const normalized = selected.trim().replace(/^\p{P}+|\p{P}+$/gu, '').toLowerCase();
     if (!normalized || /\s/u.test(normalized) || /^\d+$/u.test(normalized)) return null;
     return normalized;
   }

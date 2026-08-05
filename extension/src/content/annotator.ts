@@ -140,6 +140,15 @@ function getTooltip(): HTMLDivElement {
   return tooltipEl;
 }
 
+function positionTooltip(tip: HTMLDivElement, x: number, y: number): void {
+  tip.style.display = 'block';
+  tip.style.left = `${x}px`;
+  tip.style.top = `${y - 8}px`;
+  const rect = tip.getBoundingClientRect();
+  if (rect.bottom > window.innerHeight) tip.style.top = `${y - rect.height - 4}px`;
+  if (rect.right > window.innerWidth) tip.style.left = `${window.innerWidth - rect.width - 8}px`;
+}
+
 function showTooltip(surfaceForm: string, phonetic: string, pos: string, translation: string, x: number, y: number): void {
   const tip = getTooltip();
   tip.replaceChildren(
@@ -149,17 +158,13 @@ function showTooltip(surfaceForm: string, phonetic: string, pos: string, transla
       return row;
     }),
   );
-  tip.style.display = 'block';
-  tip.style.left = `${x}px`;
-  tip.style.top = `${y - 8}px`;
-  // 保持在视口内
-  const rect = tip.getBoundingClientRect();
-  if (rect.bottom > window.innerHeight) {
-    tip.style.top = `${y - rect.height - 4}px`;
-  }
-  if (rect.right > window.innerWidth) {
-    tip.style.left = `${window.innerWidth - rect.width - 8}px`;
-  }
+  positionTooltip(tip, x, y);
+}
+
+function showTranslationTooltip(translation: string, x: number, y: number): void {
+  const tip = getTooltip();
+  tip.textContent = translation;
+  positionTooltip(tip, x, y);
 }
 
 function hideTooltip(): void {
@@ -219,12 +224,17 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
   document.addEventListener('pointerover', (event) => {
     const wordEl = (event.target as HTMLElement).closest<HTMLElement>(`.${EXTENSION_CLASS}`);
     if (!wordEl) return;
+    const rect = wordEl.getBoundingClientRect();
+    if (wordEl.classList.contains('avr-strong')) {
+      const translation = wordEl.dataset.translation;
+      if (translation) showTranslationTooltip(translation, rect.left, rect.top);
+      return;
+    }
     if (!wordEl.classList.contains('avr-light')) return;
     const translation = wordEl.dataset.tooltipTranslation;
     const phonetic = wordEl.dataset.phonetic;
     const pos = wordEl.dataset.pos;
     if (!translation || !phonetic || !pos) return;
-    const rect = wordEl.getBoundingClientRect();
     showTooltip(wordEl.textContent || '', phonetic, pos, translation, rect.left, rect.top);
   });
 
