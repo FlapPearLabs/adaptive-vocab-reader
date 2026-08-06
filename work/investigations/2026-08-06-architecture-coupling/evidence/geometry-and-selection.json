@@ -1,0 +1,24 @@
+{
+  "capturedOn": "2026-08-06",
+  "chrome": "151.0.7922.47",
+  "geometry": {
+    "nearSticky": {"word":{"top":75,"bottom":92},"tooltip":{"top":67,"bottom":151.75},"targetOverlapPx2":695.41,"stickyBottom":72,"overlapsSticky":true},
+    "normal": {"word":{"top":235,"bottom":252},"tooltip":{"top":227,"bottom":311.75},"targetOverlapPx2":695.41},
+    "right": {"word":{"left":1211.5,"right":1280},"tooltip":{"left":1196.34375,"right":1280,"height":193.875},"targetOverlapPx2":1164.5},
+    "left": {"word":{"left":0,"top":595},"tooltip":{"left":0,"top":587},"targetOverlapPx2":695.41},
+    "bottom": {"word":{"top":779,"bottom":796},"tooltip":{"top":672.0625,"bottom":775},"targetOverlapPx2":0},
+    "afterScroll": {"scrollY":1184,"word":{"top":391,"bottom":408},"tooltip":{"top":383,"bottom":467.75},"targetOverlapPx2":695.41},
+    "github": {"wordText":"and","word":{"top":254,"bottom":292},"tooltip":{"top":246,"bottom":330.75},"targetOverlapPx2":2081.09}
+  },
+  "realMouseSelection": {
+    "selected": " improving ",
+    "action": null,
+    "visible": false,
+    "cause": "mouseup creates the action, then the same gesture's document click hides it"
+  },
+  "knownTransition": {
+    "surfaceForm": "building",
+    "before": {"wordKey":"building","className":"avr-word avr-light"},
+    "after": {"state":"known","source":"manual","wrapped":false}
+  }
+}

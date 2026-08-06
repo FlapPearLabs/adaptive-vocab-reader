@@ -1,0 +1,22 @@
+{
+  "mainSha": "011e069f0135d48822be7cf2935b8cbf84c2f574",
+  "coreCount": 1000,
+  "formsCount": 1505,
+  "bandsCount": 1000,
+  "facts": [
+    {"surfaceForm":"evaluating","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
+    {"surfaceForm":"improving","scanner":true,"core":false,"forms":"improve","wordKey":"improve","decision":"light","wrapped":true,"rootCause":"F"},
+    {"surfaceForm":"building","scanner":true,"core":true,"forms":null,"wordKey":"building","decision":"light","wrapped":true,"rootCause":"F"},
+    {"surfaceForm":"collecting","scanner":true,"core":false,"forms":"collect","wordKey":"collect","decision":"light","wrapped":true,"rootCause":"F"},
+    {"surfaceForm":"requires","scanner":true,"core":false,"forms":"require","wordKey":"require","decision":"light","wrapped":true,"rootCause":"F"},
+    {"surfaceForm":"published","scanner":true,"core":false,"forms":"publish","wordKey":"publish","decision":"light","wrapped":true,"rootCause":"F"},
+    {"surfaceForm":"environments","scanner":true,"core":false,"forms":"environment","wordKey":"environment","decision":"light","wrapped":true,"rootCause":"F"},
+    {"surfaceForm":"reinforcement","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
+    {"surfaceForm":"inference","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
+    {"surfaceForm":"framework","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
+    {"surfaceForm":"storing","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
+    {"surfaceForm":"drafted","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
+    {"surfaceForm":"reaches","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
+    {"surfaceForm":"customer","scanner":true,"core":true,"forms":null,"wordKey":"customer","decision":"light","wrapped":true,"rootCause":"F"}
+  ]
+}

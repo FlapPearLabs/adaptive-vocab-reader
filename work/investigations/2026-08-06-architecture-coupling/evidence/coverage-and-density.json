@@ -1,0 +1,61 @@
+{
+  "capturedOn": "2026-08-06",
+  "chrome": "151.0.7922.47",
+  "state": "empty isolated profile",
+  "fixedInitialTestSeed": "analysis-seed-011e069f",
+  "testedWordKeys": 50,
+  "pages": [
+    {
+      "name": "GitHub repository",
+      "url": "https://github.com/FlapPearLabs/adaptive-vocab-reader",
+      "tokens": 323,
+      "surfaceTypes": 157,
+      "lookupSuccess": 69,
+      "lookupSuccessPct": 21.36,
+      "lookupFail": 254,
+      "lookupFailPct": 78.64,
+      "lookupSurfaceTypes": 42,
+      "lightEmptyState": 69,
+      "actualInteractiveSpans": 69,
+      "lightAfterFixed50AllKnown": 66,
+      "lightPctOfLookupAfterFixed50": 95.65
+    },
+    {
+      "name": "MDN JavaScript Guide",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Introduction",
+      "tokens": 1548,
+      "surfaceTypes": 531,
+      "lookupSuccess": 792,
+      "lookupSuccessPct": 51.16,
+      "lookupFail": 756,
+      "lookupFailPct": 48.84,
+      "lookupSurfaceTypes": 221,
+      "lightEmptyState": 792,
+      "actualInteractiveSpans": 792,
+      "lightAfterFixed50AllKnown": 750,
+      "lightPctOfLookupAfterFixed50": 94.70
+    },
+    {
+      "name": "Wikipedia Artificial intelligence",
+      "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
+      "tokens": 27740,
+      "surfaceTypes": 5856,
+      "lookupSuccess": 12144,
+      "lookupSuccessPct": 43.78,
+      "lookupFail": 15596,
+      "lookupFailPct": 56.22,
+      "lookupSurfaceTypes": 1080,
+      "lightEmptyState": 12144,
+      "actualInteractiveSpansAtSnapshot": 8439,
+      "lightAfterFixed50AllKnown": 11733,
+      "lightPctOfLookupAfterFixed50": 96.62,
+      "note": "Dynamic page snapshot differs from strategy count; observer does not watch characterData and page continued changing."
+    }
+  ],
+  "packLevelConclusion": {
+    "coreWordKeys": 1000,
+    "explicitAfterInitialTest": 50,
+    "unknownAfterInitialTest": 950,
+    "unknownPct": 95
+  }
+}
