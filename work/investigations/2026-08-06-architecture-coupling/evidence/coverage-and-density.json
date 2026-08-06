@@ -1,61 +1,196 @@
 {
-  "capturedOn": "2026-08-06",
-  "chrome": "151.0.7922.47",
+  "capturedAt": "2026-08-06T03:32:10.772Z",
+  "chrome": "Chrome/151.0.7922.47",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64"
+  },
   "state": "empty isolated profile",
-  "fixedInitialTestSeed": "analysis-seed-011e069f",
+  "seed": "analysis-seed-011e069f",
   "testedWordKeys": 50,
   "pages": [
     {
       "name": "GitHub repository",
       "url": "https://github.com/FlapPearLabs/adaptive-vocab-reader",
-      "tokens": 323,
-      "surfaceTypes": 157,
-      "lookupSuccess": 69,
-      "lookupSuccessPct": 21.36,
-      "lookupFail": 254,
-      "lookupFailPct": 78.64,
-      "lookupSurfaceTypes": 42,
-      "lightEmptyState": 69,
-      "actualInteractiveSpans": 69,
-      "lightAfterFixed50AllKnown": 66,
-      "lightPctOfLookupAfterFixed50": 95.65
+      "title": "GitHub - FlapPearLabs/adaptive-vocab-reader: Local-first adaptive vocabulary reading assistant · GitHub",
+      "stats": {
+        "tokens": 323,
+        "tokenTypes": 157,
+        "lookupSuccess": 69,
+        "lookupUnresolved": 254,
+        "lookupSuccessPct": 21.36,
+        "lookupUnresolvedPct": 78.64,
+        "lookupSurfaceTypes": 42,
+        "lookupSurfaceTypePct": 26.75,
+        "lookupWordKeyTypes": 40,
+        "clear": {
+          "known": 0,
+          "learning": 0,
+          "noExplicit": 69,
+          "lookupUnresolved": 254,
+          "displayNoneKnown": 0,
+          "light": 69,
+          "strong": 0,
+          "interactive": 69,
+          "lightPctAll": 21.36,
+          "interactivePctAll": 21.36
+        },
+        "afterFixed50AllKnown": {
+          "known": 3,
+          "learning": 0,
+          "noExplicit": 66,
+          "lookupUnresolved": 254,
+          "displayNoneKnown": 3,
+          "light": 66,
+          "strong": 0,
+          "interactive": 66,
+          "lightPctLookup": 95.65,
+          "testedOverlapTokenCount": 3,
+          "testedOverlapTypeCount": 3
+        },
+        "actualDom": {
+          "spans": 69,
+          "light": 69,
+          "strong": 0,
+          "noneWrapped": 0,
+          "perf": {
+            "totalScanMs": 258.4,
+            "maxBatchMs": 0.5,
+            "textNodesScanned": 191,
+            "wordsAnnotated": 70,
+            "domNodesAdded": 144,
+            "domNodesRemoved": 41,
+            "netNodes": 103,
+            "heightDeltaPx": 0,
+            "layoutShiftScore": 0.0027,
+            "layoutShiftSupported": true,
+            "batches": 64
+          }
+        }
+      },
+      "consoleErrors": []
     },
     {
       "name": "MDN JavaScript Guide",
       "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Introduction",
-      "tokens": 1548,
-      "surfaceTypes": 531,
-      "lookupSuccess": 792,
-      "lookupSuccessPct": 51.16,
-      "lookupFail": 756,
-      "lookupFailPct": 48.84,
-      "lookupSurfaceTypes": 221,
-      "lightEmptyState": 792,
-      "actualInteractiveSpans": 792,
-      "lightAfterFixed50AllKnown": 750,
-      "lightPctOfLookupAfterFixed50": 94.70
+      "title": "Introduction - JavaScript | MDN",
+      "stats": {
+        "tokens": 1548,
+        "tokenTypes": 531,
+        "lookupSuccess": 792,
+        "lookupUnresolved": 756,
+        "lookupSuccessPct": 51.16,
+        "lookupUnresolvedPct": 48.84,
+        "lookupSurfaceTypes": 221,
+        "lookupSurfaceTypePct": 41.62,
+        "lookupWordKeyTypes": 194,
+        "clear": {
+          "known": 0,
+          "learning": 0,
+          "noExplicit": 792,
+          "lookupUnresolved": 756,
+          "displayNoneKnown": 0,
+          "light": 792,
+          "strong": 0,
+          "interactive": 792,
+          "lightPctAll": 51.16,
+          "interactivePctAll": 51.16
+        },
+        "afterFixed50AllKnown": {
+          "known": 42,
+          "learning": 0,
+          "noExplicit": 750,
+          "lookupUnresolved": 756,
+          "displayNoneKnown": 42,
+          "light": 750,
+          "strong": 0,
+          "interactive": 750,
+          "lightPctLookup": 94.7,
+          "testedOverlapTokenCount": 42,
+          "testedOverlapTypeCount": 12
+        },
+        "actualDom": {
+          "spans": 792,
+          "light": 792,
+          "strong": 0,
+          "noneWrapped": 0,
+          "perf": {
+            "totalScanMs": 211.8,
+            "maxBatchMs": 0.8,
+            "textNodesScanned": 146,
+            "wordsAnnotated": 792,
+            "domNodesAdded": 1648,
+            "domNodesRemoved": 111,
+            "netNodes": 1537,
+            "heightDeltaPx": 58,
+            "layoutShiftScore": 0.0059,
+            "layoutShiftSupported": true,
+            "batches": 17
+          }
+        }
+      },
+      "consoleErrors": []
     },
     {
-      "name": "Wikipedia Artificial intelligence",
+      "name": "Wikipedia AI",
       "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
-      "tokens": 27740,
-      "surfaceTypes": 5856,
-      "lookupSuccess": 12144,
-      "lookupSuccessPct": 43.78,
-      "lookupFail": 15596,
-      "lookupFailPct": 56.22,
-      "lookupSurfaceTypes": 1080,
-      "lightEmptyState": 12144,
-      "actualInteractiveSpansAtSnapshot": 8439,
-      "lightAfterFixed50AllKnown": 11733,
-      "lightPctOfLookupAfterFixed50": 96.62,
-      "note": "Dynamic page snapshot differs from strategy count; observer does not watch characterData and page continued changing."
+      "title": "Artificial intelligence - Wikipedia",
+      "stats": {
+        "tokens": 27740,
+        "tokenTypes": 5856,
+        "lookupSuccess": 12144,
+        "lookupUnresolved": 15596,
+        "lookupSuccessPct": 43.78,
+        "lookupUnresolvedPct": 56.22,
+        "lookupSurfaceTypes": 1080,
+        "lookupSurfaceTypePct": 18.44,
+        "lookupWordKeyTypes": 730,
+        "clear": {
+          "known": 0,
+          "learning": 0,
+          "noExplicit": 12144,
+          "lookupUnresolved": 15596,
+          "displayNoneKnown": 0,
+          "light": 12144,
+          "strong": 0,
+          "interactive": 12144,
+          "lightPctAll": 43.78,
+          "interactivePctAll": 43.78
+        },
+        "afterFixed50AllKnown": {
+          "known": 411,
+          "learning": 0,
+          "noExplicit": 11733,
+          "lookupUnresolved": 15596,
+          "displayNoneKnown": 411,
+          "light": 11733,
+          "strong": 0,
+          "interactive": 11733,
+          "lightPctLookup": 96.62,
+          "testedOverlapTokenCount": 411,
+          "testedOverlapTypeCount": 35
+        },
+        "actualDom": {
+          "spans": 8984,
+          "light": 8984,
+          "strong": 0,
+          "noneWrapped": 0,
+          "perf": {
+            "totalScanMs": 54.2,
+            "maxBatchMs": 1.6,
+            "textNodesScanned": 4855,
+            "wordsAnnotated": 8338,
+            "domNodesAdded": 17704,
+            "domNodesRemoved": 1677,
+            "netNodes": 16027,
+            "heightDeltaPx": 0,
+            "layoutShiftScore": 0.0012,
+            "layoutShiftSupported": true,
+            "batches": 366
+          }
+        }
+      },
+      "consoleErrors": []
     }
-  ],
-  "packLevelConclusion": {
-    "coreWordKeys": 1000,
-    "explicitAfterInitialTest": 50,
-    "unknownAfterInitialTest": 950,
-    "unknownPct": 95
-  }
+  ]
 }

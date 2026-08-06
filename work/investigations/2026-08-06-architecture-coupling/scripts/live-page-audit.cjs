@@ -7,13 +7,31 @@ const ROOT=path.resolve(__dirname,'../../../..');
 const puppeteer = require(path.join(ROOT,'node_modules/puppeteer-core'));
 const DIST=path.join(ROOT,'dist');
 function findChromeForTesting(){
+ const override=process.env.CHROME_FOR_TESTING;
+ if(override){
+  if(fs.existsSync(override))return override;
+  throw new Error(`CHROME_FOR_TESTING does not exist: ${override}`);
+ }
  const chromeRoot=path.join(ROOT,'.cache','puppeteer','chrome');
  if(!fs.existsSync(chromeRoot))throw new Error('Chrome for Testing not found; run npm run setup:e2e');
+ const relativeCandidates=process.platform==='darwin'
+  ? (process.arch==='arm64'
+   ? ['chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing','chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing']
+   : ['chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'])
+  : process.platform==='linux'&&process.arch==='x64'
+   ? ['chrome-linux64/chrome','chrome-linux/chrome']
+   : process.platform==='win32'&&process.arch==='x64'
+    ? ['chrome-win64/chrome.exe','chrome-win32/chrome.exe']
+    : process.platform==='win32'&&process.arch==='ia32'
+     ? ['chrome-win32/chrome.exe']
+     : [];
  for(const name of fs.readdirSync(chromeRoot).sort().reverse()){
-  const executable=path.join(chromeRoot,name,'chrome-mac-arm64','Google Chrome for Testing.app','Contents','MacOS','Google Chrome for Testing');
-  if(fs.existsSync(executable))return executable;
+  for(const relative of relativeCandidates){
+   const executable=path.join(chromeRoot,name,relative);
+   if(fs.existsSync(executable))return executable;
+  }
  }
- throw new Error('Chrome for Testing executable not found');
+ throw new Error(`Chrome for Testing executable not found for ${process.platform}/${process.arch}; set CHROME_FOR_TESTING`);
 }
 const CHROME=findChromeForTesting();
 const core=JSON.parse(fs.readFileSync(path.join(DIST,'data/dict-core.json')));
@@ -36,21 +54,25 @@ async function launch(){
  const ws=await new Promise((resolve,reject)=>{const t=setTimeout(()=>reject(new Error('devtools timeout')),15000);cp.stderr.on('data',d=>{const m=String(d).match(/DevTools listening on (ws:\/\/\S+)/);if(m){clearTimeout(t);resolve(m[1])}});cp.on('exit',c=>reject(new Error('chrome exit '+c)))});
  return {cp,browser:await puppeteer.connect({browserWSEndpoint:ws,protocolTimeout:240000}),profile};
 }
+async function stopChrome(cp){
+ if(cp.exitCode!==null)return;
+ await new Promise(resolve=>{const t=setTimeout(resolve,5000);cp.once('exit',()=>{clearTimeout(t);resolve()});cp.kill('SIGTERM')});
+}
 function summarize(texts,actual){
  const tokens=[]; for(const text of texts){for(const raw of text.match(WORD_RE)||[]){const w=normalize(raw);if(w)tokens.push(w)}}
  const keys=tokens.map(lookup); const success=keys.filter(Boolean); const fail=keys.length-success.length;
  const tokenTypes=new Set(tokens), successSurfaceTypes=new Set(tokens.filter(t=>lookup(t))), successTypes=new Set(success);
  const afterUnknown=success.filter(k=>!tested.has(k)); const afterKnown=success.filter(k=>tested.has(k));
- return {tokens:tokens.length,tokenTypes:tokenTypes.size,lookupSuccess:success.length,lookupFail:fail,lookupSuccessPct:+(100*success.length/tokens.length).toFixed(2),lookupFailPct:+(100*fail/tokens.length).toFixed(2),lookupSurfaceTypes:successSurfaceTypes.size,lookupSurfaceTypePct:+(100*successSurfaceTypes.size/tokenTypes.size).toFixed(2),lookupWordKeyTypes:successTypes.size,clear:{known:0,learning:0,noExplicit:success.length,light:success.length,strong:0,none:fail,interactive:success.length,lightPctAll:+(100*success.length/tokens.length).toFixed(2),interactivePctAll:+(100*success.length/tokens.length).toFixed(2)},afterFixed50AllKnown:{known:afterKnown.length,learning:0,noExplicit:afterUnknown.length,light:afterUnknown.length,strong:0,none:fail+afterKnown.length,interactive:afterUnknown.length,lightPctLookup:+(100*afterUnknown.length/success.length).toFixed(2),testedOverlapTokenCount:afterKnown.length,testedOverlapTypeCount:new Set(afterKnown).size},actualDom:actual};
+ return {tokens:tokens.length,tokenTypes:tokenTypes.size,lookupSuccess:success.length,lookupUnresolved:fail,lookupSuccessPct:+(100*success.length/tokens.length).toFixed(2),lookupUnresolvedPct:+(100*fail/tokens.length).toFixed(2),lookupSurfaceTypes:successSurfaceTypes.size,lookupSurfaceTypePct:+(100*successSurfaceTypes.size/tokenTypes.size).toFixed(2),lookupWordKeyTypes:successTypes.size,clear:{known:0,learning:0,noExplicit:success.length,lookupUnresolved:fail,displayNoneKnown:0,light:success.length,strong:0,interactive:success.length,lightPctAll:+(100*success.length/tokens.length).toFixed(2),interactivePctAll:+(100*success.length/tokens.length).toFixed(2)},afterFixed50AllKnown:{known:afterKnown.length,learning:0,noExplicit:afterUnknown.length,lookupUnresolved:fail,displayNoneKnown:afterKnown.length,light:afterUnknown.length,strong:0,interactive:afterUnknown.length,lightPctLookup:+(100*afterUnknown.length/success.length).toFixed(2),testedOverlapTokenCount:afterKnown.length,testedOverlapTypeCount:new Set(afterKnown).size},actualDom:actual};
 }
 (async()=>{
- const {cp,browser}=await launch();
+ const {cp,browser,profile}=await launch();
  const pages=[
   ['GitHub repository','https://github.com/FlapPearLabs/adaptive-vocab-reader'],
   ['MDN JavaScript Guide','https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Introduction'],
   ['Wikipedia AI','https://en.wikipedia.org/wiki/Artificial_intelligence'],
  ];
- const out={chrome:await browser.version(),seed,testedWordKeys:tested.size,pages:[]};
+ const out={capturedAt:new Date().toISOString(),chrome:await browser.version(),platform:{os:process.platform,arch:process.arch},state:'empty isolated profile',seed,testedWordKeys:tested.size,pages:[]};
  try{
   for(const [name,url] of pages){
    const p=await browser.newPage(); await p.setViewport({width:1280,height:800});
@@ -70,5 +92,5 @@ function summarize(texts,actual){
    await p.close();
   }
   console.log(JSON.stringify(out,null,2));
- } finally {browser.disconnect();cp.kill('SIGTERM')}
+ } finally {browser.disconnect();await stopChrome(cp);fs.rmSync(profile,{recursive:true,force:true})}
 })().catch(e=>{console.error(e);process.exitCode=1});

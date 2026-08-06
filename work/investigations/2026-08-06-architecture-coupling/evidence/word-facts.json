@@ -1,22 +1,170 @@
 {
-  "mainSha": "011e069f0135d48822be7cf2935b8cbf84c2f574",
-  "coreCount": 1000,
-  "formsCount": 1505,
-  "bandsCount": 1000,
+  "counts": {
+    "core": 1000,
+    "forms": 1505,
+    "bands": 1000
+  },
   "facts": [
-    {"surfaceForm":"evaluating","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
-    {"surfaceForm":"improving","scanner":true,"core":false,"forms":"improve","wordKey":"improve","decision":"light","wrapped":true,"rootCause":"F"},
-    {"surfaceForm":"building","scanner":true,"core":true,"forms":null,"wordKey":"building","decision":"light","wrapped":true,"rootCause":"F"},
-    {"surfaceForm":"collecting","scanner":true,"core":false,"forms":"collect","wordKey":"collect","decision":"light","wrapped":true,"rootCause":"F"},
-    {"surfaceForm":"requires","scanner":true,"core":false,"forms":"require","wordKey":"require","decision":"light","wrapped":true,"rootCause":"F"},
-    {"surfaceForm":"published","scanner":true,"core":false,"forms":"publish","wordKey":"publish","decision":"light","wrapped":true,"rootCause":"F"},
-    {"surfaceForm":"environments","scanner":true,"core":false,"forms":"environment","wordKey":"environment","decision":"light","wrapped":true,"rootCause":"F"},
-    {"surfaceForm":"reinforcement","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
-    {"surfaceForm":"inference","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
-    {"surfaceForm":"framework","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
-    {"surfaceForm":"storing","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
-    {"surfaceForm":"drafted","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
-    {"surfaceForm":"reaches","scanner":true,"core":false,"forms":null,"wordKey":null,"decision":null,"wrapped":false,"rootCause":"A"},
-    {"surfaceForm":"customer","scanner":true,"core":true,"forms":null,"wordKey":"customer","decision":"light","wrapped":true,"rootCause":"F"}
+    {
+      "surfaceForm": "evaluating",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": null,
+      "lookup": null
+    },
+    {
+      "surfaceForm": "improving",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": "improve",
+      "lookup": {
+        "kind": "forms",
+        "wordKey": "improve",
+        "entry": [
+          "im'pru:v",
+          "vt./vi.",
+          "改良, 提高...的价值, 改善, 利用；变得更好, 增加"
+        ],
+        "band": 6
+      }
+    },
+    {
+      "surfaceForm": "building",
+      "scannerExtracted": true,
+      "coreHit": true,
+      "formsTarget": null,
+      "lookup": {
+        "kind": "core",
+        "wordKey": "building",
+        "entry": [
+          "'bildiŋ",
+          "n.",
+          "建筑物, 建筑；[法] 营造, 建筑, 建筑物"
+        ],
+        "band": 3
+      }
+    },
+    {
+      "surfaceForm": "collecting",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": "collect",
+      "lookup": {
+        "kind": "forms",
+        "wordKey": "collect",
+        "entry": [
+          "kә'lekt",
+          "v./a./adv.",
+          "收集, 聚集, 集中, 搜集；由收到者付款的；由收到者付款地"
+        ],
+        "band": 8
+      }
+    },
+    {
+      "surfaceForm": "requires",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": "require",
+      "lookup": {
+        "kind": "forms",
+        "wordKey": "require",
+        "entry": [
+          "ri'kwaiә",
+          "vt.",
+          "需要, 命令, 要求；[法] 需要, 要求, 命令"
+        ],
+        "band": 2
+      }
+    },
+    {
+      "surfaceForm": "published",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": "publish",
+      "lookup": {
+        "kind": "forms",
+        "wordKey": "publish",
+        "entry": [
+          "'pʌbliʃ",
+          "vt./vi.",
+          "出版, 发行, 公开, 发表, 宣传, 公布；出版, 发行"
+        ],
+        "band": 7
+      }
+    },
+    {
+      "surfaceForm": "environments",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": "environment",
+      "lookup": {
+        "kind": "forms",
+        "wordKey": "environment",
+        "entry": [
+          "in'vairәnmәnt",
+          "n.",
+          "环境, 外界, 围绕；[计] 环境"
+        ],
+        "band": 5
+      }
+    },
+    {
+      "surfaceForm": "reinforcement",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": null,
+      "lookup": null
+    },
+    {
+      "surfaceForm": "inference",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": null,
+      "lookup": null
+    },
+    {
+      "surfaceForm": "framework",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": null,
+      "lookup": null
+    },
+    {
+      "surfaceForm": "storing",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": null,
+      "lookup": null
+    },
+    {
+      "surfaceForm": "drafted",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": null,
+      "lookup": null
+    },
+    {
+      "surfaceForm": "reaches",
+      "scannerExtracted": true,
+      "coreHit": false,
+      "formsTarget": null,
+      "lookup": null
+    },
+    {
+      "surfaceForm": "customer",
+      "scannerExtracted": true,
+      "coreHit": true,
+      "formsTarget": null,
+      "lookup": {
+        "kind": "core",
+        "wordKey": "customer",
+        "entry": [
+          "'kʌstәmә",
+          "n.",
+          "消费者；[化] 顾客"
+        ],
+        "band": 7
+      }
+    }
   ]
 }

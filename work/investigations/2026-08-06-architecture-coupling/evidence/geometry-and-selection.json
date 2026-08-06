@@ -1,24 +1,433 @@
 {
-  "capturedOn": "2026-08-06",
-  "chrome": "151.0.7922.47",
-  "geometry": {
-    "nearSticky": {"word":{"top":75,"bottom":92},"tooltip":{"top":67,"bottom":151.75},"targetOverlapPx2":695.41,"stickyBottom":72,"overlapsSticky":true},
-    "normal": {"word":{"top":235,"bottom":252},"tooltip":{"top":227,"bottom":311.75},"targetOverlapPx2":695.41},
-    "right": {"word":{"left":1211.5,"right":1280},"tooltip":{"left":1196.34375,"right":1280,"height":193.875},"targetOverlapPx2":1164.5},
-    "left": {"word":{"left":0,"top":595},"tooltip":{"left":0,"top":587},"targetOverlapPx2":695.41},
-    "bottom": {"word":{"top":779,"bottom":796},"tooltip":{"top":672.0625,"bottom":775},"targetOverlapPx2":0},
-    "afterScroll": {"scrollY":1184,"word":{"top":391,"bottom":408},"tooltip":{"top":383,"bottom":467.75},"targetOverlapPx2":695.41},
-    "github": {"wordText":"and","word":{"top":254,"bottom":292},"tooltip":{"top":246,"bottom":330.75},"targetOverlapPx2":2081.09}
+  "capturedAt": "2026-08-06T03:32:41.097Z",
+  "chrome": "Chrome/151.0.7922.47",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64"
   },
-  "realMouseSelection": {
-    "selected": " improving ",
-    "action": null,
-    "visible": false,
-    "cause": "mouseup creates the action, then the same gesture's document click hides it"
+  "fixture": {
+    "url": "https://localhost:18924/",
+    "page": {
+      "sampleFacts": [
+        {
+          "surfaceForm": "evaluating",
+          "wrapped": false,
+          "className": null,
+          "wordKey": null,
+          "hoverable": false,
+          "clickMenuReachable": false
+        },
+        {
+          "surfaceForm": "improving",
+          "wrapped": true,
+          "className": "avr-word avr-light",
+          "wordKey": "improve",
+          "hoverable": true,
+          "clickMenuReachable": true
+        },
+        {
+          "surfaceForm": "building",
+          "wrapped": true,
+          "className": "avr-word avr-light",
+          "wordKey": "building",
+          "hoverable": true,
+          "clickMenuReachable": true
+        },
+        {
+          "surfaceForm": "collecting",
+          "wrapped": true,
+          "className": "avr-word avr-light",
+          "wordKey": "collect",
+          "hoverable": true,
+          "clickMenuReachable": true
+        },
+        {
+          "surfaceForm": "requires",
+          "wrapped": true,
+          "className": "avr-word avr-light",
+          "wordKey": "require",
+          "hoverable": true,
+          "clickMenuReachable": true
+        },
+        {
+          "surfaceForm": "published",
+          "wrapped": true,
+          "className": "avr-word avr-light",
+          "wordKey": "publish",
+          "hoverable": true,
+          "clickMenuReachable": true
+        },
+        {
+          "surfaceForm": "environments",
+          "wrapped": true,
+          "className": "avr-word avr-light",
+          "wordKey": "environment",
+          "hoverable": true,
+          "clickMenuReachable": true
+        },
+        {
+          "surfaceForm": "reinforcement",
+          "wrapped": false,
+          "className": null,
+          "wordKey": null,
+          "hoverable": false,
+          "clickMenuReachable": false
+        },
+        {
+          "surfaceForm": "inference",
+          "wrapped": false,
+          "className": null,
+          "wordKey": null,
+          "hoverable": false,
+          "clickMenuReachable": false
+        },
+        {
+          "surfaceForm": "framework",
+          "wrapped": false,
+          "className": null,
+          "wordKey": null,
+          "hoverable": false,
+          "clickMenuReachable": false
+        },
+        {
+          "surfaceForm": "storing",
+          "wrapped": false,
+          "className": null,
+          "wordKey": null,
+          "hoverable": false,
+          "clickMenuReachable": false
+        },
+        {
+          "surfaceForm": "drafted",
+          "wrapped": false,
+          "className": null,
+          "wordKey": null,
+          "hoverable": false,
+          "clickMenuReachable": false
+        },
+        {
+          "surfaceForm": "reaches",
+          "wrapped": false,
+          "className": null,
+          "wordKey": null,
+          "hoverable": false,
+          "clickMenuReachable": false
+        },
+        {
+          "surfaceForm": "customer",
+          "wrapped": true,
+          "className": "avr-word avr-light",
+          "wordKey": "customer",
+          "hoverable": true,
+          "clickMenuReachable": true
+        }
+      ],
+      "initialState": {},
+      "geometry": {
+        "nearSticky": {
+          "word": {
+            "left": 500,
+            "top": 75,
+            "right": 540.90625,
+            "bottom": 92,
+            "width": 40.90625,
+            "height": 17
+          },
+          "tooltip": {
+            "left": 500,
+            "top": 67,
+            "right": 675.296875,
+            "bottom": 151.75,
+            "width": 175.296875,
+            "height": 84.75
+          },
+          "overlapTargetPx2": 695.41,
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "scrollY": 0,
+          "sticky": {
+            "top": 0,
+            "bottom": 72
+          },
+          "overlapsSticky": true
+        },
+        "normal": {
+          "word": {
+            "left": 193.4375,
+            "top": 235,
+            "right": 234.34375,
+            "bottom": 252,
+            "width": 40.90625,
+            "height": 17
+          },
+          "tooltip": {
+            "left": 193.4375,
+            "top": 227,
+            "right": 368.734375,
+            "bottom": 311.75,
+            "width": 175.296875,
+            "height": 84.75
+          },
+          "overlapTargetPx2": 695.41,
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "scrollY": 0,
+          "sticky": {
+            "top": 0,
+            "bottom": 72
+          },
+          "overlapsSticky": false
+        },
+        "right": {
+          "word": {
+            "left": 1211.5,
+            "top": 455,
+            "right": 1280,
+            "bottom": 472,
+            "width": 68.5,
+            "height": 17
+          },
+          "tooltip": {
+            "left": 1196.34375,
+            "top": 447,
+            "right": 1280,
+            "bottom": 640.875,
+            "width": 83.65625,
+            "height": 193.875
+          },
+          "overlapTargetPx2": 1164.5,
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "scrollY": 0,
+          "sticky": {
+            "top": 0,
+            "bottom": 72
+          },
+          "overlapsSticky": false
+        },
+        "left": {
+          "word": {
+            "left": 0,
+            "top": 595,
+            "right": 40.90625,
+            "bottom": 612,
+            "width": 40.90625,
+            "height": 17
+          },
+          "tooltip": {
+            "left": 0,
+            "top": 587,
+            "right": 175.296875,
+            "bottom": 671.75,
+            "width": 175.296875,
+            "height": 84.75
+          },
+          "overlapTargetPx2": 695.41,
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "scrollY": 0,
+          "sticky": {
+            "top": 0,
+            "bottom": 72
+          },
+          "overlapsSticky": false
+        },
+        "bottom": {
+          "word": {
+            "left": 300,
+            "top": 779,
+            "right": 368.5,
+            "bottom": 796,
+            "width": 68.5,
+            "height": 17
+          },
+          "tooltip": {
+            "left": 300,
+            "top": 672.0625,
+            "right": 600,
+            "bottom": 775,
+            "width": 300,
+            "height": 102.9375
+          },
+          "overlapTargetPx2": 0,
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "scrollY": 0,
+          "sticky": {
+            "top": 0,
+            "bottom": 72
+          },
+          "overlapsSticky": false
+        },
+        "scrolled": {
+          "word": {
+            "left": 200,
+            "top": 391,
+            "right": 240.90625,
+            "bottom": 408,
+            "width": 40.90625,
+            "height": 17
+          },
+          "tooltip": {
+            "left": 200,
+            "top": 383,
+            "right": 375.296875,
+            "bottom": 467.75,
+            "width": 175.296875,
+            "height": 84.75
+          },
+          "overlapTargetPx2": 695.41,
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          },
+          "scrollY": 1184,
+          "sticky": {
+            "top": 0,
+            "bottom": 72
+          },
+          "overlapsSticky": false
+        }
+      },
+      "realMouseSelection": {
+        "selected": " improving ",
+        "action": null,
+        "visible": false,
+        "eventTimeline": [
+          {
+            "sequence": 1,
+            "timeMs": 3969.1,
+            "kind": "mousedown:capture",
+            "eventPhase": 1,
+            "target": "p#samples",
+            "selected": "",
+            "actionWord": null,
+            "actionPresent": false
+          },
+          {
+            "sequence": 2,
+            "timeMs": 3969.2,
+            "kind": "mousedown:bubble",
+            "eventPhase": 3,
+            "target": "p#samples",
+            "selected": "",
+            "actionWord": null,
+            "actionPresent": false
+          },
+          {
+            "sequence": 3,
+            "timeMs": 4367.7,
+            "kind": "mouseup:capture",
+            "eventPhase": 1,
+            "target": "p#samples",
+            "selected": " improving ",
+            "actionWord": null,
+            "actionPresent": false
+          },
+          {
+            "sequence": 4,
+            "timeMs": 4368.8,
+            "kind": "selectionAction:inserted",
+            "eventPhase": null,
+            "target": null,
+            "selected": " improving ",
+            "actionWord": "improve",
+            "actionPresent": true
+          },
+          {
+            "sequence": 5,
+            "timeMs": 4368.8,
+            "kind": "mouseup:bubble",
+            "eventPhase": 3,
+            "target": "p#samples",
+            "selected": " improving ",
+            "actionWord": "improve",
+            "actionPresent": true
+          },
+          {
+            "sequence": 6,
+            "timeMs": 4368.9,
+            "kind": "click:capture",
+            "eventPhase": 1,
+            "target": "p#samples",
+            "selected": " improving ",
+            "actionWord": "improve",
+            "actionPresent": true
+          },
+          {
+            "sequence": 7,
+            "timeMs": 4369,
+            "kind": "selectionAction:removed",
+            "eventPhase": null,
+            "target": null,
+            "selected": " improving ",
+            "actionWord": null,
+            "actionPresent": false
+          },
+          {
+            "sequence": 8,
+            "timeMs": 4369.1,
+            "kind": "click:bubble",
+            "eventPhase": 3,
+            "target": "p#samples",
+            "selected": " improving ",
+            "actionWord": null,
+            "actionPresent": false
+          }
+        ]
+      },
+      "knownAfterAction": {
+        "wrapped": false
+      },
+      "finalState": {
+        "building": {
+          "source": "manual",
+          "status": "known",
+          "updatedAt": 1785987166109,
+          "version": 0
+        }
+      }
+    }
   },
-  "knownTransition": {
-    "surfaceForm": "building",
-    "before": {"wordKey":"building","className":"avr-word avr-light"},
-    "after": {"state":"known","source":"manual","wrapped":false}
+  "github": {
+    "url": "https://github.com/FlapPearLabs/adaptive-vocab-reader",
+    "title": "GitHub - FlapPearLabs/adaptive-vocab-reader: Local-first adaptive vocabulary reading assistant · GitHub",
+    "targetSurfaceForm": "Public",
+    "targetWordKey": "public",
+    "targetSelection": "first visible main .avr-word in DOM order",
+    "word": {
+      "left": 415.828125,
+      "top": 95,
+      "right": 451.453125,
+      "bottom": 110,
+      "width": 35.625,
+      "height": 15
+    },
+    "tooltip": {
+      "left": 415.828125,
+      "top": 87,
+      "right": 686.28125,
+      "bottom": 171.75,
+      "width": 270.453125,
+      "height": 84.75
+    },
+    "overlapTargetPx2": 534.38,
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "scrollY": 0,
+    "sticky": null,
+    "overlapsSticky": null
   }
 }

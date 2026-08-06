@@ -142,13 +142,23 @@
 
 ## 6. COVERAGE_AND_HINT_DENSITY
 
-统计使用真实网页、生产 tokenizer/lookup/状态规则和空隔离 profile。type 为归一化 surface type。“固定 50 题后”采用十频段各 5 个 wordKey 的固定分析 seed，并假定全部答对，从而得到最有利于减少灰线的情况。
+统计使用真实网页、生产 tokenizer/lookup/状态规则和空隔离 profile。type 为归一化 surface type。`lookupUnresolved` 表示 `dictionary.lookup` 返回 null、生产 scanner 在进入展示策略前就跳过；`displayNoneKnown` 只表示 lookup 成功后因状态为 known 得到 `decision=none`。两者不是同一类。“固定 50 题后”采用十频段各 5 个 wordKey 的固定分析 seed，并假定全部答对，从而得到最有利于减少灰线的情况。
 
-| 页面样本 | token / type | lookup 成功 | lookup 失败 | 空状态 light token / type | strong | none | 实际 `.avr-word` | 50 题后命中词仍 light |
+空 profile 的规则统计与真实 DOM 快照：
+
+| 页面样本 | token / type | lookup 成功 | lookupUnresolved | light token / type | strong | displayNoneKnown | 规则上可交互 | 实际 `.avr-word` |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| GitHub 仓库页 | 323 / 157 | 69（21.36%） | 254（78.64%） | 69（21.36%）/42（26.75%） | 0 | 254 | 69（21.36%） | 66/69（95.65%） |
-| MDN JavaScript Guide | 1,548 / 531 | 792（51.16%） | 756（48.84%） | 792（51.16%）/221（41.62%） | 0 | 756 | 792（51.16%） | 750/792（94.70%） |
-| Wikipedia AI | 27,740 / 5,856 | 12,144（43.78%） | 15,596（56.22%） | 12,144（43.78%）/1,080（18.44%） | 0 | 15,596 | 快照时 8,439（30.42%） | 11,733/12,144（96.62%） |
+| GitHub 仓库页 | 323 / 157 | 69（21.36%） | 254（78.64%） | 69（21.36%）/42（26.75%） | 0 | 0 | 69 | 69（21.36%） |
+| MDN JavaScript Guide | 1,548 / 531 | 792（51.16%） | 756（48.84%） | 792（51.16%）/221（41.62%） | 0 | 0 | 792 | 792（51.16%） |
+| Wikipedia AI | 27,740 / 5,856 | 12,144（43.78%） | 15,596（56.22%） | 12,144（43.78%）/1,080（18.44%） | 0 | 0 | 12,144 | 快照时 8,984（32.39%） |
+
+固定 50 题全部答对后的规则计算（不是第二次 DOM 快照）：
+
+| 页面样本 | lookupUnresolved | light | strong | displayNoneKnown | 规则上可交互 | light / lookup 成功 |
+|---|---:|---:|---:|---:|---:|---:|
+| GitHub 仓库页 | 254 | 66 | 0 | 3 | 66 | 66/69（95.65%） |
+| MDN JavaScript Guide | 756 | 750 | 0 | 42 | 750 | 750/792（94.70%） |
+| Wikipedia AI | 15,596 | 11,733 | 0 | 411 | 11,733 | 11,733/12,144（96.62%） |
 
 Wikipedia 的规则计算值与快照 DOM 数不同：页面持续动态更新，当前 observer 不监听 `characterData`，且部分动态文本在快照时尚未重新包装。这不改变“lookup 成功且无状态必定 light”的策略事实，但说明真实 SPA 的交互覆盖还受 DOM 生命周期影响。
 
@@ -202,7 +212,9 @@ Wikipedia 的规则计算值与快照 DOM 数不同：页面持续动态更新�
 | 底边界 | 翻到目标上方，目标重叠为 0 |
 | 页面滚动后 | 仍覆盖目标 `695.41 px²` |
 | sticky 附近 | 目标 top=75，tooltip top=67；既覆盖目标，也侵入 bottom=72 的 sticky header |
-| GitHub 实页 | 目标 top=254/bottom=292；tooltip top=246/bottom=330.75；重叠 `2081.09 px²` |
+| GitHub 实页 | viewport 1280×800；首个可见 `main .avr-word` 为 `Public`（wordKey=`public`）；目标 top=95/bottom=110；tooltip top=87/bottom=171.75；重叠 `534.38 px²` |
+
+GitHub 行由同一提交内的脚本直接访问固定公开 URL `https://github.com/FlapPearLabs/adaptive-vocab-reader` 生成。机器证据同时记录最终 URL、页面标题、目标 surface/wordKey、目标选择规则（`main` 内 DOM 顺序首个可见 `.avr-word`）、viewport 和完整矩形。公开页面会变化，因此目标词和数值是 `2026-08-06T03:32:41.097Z` 的可重跑快照，不被解释为稳定基准。
 
 结论：主因是定位算法及其与 fixed shrink-to-fit 的交互，不是普通页面层叠上下文。tooltip 使用 `z-index:2147483647`，通常不会被页面压住，反而确保它覆盖正文。
 
@@ -216,12 +228,18 @@ Wikipedia 的规则计算值与快照 DOM 数不同：页面持续动态更新�
 {"selected":" improving ","action":null,"visible":false}
 ```
 
-事件链：
+fixture 在不修改生产监听器、不单独人工派发 `mouseup` 的前提下，预先安装只读捕获/冒泡监听和 `MutationObserver`。机器证据记录到以下实际顺序：
 
-1. `mouseup` 读取 Selection，lookup 到 `improve`，创建 `.avr-selection-action`；
-2. 同一手势随后产生的 document `click` target 仍是正文词；
-3. click handler 发现 target 不是 `.avr-selection-action`，立即调用 `hideSelectionAction()`；
-4. 用户看不到按钮，而合成 mouseup E2E 会通过。
+| 序号 | 事件/变更 | target | Selection | action |
+|---:|---|---|---|---|
+| 3 | `mouseup:capture` | `p#samples` | ` improving ` | 不存在 |
+| 4 | `selectionAction:inserted` | — | ` improving ` | `improve`，存在 |
+| 5 | `mouseup:bubble` | `p#samples` | ` improving ` | `improve`，存在 |
+| 6 | `click:capture` | `p#samples` | ` improving ` | `improve`，存在 |
+| 7 | `selectionAction:removed` | — | ` improving ` | 不存在 |
+| 8 | `click:bubble` | `p#samples` | ` improving ` | 不存在 |
+
+这直接证明：生产 `mouseup` 路径在该真实拖拽中创建了按钮；同一手势随后对正文产生 `click`；按钮在该 click 的传播期间被移除。结合 `pageScanner.ts` 的 document click handler（非 `.avr-selection-action` target 调用 `hideSelectionAction()`），可以归因于同一手势的后续 click，而不是只凭最终 DOM 状态推断。合成 `Range + mouseup` 的现有 E2E 不包含后续 click，所以会通过。
 
 ## 11. OPTION_MATRIX
 
@@ -271,13 +289,15 @@ node work/investigations/2026-08-06-architecture-coupling/scripts/live-page-audi
 node work/investigations/2026-08-06-architecture-coupling/scripts/geometry-and-selection-audit.cjs
 ```
 
+浏览器脚本优先读取 `CHROME_FOR_TESTING`，否则按当前平台从 `.cache/puppeteer/chrome/` 查找标准 Chrome for Testing 路径。本轮实际验证环境为 Apple Silicon macOS、Node `v25.8.0`、Chrome for Testing `151.0.7922.47` 和 Homebrew OpenSSL；几何脚本需要系统 `openssl`，两个实页采集均需要公开网络。其他平台的候选发现逻辑未在本轮实机验证，完整要求和覆盖入口见复现包 README。
+
 ### 13.2 验证结果
 
 - TypeScript：通过。
 - 单元/集成：16 个文件、267 项通过。
 - Build：通过。
 - 现有综合 E2E：全部通过。
-- 真实 mouse drag：Selection 产生，但 action 被后续 click 隐藏。
+- 真实 mouse drag：Selection 产生；时间线记录 action 在 mouseup 路径插入，并在同一手势后续 click 传播期间移除。
 - 所有 profile 为隔离临时 profile；未读取或修改真人 Chrome profile。
 - 原始机器可读摘要见 [`work/investigations/2026-08-06-architecture-coupling/evidence/`](../work/investigations/2026-08-06-architecture-coupling/evidence/)。
 
