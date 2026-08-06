@@ -12,6 +12,6 @@
 8. [个人词汇掌握预测与主动测试算法研究](../work/research/2026-07-22-个人词汇掌握预测与主动测试算法研究.md)：算法候选、数据前提和研究边界。
 9. [Beta/PAV 策略原型结果](../work/prototypes/beta_pav_policy_prototype/RESULTS-2026-07-22.md)：可丢弃原型的阈值、PAV 和状态机证据；旧日测配比已被校准轮定位取代。
 10. [kaikki-tooltip-cleaner Skill](./kaikki-tooltip-cleaner/SKILL.md)：独立保留的 Skill 资产；不属于当前 V0.1 流程。
-11. [查询、交互、主动提示与测评词包解耦规格（DRAFT/待审）](../docs/specs/2026-08-06-V0.1-查询交互提示与测评词包解耦规格.md)：2026-08-06 唯一待审 Spec；未批准、未实现，不授权开发。
+11. [查询、交互、主动提示与测评词包解耦规格（DRAFT/待审）](../docs/specs/2026-08-06-V0.1-查询交互提示与测评词包解耦规格.md)：2026-08-06 唯一待审 Spec；未批准，完整解耦目标未实现（部分既有行为已实现或部分实现），不授权开发。
 
 施工必须同时读取 `RULES.md`、相关 `docs/specs/` 与 GitHub ticket；不得以 ticket 的简短描述覆盖完整规格。
