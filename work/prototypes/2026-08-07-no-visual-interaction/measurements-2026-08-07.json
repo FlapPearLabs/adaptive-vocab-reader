@@ -1,0 +1,975 @@
+{
+  "generatedAt": "2026-08-07T06:04:24.828Z",
+  "chrome": "Chrome/151.0.7922.47",
+  "dictionary": {
+    "entries": 1000,
+    "forms": 1505
+  },
+  "routes": [
+    {
+      "route": "wrap",
+      "baseline": {
+        "nodes": 24,
+        "scrollHeight": 11678,
+        "shifts": 0
+      },
+      "annotation": {
+        "nodes": 3912,
+        "scrollHeight": 11678,
+        "shifts": 0,
+        "metrics": {
+          "route": "wrap",
+          "initialScanMs": 4,
+          "mutationScanMs": 0,
+          "mutationBatches": 1,
+          "wrappedTokens": 3891,
+          "pointerResolutions": 0
+        }
+      },
+      "after": {
+        "nodes": 3916,
+        "scrollHeight": 11709,
+        "shifts": 0,
+        "metrics": {
+          "route": "wrap",
+          "initialScanMs": 4,
+          "mutationScanMs": 0.5999999046325684,
+          "mutationBatches": 32,
+          "wrappedTokens": 3898,
+          "pointerResolutions": 0
+        },
+        "events": [
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "action",
+            "surface": "action"
+          },
+          {
+            "type": "click",
+            "wordKey": "action",
+            "surface": "action"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "activity",
+            "surface": "Activity"
+          },
+          {
+            "type": "click",
+            "wordKey": "activity",
+            "surface": "Activity"
+          }
+        ],
+        "geometry": {
+          "target": {
+            "x": 275,
+            "y": 373.21875,
+            "width": 59.5,
+            "height": 21,
+            "top": 373.21875,
+            "right": 334.5,
+            "bottom": 394.21875,
+            "left": 275
+          },
+          "tooltip": {
+            "x": 275,
+            "y": 279.21875,
+            "width": 211.453125,
+            "height": 86.1875,
+            "top": 279.21875,
+            "right": 486.453125,
+            "bottom": 365.40625,
+            "left": 275
+          },
+          "overlap": 0,
+          "headerBottom": 56
+        }
+      },
+      "cases": {
+        "normal-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 179.59375,
+                "width": 49.578125,
+                "height": 21,
+                "top": 179.59375,
+                "right": 324.578125,
+                "bottom": 200.59375,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 85.59375,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 85.59375,
+                "right": 453.09375,
+                "bottom": 171.78125,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "punctuation-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 332.421875,
+                "y": 258.1875,
+                "width": 49.390625,
+                "height": 21,
+                "top": 258.1875,
+                "right": 381.8125,
+                "bottom": 279.1875,
+                "left": 332.421875
+              },
+              "tooltip": {
+                "x": 332.421875,
+                "y": 146.1875,
+                "width": 260,
+                "height": 103.734375,
+                "top": 146.1875,
+                "right": 592.421875,
+                "bottom": 249.921875,
+                "left": 332.421875
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "action"
+          },
+          "feedback": "已反馈不会：action"
+        },
+        "zoom-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 359.375,
+                "y": 342.5625,
+                "width": 54.484375,
+                "height": 24,
+                "top": 342.5625,
+                "right": 413.859375,
+                "bottom": 366.5625,
+                "left": 359.375
+              },
+              "tooltip": {
+                "x": 359.375,
+                "y": 248.5625,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 248.5625,
+                "right": 537.46875,
+                "bottom": 334.75,
+                "left": 359.375
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "transform-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 391.43939208984375,
+                "y": 444.3637390136719,
+                "width": 51.16497802734375,
+                "height": 22.680023193359375,
+                "top": 444.3637390136719,
+                "right": 442.6043701171875,
+                "bottom": 467.04376220703125,
+                "left": 391.43939208984375
+              },
+              "tooltip": {
+                "x": 391.4375,
+                "y": 350.359375,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 350.359375,
+                "right": 569.53125,
+                "bottom": 436.546875,
+                "left": 391.4375
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "shadow-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 343.9375,
+                "y": 555.4375,
+                "width": 47.375,
+                "height": 21,
+                "top": 555.4375,
+                "right": 391.3125,
+                "bottom": 576.4375,
+                "left": 343.9375
+              },
+              "tooltip": {
+                "x": 343.9375,
+                "y": 461.4375,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 461.4375,
+                "right": 522.03125,
+                "bottom": 547.625,
+                "left": 343.9375
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "bottomAfterScroll": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 612.828125,
+                "y": 80,
+                "width": 49.578125,
+                "height": 21,
+                "top": 80,
+                "right": 662.40625,
+                "bottom": 101,
+                "left": 612.828125
+              },
+              "tooltip": {
+                "x": 612.828125,
+                "y": 109,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 109,
+                "right": 790.921875,
+                "bottom": 195.1875,
+                "left": 612.828125
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "topNearSticky": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 101,
+                "width": 49.578125,
+                "height": 21,
+                "top": 101,
+                "right": 324.578125,
+                "bottom": 122,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 130,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 130,
+                "right": 453.09375,
+                "bottom": 216.1875,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "sameOriginIframe": {
+          "tooltip": {
+            "lineCount": 4,
+            "firstLine": "ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "spaInsertion": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 388.625,
+                "width": 49.578125,
+                "height": 21,
+                "top": 388.625,
+                "right": 324.578125,
+                "bottom": 409.625,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 294.625,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 294.625,
+                "right": 453.09375,
+                "bottom": 380.8125,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "characterData": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 373.21875,
+                "width": 59.5,
+                "height": 21,
+                "top": 373.21875,
+                "right": 334.5,
+                "bottom": 394.21875,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 279.21875,
+                "width": 211.453125,
+                "height": 86.1875,
+                "top": 279.21875,
+                "right": 486.453125,
+                "bottom": 365.40625,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Activity"
+          },
+          "feedback": "已反馈不会：activity"
+        }
+      },
+      "pass": {
+        "normal-case": true,
+        "punctuation-case": true,
+        "zoom-case": true,
+        "transform-case": true,
+        "shadow-case": true,
+        "bottomAfterScroll": true,
+        "topNearSticky": true,
+        "sameOriginIframe": true,
+        "spaInsertion": true,
+        "characterData": true
+      },
+      "tooltipSafety": [
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        }
+      ],
+      "derived": {
+        "domNodesAdded": 3888,
+        "scrollHeightDeltaPx": 0,
+        "clsDelta": 0,
+        "everyCasePassed": true,
+        "maxTargetTooltipOverlap": 0
+      }
+    },
+    {
+      "route": "caret",
+      "baseline": {
+        "nodes": 24,
+        "scrollHeight": 11678,
+        "shifts": 0
+      },
+      "annotation": {
+        "nodes": 24,
+        "scrollHeight": 11678,
+        "shifts": 0,
+        "metrics": {
+          "route": "caret",
+          "initialScanMs": 0,
+          "mutationScanMs": 0,
+          "mutationBatches": 0,
+          "wrappedTokens": 0,
+          "pointerResolutions": 0
+        }
+      },
+      "after": {
+        "nodes": 25,
+        "scrollHeight": 11678,
+        "shifts": 0,
+        "metrics": {
+          "route": "caret",
+          "initialScanMs": 0,
+          "mutationScanMs": 0,
+          "mutationBatches": 0,
+          "wrappedTokens": 0,
+          "pointerResolutions": 26
+        },
+        "events": [
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "action",
+            "surface": "action"
+          },
+          {
+            "type": "click",
+            "wordKey": "action",
+            "surface": "action"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "improve",
+            "surface": "improve"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "click",
+            "wordKey": "ability",
+            "surface": "Ability"
+          },
+          {
+            "type": "hover",
+            "wordKey": "activity",
+            "surface": "Activity"
+          },
+          {
+            "type": "click",
+            "wordKey": "activity",
+            "surface": "Activity"
+          }
+        ],
+        "geometry": {
+          "target": {
+            "x": 275,
+            "y": 388.21875,
+            "width": 59.5,
+            "height": 21,
+            "top": 388.21875,
+            "right": 334.5,
+            "bottom": 409.21875,
+            "left": 275
+          },
+          "tooltip": {
+            "x": 275,
+            "y": 294.21875,
+            "width": 211.453125,
+            "height": 86.1875,
+            "top": 294.21875,
+            "right": 486.453125,
+            "bottom": 380.40625,
+            "left": 275
+          },
+          "overlap": 0,
+          "headerBottom": 56
+        }
+      },
+      "cases": {
+        "normal-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 179.59375,
+                "width": 49.578125,
+                "height": 21,
+                "top": 179.59375,
+                "right": 324.578125,
+                "bottom": 200.59375,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 85.59375,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 85.59375,
+                "right": 453.09375,
+                "bottom": 171.78125,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "punctuation-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 332.40625,
+                "y": 258.1875,
+                "width": 49.40625,
+                "height": 21,
+                "top": 258.1875,
+                "right": 381.8125,
+                "bottom": 279.1875,
+                "left": 332.40625
+              },
+              "tooltip": {
+                "x": 332.40625,
+                "y": 146.1875,
+                "width": 260,
+                "height": 103.734375,
+                "top": 146.1875,
+                "right": 592.40625,
+                "bottom": 249.921875,
+                "left": 332.40625
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "action"
+          },
+          "feedback": "已反馈不会：action"
+        },
+        "zoom-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 359.359375,
+                "y": 342.5625,
+                "width": 54.484375,
+                "height": 24,
+                "top": 342.5625,
+                "right": 413.84375,
+                "bottom": 366.5625,
+                "left": 359.359375
+              },
+              "tooltip": {
+                "x": 359.359375,
+                "y": 248.5625,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 248.5625,
+                "right": 537.453125,
+                "bottom": 334.75,
+                "left": 359.359375
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "transform-case": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 391.4224853515625,
+                "y": 444.3637390136719,
+                "width": 51.1650390625,
+                "height": 22.680023193359375,
+                "top": 444.3637390136719,
+                "right": 442.5875244140625,
+                "bottom": 467.04376220703125,
+                "left": 391.4224853515625
+              },
+              "tooltip": {
+                "x": 391.421875,
+                "y": 350.359375,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 350.359375,
+                "right": 569.515625,
+                "bottom": 436.546875,
+                "left": 391.421875
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "shadow-case": {
+          "error": "shadow-case: timeout: tooltip shadow-case"
+        },
+        "bottomAfterScroll": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 337.34375,
+                "y": 538.90625,
+                "width": 64.234375,
+                "height": 21,
+                "top": 538.90625,
+                "right": 401.578125,
+                "bottom": 559.90625,
+                "left": 337.34375
+              },
+              "tooltip": {
+                "x": 337.34375,
+                "y": 426.90625,
+                "width": 260,
+                "height": 103.734375,
+                "top": 426.90625,
+                "right": 597.34375,
+                "bottom": 530.640625,
+                "left": 337.34375
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "improve"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "topNearSticky": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 101,
+                "width": 49.578125,
+                "height": 21,
+                "top": 101,
+                "right": 324.578125,
+                "bottom": 122,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 130,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 130,
+                "right": 453.09375,
+                "bottom": 216.1875,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "sameOriginIframe": {
+          "tooltip": {
+            "lineCount": 4,
+            "firstLine": "ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "spaInsertion": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 388.625,
+                "width": 49.578125,
+                "height": 21,
+                "top": 388.625,
+                "right": 324.578125,
+                "bottom": 409.625,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 294.625,
+                "width": 178.09375,
+                "height": 86.1875,
+                "top": 294.625,
+                "right": 453.09375,
+                "bottom": 380.8125,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Ability"
+          },
+          "feedback": "已反馈不会：ability"
+        },
+        "characterData": {
+          "tooltip": {
+            "geometry": {
+              "target": {
+                "x": 275,
+                "y": 388.21875,
+                "width": 59.5,
+                "height": 21,
+                "top": 388.21875,
+                "right": 334.5,
+                "bottom": 409.21875,
+                "left": 275
+              },
+              "tooltip": {
+                "x": 275,
+                "y": 294.21875,
+                "width": 211.453125,
+                "height": 86.1875,
+                "top": 294.21875,
+                "right": 486.453125,
+                "bottom": 380.40625,
+                "left": 275
+              },
+              "overlap": 0,
+              "headerBottom": 56
+            },
+            "lineCount": 4,
+            "firstLine": "Activity"
+          },
+          "feedback": "已反馈不会：activity"
+        }
+      },
+      "pass": {
+        "normal-case": true,
+        "punctuation-case": true,
+        "zoom-case": true,
+        "transform-case": true,
+        "shadow-case": false,
+        "bottomAfterScroll": false,
+        "topNearSticky": true,
+        "sameOriginIframe": true,
+        "spaInsertion": true,
+        "characterData": true
+      },
+      "tooltipSafety": [
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        },
+        {
+          "overlap": 0,
+          "insideViewport": true,
+          "aboveSticky": true
+        }
+      ],
+      "derived": {
+        "domNodesAdded": 0,
+        "scrollHeightDeltaPx": 0,
+        "clsDelta": 0,
+        "everyCasePassed": false,
+        "maxTargetTooltipOverlap": 0
+      }
+    }
+  ]
+}

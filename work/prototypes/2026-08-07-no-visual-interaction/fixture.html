@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>无视觉词交互原型 fixture</title>
+<style>
+  body { margin: 0; color: #1f2937; font: 18px/1.7 system-ui, sans-serif; }
+  #sticky { position: sticky; top: 0; z-index: 10; height: 56px; padding: 8px 28px; box-sizing: border-box; background: #172554; color: white; }
+  main { max-width: 760px; margin: 0 auto; padding: 22px 28px 140px; }
+  .case { margin: 18px 0; padding: 14px; border: 1px solid #d1d5db; }
+  #top-case { margin-top: 4px; }
+  #transform-case { transform: scale(1.08); transform-origin: left top; margin: 34px 0; }
+  #zoom-case { zoom: 1.15; }
+  #bulk { max-width: 700px; }
+  iframe { width: 100%; height: 110px; border: 1px solid #94a3b8; }
+</style>
+<div id="sticky">固定头部安全区（56px）</div>
+<main>
+  <section class="case" id="top-case">Ability appears immediately below the fixed header.</section>
+  <section class="case" id="normal-case">Ability and activity improve reading. A known reader can still query ability.</section>
+  <section class="case" id="punctuation-case">Ability-action: activity—action, ability.</section>
+  <section class="case" id="zoom-case">Zoomed ability remains available for hover and click.</section>
+  <section class="case" id="transform-case">Transformed ability remains available for hover and click.</section>
+  <section class="case" id="shadow-case"><div id="shadow-host"></div></section>
+  <section class="case" id="frame-case"><iframe id="same-origin-frame" title="同源 iframe"></iframe></section>
+  <section class="case" id="dynamic-case">
+    <p id="dynamic-added">Dynamic target is inserted by the measurement script.</p>
+    <p id="character-data">zzprototype is replaced by characterData during the measurement script.</p>
+  </section>
+  <section class="case" id="bulk"></section>
+</main>
+<script>
+  const host = document.querySelector('#shadow-host');
+  const root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = '<style>:host{display:block}</style><p id="shadow-text">Shadow ability supports the same interaction.</p>';
+  const route = new URLSearchParams(location.search).get('route') || 'wrap';
+  document.querySelector('#same-origin-frame').src = `/frame.html?route=${route}`;
+  const bulkSentence = 'Ability and activity improve action for an active adult. ';
+  document.querySelector('#bulk').textContent = bulkSentence.repeat(550);
+</script>
+<script src="/dictionary.js"></script>
+<script src="/prototype.js"></script>
