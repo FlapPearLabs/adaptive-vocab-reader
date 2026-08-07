@@ -47,7 +47,7 @@ ECDICT 数据组合自以下来源，**MIT 无法覆盖第三方权利**：
 - cdict、diaosi 的具体许可证版本文本未逐字核验。
 - 中文释义（EDictAZ / 词表 / 网友贡献）的逐条来源权利链无法确认。
 - BNC 派生数据（词频排序、lemma.en.txt）的公开再分发许可未获 BNC 方确认。
-- **以上均只影响"对外公开再分发"；对"个人本地使用 + 本地打包"无实质冲突。**
+- **风险限定（非法律清权）**：以上不确定项只影响"对外公开再分发"。**在当前个人 dogfood 风险边界内未识别到阻断证据；这并不构成对第三方来源权利的法律清权结论**——若未来涉及公开分发，必须重新做逐条权利链核验（E/F fail-closed）。
 
 ---
 
@@ -62,16 +62,23 @@ ECDICT 数据组合自以下来源，**MIT 无法覆盖第三方权利**：
 - 字段（README）：word / phonetic / definition / translation / pos / collins / oxford / tag / bnc / frq / exchange / detail / audio。
 - 本项目运行时只消费 word / phonetic / pos / translation（见 RULES「词典」）；构建期用 bnc / frq / tag 排序、exchange 生成词形映射。
 
-### 2.3 lemma/forms 可用性
-- 合格候选（满足 ASCII 小写单词 + 音标 + 词性 + 中文释义 + 频率排名）：构建报告 `eligible_count = 38,036`。
-- 淘汰原因（构建报告 rejections，1,000 词包同一规则）：not_simple_lowercase_word 438,909、missing_phonetic 155,209、missing_frequency_rank 76,083、missing_pos 55,153、translation_too_long 7,221。
-- forms：`exchange` 字段可机械生成词形→主词条映射（现有 1,000 词包 `forms.json` 已验证）；README 另提供 lemma.en.txt（BNC 派生），但**其公开再分发许可未确认**，故不作为本项目依赖。
+### 2.3 query eligibility 与 hint eligibility（2026-08-07 重新核算，只读、可复现）
+**查询资格（query-entry eligibility）只依赖身份与展示元数据，与频率是否存在无关**（RULES「缺 frequency rank 淘汰」仅属于固定测评包/旧高频构建规则，不得默认套用到查询词典）：
+
+| 口径 | 判定条件 | 数量（只读实测，复用 `scripts/build_ecdict_core.py` 的词性提取与 `_positive_rank` 语义） |
+|---|---|---|
+| **query-eligible（可查询）** | ASCII 小写单词 + 音标 + 词性（pos 列或 translation 行首前缀机械提取）+ 中文释义，**不要求频率** | **121,340** |
+| 其中含有效 frq/bnc 排名 | 上述 + `_positive_rank(frq) 或 _positive_rank(bnc)` 非 None | 40,090 |
+| 其中无有效频率排名 | 上述且 frq/bnc 均无有效排名（**可查询，但不具备提示频率输入**） | **81,250** |
+
+- **缺 frq/bnc ≠ 不可查询**：81,250 条可查询但无有效频率排名的词，在 query layer 正常可查询、可展示元数据；在 hint layer 因无频率输入不参与候选判定（其候选行为见 Spec §8/§9/AC-7 的 hint eligibility 定义）。**不得把缺频率词变成 lookup-unresolved。**
+- **38,036 / 4.6 MB 的旧口径**：38,036 是"含频率排名的合格候选"（旧严格筛选规则，`eligible_count`）；**它不是"全量查询词典"的确定规模**。以 query-eligible 121,340 条估算的裁剪后规模见 2.4。
 
 ### 2.4 本地资产规模（实测 + 可复现估算）
 - 1,000 词裁剪产物：`dict-core.json` 81,486 B + `forms.json` 29,061 B + `frequency-bands.json` 11,115 B ≈ **121 KB**（约 121 B/词条）。
-- 全量合格候选（38,036 条）按同规则估算：约 **4.6 MB**（38,036 × 121 B；未压缩，未计 forms 全量扩展）。**该估算可由现有 `scripts/build_ecdict_core.py` 以 `--limit` 放开复现，属可复现估计。**
-- 原始 65.9 MB CSV 为构建期输入，**运行时不需要携带**；运行时仅携带裁剪后 JSON（约数 MB 量级）。
-- **不预设最终条目数**：38,036 是"字段合格候选"上限，是否全取或取子集由后续产品/数据决策（仍受 A 的 dogfood 驱动口径约束），本次调查不预设。
+- 全量 query-eligible（121,340 条）按同规则估算：约 **14.7 MB**（121,340 × 121 B；未压缩，未计 forms 全量扩展）。**该估算可由 `scripts/build_ecdict_core.py` 放开 `--limit`（并移除频率淘汰）复现；若最终 query eligibility 口径调整，须重新给出对应可复现实测/估算。**
+- 原始 65.9 MB CSV 为构建期输入，**运行时不需要携带**；运行时仅携带裁剪后 JSON（约 15 MB 量级，以最终口径实测为准）。
+- **不预设最终条目数**：121,340 是"查询资格合格候选"上限；实际进入查询词典的条目数由最终 query eligibility 口径与数据决策决定（仍受 A 的 dogfood 驱动口径约束），本次调查不预设。
 
 ---
 
@@ -81,7 +88,7 @@ ECDICT 数据组合自以下来源，**MIT 无法覆盖第三方权利**：
 **E_VALIDATED（限定范围）**——满足 E 条件决议的生效前提，但范围必须明确：
 
 - **验证成立的范围**：ECDICT 全量本地词典，随 Chrome 扩展**本地打包（load unpacked）供个人 dogfood 使用，不对外公开分发**。
-  - 依据：MIT 授权文本明确含 `use / copy / distribute`，作者以 MIT 公开发布仓库（含数据文件）；社区广泛按此集成；本地个人使用无第三方权利冲突。
+  - 依据：MIT 授权文本明确含 `use / copy / distribute`，作者以 MIT 公开发布仓库（含数据文件）；社区广泛按此集成。**风险限定：在当前个人 dogfood 风险边界内未识别到阻断证据；这不构成对第三方来源权利的法律清权结论（第三方权利链仍未完成核验，见 §1.5）。**
 - **明确不在验证范围内的部分**：**对外公开再分发**（Chrome Web Store 发布、分享 crx、随公开仓库分发）——中文释义与 BNC 派生数据的逐条权利链 UNKNOWN，**未获通过，维持 UNKNOWN**。
 - 该边界与 E 决议原文自洽：E 决议本身即限定"许可证未验证前仅用于个人 dogfood，不公开发布"；"验证通过"在本项目中应理解为**本地使用方向**的许可与数据可行性验证通过。
 
