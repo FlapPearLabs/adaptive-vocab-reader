@@ -9,19 +9,22 @@
 
 **What to build**：把「查询词典」与「固定 1,000 测评词包」在数据资产与运行时消费上解耦。产出可复现的查询词典构建管线（ECDICT 全量本地、query-eligible 口径、含最小只读频率元数据 `effectiveFrequencyRank`），内容脚本 `dictionary.lookup` 改读查询词典；测评/估计/首测/每日继续只消费固定 assessment 资产。**本票只做数据资产与身份/查询合同，不改变任何展示决策（灰线/红线逻辑不变，由后续 T-HINT-4 单独处理）。**
 
-**主责任 Requirement ID**：R-QUERY-1（数据部分）、R-QUERY-3、R-QUERY-5、R-ASSESS-1（资产分离）、R-COMPAT-4、R-HINT-3（频率元数据合同部分）；对齐 OPEN_DECISIONS E/F、A（dogfood 驱动覆盖验收，不预设条目数）。
+**主责任 Requirement ID**：R-QUERY-1（数据部分）、R-QUERY-3、R-QUERY-5、R-ASSESS-1（资产分离）、R-COMPAT-4、R-HINT-3（频率元数据合同部分）、**R-PRIVACY-3（E research 已完成的前置验证 + 本票实施期 fail-closed guard，不是新的许可证研究任务）**；对齐 OPEN_DECISIONS E/F、A（dogfood 驱动覆盖验收，不预设条目数）。
 
 **用户可见收益**：普通英文网页上、固定 1,000 词包之外的普通英文词（如 `serendipity`、`ubiquitous`），页面处理进入查询能力范围；悬停/点击行为由 T-INT-2 提供，本票先保证「能解析出身份与元数据」。
 
 **依赖/前置 ticket**：无（本批次地基；其余 ticket 均依赖本票的查询资产与身份合同）。
 
 **允许修改范围**：
-- `scripts/`（新增或修改确定性构建脚本，如扩展 `scripts/build_ecdict_core.py` 或新增 `scripts/build_query_dictionary.py`：放开 `--limit`、移除「缺 frequency 淘汰」、保留 query eligibility 判定）。
-- `data/derived/`（新增查询词典构建产物与 `build-report.json` 类报告：数量、缺失、重复、冲突、丢弃原因）。
-- `extension/data/`（新增查询词典运行时资产；`dict-core.json`/`forms.json`/`frequency-bands.json` 作为 assessment 资产保持不动，或按实施口径调整承载方式——不得删除、不得静默改动其内容语义）。
+- `scripts/`（新增或修改确定性构建脚本，如扩展 `scripts/build_ecdict_core.py` 或新增 `scripts/build_query_dictionary.py`：放开 `--limit`、移除「缺 frequency 淘汰」、保留 query eligibility 判定）。**构建代码可提交**。
+- `data/derived/`（新增查询词典构建产物与 `build-report.json` 类报告：数量、缺失、重复、冲突、丢弃原因）。**该目录是本地 ignored/reproducible payload 位置（`.gitignore` 已忽略 `data/derived/`），产物不进入 commit**。
+- **tracked 与 ignored 边界（硬约定）**：新 ECDICT 派生查询 payload（音标/POS/中文释义/频率）**不得作为 tracked `extension/data/**` 文件 commit/push**（`.gitignore` 不忽略 `extension/data/`，凡落入该路径的文件都会进入公开 Git）；若 build 需要运行时查询资产，只允许在**本地构建阶段**从 ignored 本地资产生成/复制到 **ignored 构建输出**（如 `dist/`，`.gitignore` 已忽略）。具体文件布局由施工确定，但「tracked 公开 Git 不得新增 ECDICT payload」必须无歧义。
+- `extension/data/`：**不作为新 ECDICT 查询 payload 的可提交目标**；该路径下既有 assessment 资产（`dict-core.json`/`forms.json`/`frequency-bands.json`）本票不触碰、不得删除、不得静默改动其内容语义。
 - `extension/src/content/dictionary.ts`：`lookup()` 消费查询词典资产；`entry`/身份返回模型按 §5/§8 目标合同（身份键 + 音标/词性/释义 + 可选 `effectiveFrequencyRank`；**不输出频段**）。
-- 与查询资产加载相关的构建配置（`build.mjs` 若需把新资产打进扩展包）。
+- 与查询资产加载相关的构建配置（`build.mjs` 若需把新资产打进扩展包——目标位置必须为 ignored 构建输出）。
 - 相关单测与 E2E 场景（`e2e-verify.cjs` 中新增/调整的查询资产 seam）。
+
+**review/test evidence 规则**：screenshot/video/debug output 若显示真实 ECDICT 音标/POS/中文释义，**只能本地临时查看，不得 commit/push**；可持久化的 review evidence 必须使用结构化/脱敏结果（route、case、wordKey/测试标识、pass/fail、geometry、DOM/CLS/timing/error）。
 
 **禁止范围**：
 - 不改展示决策：灰线/红线判定、`strategy` 的 light/strong/none 输出语义本轮不动（T-HINT-4 负责）。
@@ -35,8 +38,9 @@
 
 **数据/许可边界（硬边界）**：
 - E 生效范围：**仅个人本地 dogfood + load unpacked**。MIT 授权个人本地使用与打包；公开再分发（Web Store、分享 crx、随公开仓库分发）**UNKNOWN、fail-closed**。
-- 查询词典构建产物（ECDICT 派生：音标/词性/中文释义/频率）**不得写入公开 Git 历史**；本地数据必须可再生成（确定性构建脚本 + 记录来源版本/哈希/筛选规则）。
-- review/test evidence 不得落盘 ECDICT tooltip payload（仅结构化字段：route、case、wordKey/测试标识、pass/fail、geometry、DOM/CLS/timing/error）。
+- 查询词典构建产物（ECDICT 派生：音标/词性/中文释义/频率）**由本票新增 commit 不进入 tracked 公开 Git**（`data/derived/`、`dist/` 等 ignored 位置可存本地生成物）；本地数据必须可再生成（确定性构建脚本 + 记录来源版本/哈希/筛选规则）。
+- **不得否认 main 既有 existing assets 与 RESIDUAL_PUBLIC_OBJECT**：本票边界是「本 ticket 新增 commit 不新增 ECDICT 派生 payload」；仓库整体历史中已存在的 ECDICT 派生资产（如 main 既有 `extension/data/dict-core.json`、旧 SHA 28f6d83）是独立发布前阻断项，由另行单独任务处理，本票不清理、不审计、不声称已清除。
+- review/test evidence 不得落盘 ECDICT tooltip payload（仅结构化字段：route、case、wordKey/测试标识、pass/fail、geometry、DOM/CLS/timing/error）；含真实音标/POS/中文释义的截图/视频仅本地临时查看、不 commit。
 - 若施工需要公开提交这些数据，**立即 STOP，E/F 返回用户**。
 - `extension/data/dict-core.json`（main 既有）本票不触碰、不清理、不审计。
 
@@ -58,9 +62,9 @@
 - `dictionary.lookup` 全量查询词典路径通过单测与 E2E；
 - assessment 资产/测评/估计行为零回归；
 - 无 schema/migration 改动；
-- 公开 Git 历史无 ECDICT 派生数据（forbidden path 检查通过）。
+- 本 ticket 新增 commit 不新增 ECDICT 派生 payload（forbidden path 检查通过；`extension/data/**` 无新增查询 payload 文件）。
 
-**是否可以独立提交**：是——本票自包含数据资产 + 查询合同，不依赖交互展示层；展示行为不变，可独立验收、独立提交（仍须遵守 AGENTS 提交授权规则）。
+**是否可以独立提交**：是——commit 自包含**构建代码/查询合同/测试**；本地生成 payload（`data/derived/`、`dist/` 等 ignored 位置）**不进入 commit**；展示行为不变，可独立验收、独立提交（仍须遵守 AGENTS 提交授权规则）。
 
 **后续 Codex 所需证据**：
 - 构建报告（来源版本/哈希、query-eligible 计数、频率覆盖计数、裁剪规模实测）；
@@ -75,5 +79,6 @@
 - [ ] `effectiveFrequencyRank`：frq 优先、bnc fallback、双缺失 = 无频率输入；不输出 frequency band（R-HINT-3）。
 - [ ] 查询身份 = ECDICT lemma 字符串键；forms 映射 core 优先；包外词同键不区分来源（R-QUERY-3、F）。
 - [ ] 测评/首测/每日/估计仍只消费 assessment 资产（R-ASSESS-1、R-ASSESS-4 回归）。
-- [ ] 数据可再生成；无 ECDICT 派生数据进入公开 Git；review/test evidence 无 tooltip payload（E 边界）。
+- [ ] 数据可再生成；**本 ticket 新增 commit 不新增 ECDICT 派生 payload**（`extension/data/**` 无新增查询 payload）；review/test evidence 无 tooltip payload、含真实释义的截图/视频仅本地（E 边界）。
+- [ ] **R-PRIVACY-3**：E research 已作为前置验证满足（E_VALIDATED 限定本地）；本票实施期 fail-closed/data-boundary guard 生效（无 ECDICT 派生 payload 进入 tracked 公开 Git；公开再分发保持 UNKNOWN）。
 - [ ] 未触发任何 schema/migration；无远程组件；无冻结项恢复。

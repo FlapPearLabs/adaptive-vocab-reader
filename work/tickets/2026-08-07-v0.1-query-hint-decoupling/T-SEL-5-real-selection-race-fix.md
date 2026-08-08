@@ -17,7 +17,7 @@
 
 **用户可见收益**：真人用鼠标拖选一个词，弹出的「加入生词本」按钮不再被同一手势的后续 click 闪没；点一下就能把这个词（含测评包外词）加进生词本。
 
-**依赖/前置 ticket**：T-QD-1（拖选解析使用 query dictionary，含包外词身份）；T-INT-2（核心交互路径可用后拖选降级为辅助；透明 span 不影响文本选区）。与 T-UNR-3、T-HINT-4、T-NB-6 文件边界不冲突，顺序不限。
+**依赖/前置 ticket**：T-QD-1（拖选解析使用 query dictionary，含包外词身份）；T-INT-2（核心交互路径可用后拖选降级为辅助；透明 span 不影响文本选区）。**与 T-NB-6 无相互依赖、顺序不限**（popup 生词本展示包外词条的断言归属 T-NB-6，本票不把它作为必验项）；与 T-UNR-3、T-HINT-4 文件边界不冲突，顺序不限。
 
 **允许修改范围**：
 - `extension/src/content/pageScanner.ts` / `index.ts`：选区监听（mouse down/move/up + selectionchange 生命周期）、浮条出现/消失时序（修复 click 竞态）、按钮点击写入路径。
@@ -39,7 +39,7 @@
 **真实 Chrome 用户路径验收**（Chrome for Testing + 隔离 profile）：
 1. **真实鼠标路径**：用真实 mouse down/move/up（非合成 Range）选择 fixture 中 query-eligible 词 → 选区旁弹出「加入生词本」浮动按钮（AC-9）。
 2. **竞态断言（时间线记录）**：拖选动作结束后，同一手势后续 click 事件发生 → 按钮仍可见；点击按钮 → 写入 learning 并关闭（按钮生命周期正确）；选区消失/点击外部 → 按钮关闭且不写入。
-3. 点击按钮后：该词（含测评包外词，如 `serendipity`）升级为红色强提示；popup 生词本出现该词条（含包外词，依赖 T-NB-6 或确认其已实现）。
+3. 点击按钮后：该词（含测评包外词，如 `serendipity`）升级为红色强提示（同身份键实例同步）。**popup 生词本展示该包外词条的验收归属 T-NB-6，本票不作为必验项**。
 4. 已 learning/known 词不重复弹出（RULES 既有规则回归）。
 5. **负路径**：拖选未收录词 → 静默不弹、零写入（AC-10 不针对入口）；拖选多词/部分词形/纯空白/纯数字 → 静默不弹、零写入（RULES 既有规则）。
 6. **负断言**：拖选加词仅写 `WordState=learning(manual)`；`AssessmentEvidence` snapshot 不变；估计不变；快照无选区文本/URL/正文。
@@ -55,7 +55,7 @@
 - 包外词可经拖选加词（T-QD-1 合同）且不污染 Evidence/估计；
 - 负断言全绿；typecheck / 单测 / build / E2E 通过。
 
-**是否可以独立提交**：是（T-QD-1 之后即可独立实施；为避免与 T-INT-2 重复改 annotator，推荐在 T-INT-2 后施工）。
+**是否可以独立提交**：是（T-QD-1、T-INT-2 之后即可独立实施，无需等待 T-NB-6；为避免与 T-INT-2 重复改 annotator，推荐在 T-INT-2 后施工）。
 
 **后续 Codex 所需证据**：
 - 真实 down/move/up 事件时间线记录（含后续 click），按钮生命周期断言通过；

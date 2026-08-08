@@ -49,7 +49,7 @@
 - 单测：透明 span 生成（query-eligible 全量、known/none 也包装）；事件委托分发（hover/click 目标正确）；tooltip 几何计算（上下翻转、左右视口、sticky 安全区、滚动后）。
 - 负断言：hover/click 前后 `WordState` snapshot 无变化（仅查看）；点击「不会」仅更新 `WordState=learning(manual)`，不写 `AssessmentEvidence`、不改估计；快照无 URL/正文/句子；known 词 hover 后状态仍为 known。
 - E2E：上述真实 Chrome 路径 1–8。
-- 性能 sanity（正式重测在 T-PERF-7）：本票实现后立即在标准 fixture 记录 DOM 增量/扫描时间/CLS，不设预算，仅留证据；若 DOM 增量异常巨大（数量级超出原型参考 +3,888 的合理范围），在 T-PERF-7 之前先 STOP 报告。
+- 性能 sanity（正式重测在 T-PERF-7）：本票实现后立即在标准 fixture 记录 DOM 增量/扫描时间/CLS，**只记录证据、不设任何预算与自动阈值**（原型参考 +3,888 等数字仅作对照参考，不参与任何自动 PASS/FAIL 判定）；若出现明显退化或用户可见问题，如实记录并在交付报告中报告，由用户/审查决定后续，**实施方不得自行定义「可接受」、不得自动 STOP 或自动放行**。
 
 **完成定义**：
 - AC-1/AC-2/AC-4/AC-8 全部通过真实 Chrome 机器测量（含无灰线词 hover/click、known 纠错往返、tooltip 几何五场景）；
@@ -59,7 +59,7 @@
 - 未改变已批准路线、未引入 caret 唯一依赖、未引入冻结项；
 - 标准 fixture 性能证据已记录（T-PERF-7 正式重测完成前，本票不得合入 main）。
 
-**是否可以独立提交**：是（在 T-QD-1 之后）。**合入 main 前置**：T-PERF-7 真实长文重测通过（R-PERF-1「与实现同批」）。
+**是否可以独立提交**：是（在 T-QD-1 之后）。**合入 main 前置**：T-PERF-7 真实长文测量报告完成并经用户/审查决定（R-PERF-1「与实现同批」；本票不自行定义性能「可接受」门槛）。
 
 **后续 Codex 所需证据**：
 - 无灰线/known 词 hover/click 的真实 Chrome 视频或截图 + 机器测量；
@@ -77,4 +77,4 @@
 - [ ] SPA 动态插入与 characterData 更新后交互与提示保持一致（§10 seam）。
 - [ ] 负断言：查看不改状态；点击仅写 WordState；无 Evidence 污染；快照无正文/句子/URL。
 - [ ] 已批准路线（透明 span + 事件委托）未被改变；caret 不作为唯一交互基础；无冻结项。
-- [ ] 标准 fixture 性能证据已记录；T-PERF-7 通过前不合入 main。
+- [ ] 标准 fixture 性能证据已记录；T-PERF-7 测量报告完成并经用户/审查决定前不合入 main。

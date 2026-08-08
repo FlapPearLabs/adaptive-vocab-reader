@@ -17,7 +17,7 @@
 
 **用户可见收益**：在阅读时加进生词本的测评包外词（如 `serendipity`）能在 popup 生词本里看到完整音标/词性/释义并可「已掌握」；但它永远不会悄悄影响词汇量估计。
 
-**依赖/前置 ticket**：T-QD-1（query dictionary 为包外词提供可展示元数据与身份解析）；T-INT-2（内容侧包外词反馈入口——若该入口未就绪，popup 侧仍可通过既有手动/选区路径验证）。与 T-UNR-3、T-HINT-4、T-SEL-5 顺序不限（文件边界不同）。
+**依赖/前置 ticket**：**T-QD-1 + T-INT-2**（T-QD-1 提供 query dictionary 身份/元数据；T-INT-2 提供内容侧 hover/click 反馈入口，用于真实 Chrome 路径生成包外 learning）。若仅用测试预置状态作补充，必须明确标注为 setup、不算用户路径。与 T-UNR-3、T-HINT-4、T-SEL-5 **顺序不限**（文件边界不同、无相互依赖）。
 
 **允许修改范围**：
 - `extension/src/popup.ts`：生词本页签数据源与可见资格（query dictionary 可解析的 learning identity，含包外词；历史无法映射 key 保守保留不展示）。
@@ -38,7 +38,7 @@
 **数据/许可边界**：同 T-QD-1（E 本地范围）；popup 只读本地状态与查询词典元数据；无新数据资产；review/test evidence 无 ECDICT payload。
 
 **真实 Chrome 用户路径验收**（Chrome for Testing + 隔离 profile）：
-1. 通过内容侧反馈或选区加词（T-SEL-5/T-INT-2 就绪后）把**包外词**（如 `serendipity`）置为 learning；打开 popup 生词本 → 该词显示完整元数据（音标/词性/释义）、按 updatedAt 排序（USER FLOW G、popup 新目标）。
+1. 通过内容侧 hover/click 反馈（T-INT-2 就绪后）把**包外词**（如 `serendipity`）置为 learning（测试预置状态仅可作补充 setup，不替代真实用户路径）；打开 popup 生词本 → 该词显示完整元数据（音标/词性/释义）、按 updatedAt 排序（USER FLOW G、popup 新目标）。
 2. **AC-5/AC-6 负断言**：包外词 feedback 前后，snapshot 中 `AssessmentEvidence` 完全不变；估计单点值与保守范围**前后数值不变**；「是否已测过」「最久未测」不受影响。
 3. 包内词回归：包内 learning 词照常显示；「已掌握」→ 该词从生词本消失、`WordState=known`、Evidence/估计不变；该词仍可查询、可再标记不会。
 4. **多标签同步**：两个标签页打开同一页面，标签 A 对某词（含包外词）反馈「不会」→ 标签 B 该词立即显示红色强提示；标签 A「已掌握」→ 标签 B 红色消失（§10 seam；storage 变更事件驱动，不轮询）。
@@ -58,7 +58,7 @@
 - 无 schema/migration 改动；无冻结项恢复；
 - typecheck / 单测 / build / E2E 通过。
 
-**是否可以独立提交**：是（T-QD-1 之后；与内容侧交互票文件边界不冲突，可并行施工或顺序施工）。
+**是否可以独立提交**：是（T-QD-1 + T-INT-2 之后；与 T-SEL-5、T-UNR-3、T-HINT-4 顺序不限，文件边界不冲突，可并行施工或顺序施工）。
 
 **后续 Codex 所需证据**：
 - AC-5/AC-6 前后快照 diff（AssessmentEvidence/估计数值不变）；
