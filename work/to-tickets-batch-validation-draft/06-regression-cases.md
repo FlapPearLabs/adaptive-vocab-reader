@@ -45,27 +45,29 @@ Ticket: "Fail if latency exceeds 200 ms."
 
 ## CASE 3 — valid batch（应零额外仪式通过）
 
-输入（两个正常 tracer-bullet ticket）：
+输入（两个正常 tracer-bullet ticket，领域无关的通用例子）：
 
 ```
 Ticket A:
   Blocked by: None
-  What to build: 实现 query dictionary 解析，产出解析结果。
+  What to build: 实现 project creation API（POST /projects）。
   Acceptance:
-  - 给定查询词返回音标/词性/中文释义。
-  - 未收录词返回明确「未收录」响应。
+  - 调用创建接口返回新项目 id。
+  - 校验失败返回明确错误。
 
 Ticket B:
   Blocked by: A
-  What to build: 在网页悬停查询路径中使用 A 的解析结果展示 tooltip。
+  What to build: 添加调用 project creation API 的 UI 流程。
   Acceptance:
-  - 悬停可查询词显示四行（词形 + A 产出元数据）。
-  - 只使用 A 的产出与本票自身状态。
+  - 用户在表单提交后看到新项目创建成功。
+  - 只使用 A 的 API 与本票自身状态。
 ```
 
 期待行为：
 
 - Dependency audit：B 的 acceptance 只依赖 A 的产出 + 自身 → 通过。
-- Source-contract audit：两个 ticket 的 requirements 均可追溯到源 spec（query lookup / tooltip 展示）→ 通过。
+- Source-contract audit：两个 ticket 的 requirements 均可追溯到源 spec（project creation API / UI 流程）→ 通过。
 - Constraint audit：无矛盾 → 通过。
 - 无 cycle、无 hidden dependency、无 orphan → 正常进入 quiz/publish，不增加任何额外字段或文件。
+
+> 备注：本用例刻意使用领域无关例子（project creation API），保证若被引用进 upstream PR discussion / fixture / maintainer 回复时，不携带本项目（query dictionary / ECDICT / tooltip 等）的领域细节。
