@@ -1,0 +1,40 @@
+# 草稿 02：upstream SKILL.md 最小补丁（unified diff）
+
+基准：`mattpocock/skills@84fdeffd` 的 `skills/engineering/to-tickets/SKILL.md`。
+目标：在 `### 3. Draft vertical slices` 之后、`### 4. Quiz the user` 之前插入 `### 4. Validate the batch`，并把原 4/5 重编号为 5/6。
+
+## 补丁内容
+
+```diff
+@@ Process 部分编号调整 @@
+-### 4. Quiz the user
++### 5. Quiz the user
+@@
+-### 5. Publish the tickets to the configured tracker
++### 6. Publish the tickets to the configured tracker
+
+@@ 在 "### 3. Draft vertical slices" 的 wide-refactor 段之后、Quiz 之前新增 @@
++
++### 4. Validate the batch
++
++Before asking the user to approve the breakdown, validate the set as a batch — a ticket can look correct in isolation while the batch is not executable as a graph:
++
++- **Dependency audit.** Walk the blocking graph in topological order. Each ticket must be implementable and independently verifiable using only the base state and the outputs of its declared blockers. An acceptance criterion must not depend on a future or undeclared ticket — if it does, add the real blocking edge or move the criterion to the ticket that owns that behaviour.
++- **Source-contract audit.** Check both directions: every normative source requirement has an explicit disposition (implemented by ticket / already satisfied / prerequisite / deferral), and every ticket requirement traces back to the source. Do not invent thresholds, policies, algorithms, or product behaviour while making tickets more concrete — if the source says "measure", a ticket must not upgrade to "fail if it exceeds a threshold I invented".
++- **Constraint audit.** Each ticket's allowed changes, produced artifacts, and hard constraints (security, privacy, licensing) must be satisfiable at once.
++- **Fix, don't publish.** Cycles, hidden dependencies, coverage gaps, and contradictory constraints are fixed in the tickets before the breakdown is presented.
+```
+
+## 为什么是 minimal patch
+
+- 只新增 1 个小节 + 重编号 2 个标题行；不修改 vertical-slice-rules、blocking edges 语义、两个 ticket 模板、publish 逻辑、wide-refactor 流程、ready-for-agent 语义。
+- 原有每一步的行为完全保留；validation 只是 publish 前新增的一个只读检查步骤，不改任何产物的形状。
+- 没有新增 ticket 字段、没有强制 coverage 文件、没有引入 DAG 库或状态机。
+- 用 upstream 现有文风（bullet + 斜体短语开头），与相邻步骤一致。
+
+## 对 upstream 规则的合规性
+
+- 改变了 to-tickets 行为 → 按 upstream CLAUDE.md 必须 re-sync docs 页面（见草稿 03）。
+- 不新增/重命名/删除 skill → 不需要更新 README.md、plugin.json、bucket README、ask-matt。
+- 不改 invocation（user-invoked，`disable-model-invocation: true` 不变）→ 不需要动 agents/openai.yaml。
+- 行为变更 → 按贡献惯例附 changeset（见草稿 04）。

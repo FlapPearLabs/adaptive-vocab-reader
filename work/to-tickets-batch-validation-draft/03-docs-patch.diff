@@ -1,0 +1,44 @@
+# 草稿 03：upstream docs 页面同步补丁
+
+基准：`mattpocock/skills@84fdeffd` 的 `docs/engineering/to-tickets.md`。
+依据 upstream `CLAUDE.md`：promoted skill 行为改变时必须 re-sync docs 页面（写作模板见 `.agents/writing-docs.md`）。
+
+## 改动点
+
+### A. 「Tracer bullets, not layers」小节：Two things → Three things
+
+原文（第 31 行）：
+
+> Two things happen before anything is published. `to-tickets` looks for prefactoring — "make the change easy, then make the easy change" — and orders that work first. Then it presents the breakdown as a numbered list and quizzes you on it: is the granularity right, are the blocking edges real, should anything merge or split. Nothing reaches the tracker until you approve, and that quiz is the place to push back.
+
+改为：
+
+> Three things happen before anything is published. `to-tickets` looks for prefactoring — "make the change easy, then make the easy change" — and orders that work first. Then it validates the breakdown **as a batch** (below), and finally presents it as a numbered list and quizzes you on it: is the granularity right, are the blocking edges real, should anything merge or split. Nothing reaches the tracker until the batch check passes and you approve; the quiz is the place to push back on shape, the batch check is the place to catch tickets that are only correct in isolation.
+
+### B. 新增小节「## Validating the batch」（放在「Tracer bullets, not layers」与「Blocking edges」之间）
+
+```markdown
+## Validating the batch
+
+Per-ticket correctness does not guarantee batch correctness. A ticket can read as fine on its own while the set fails as a dependency graph — an acceptance criterion that quietly needs a mechanism a parallel ticket will build, a threshold the source spec never approved, or an allowed artifact that collides with the ticket's own safety constraints.
+
+Before the quiz, `to-tickets` walks the blocking graph in dependency order and checks, per ticket: it can be built and independently verified from the base state plus its declared blockers alone; its acceptance criteria don't reach into a future or undeclared ticket (fix by adding the real edge or moving the criterion); every normative source requirement has an explicit disposition and every ticket requirement traces back to the source; and its allowed changes, produced artifacts, and hard constraints can all be satisfied at once. Problems are fixed in the tickets, not published around. For a two-ticket batch this is a quick check; for a large graph it is a real simulation. It adds no fields to the ticket template and no coverage spreadsheet to maintain.
+```
+
+### C. Common questions 中扩展既有条目
+
+在「**The acceptance criteria graded nothing — some passed before any work was done.**」条目末尾追加一句：
+
+> The batch-validation step now catches the middle shape before anything is published — a criterion that can only be satisfied by work another ticket owns surfaces as a hidden dependency when the graph is walked in order.
+
+### D. 「It's working if」新增一条
+
+在 bullet 列表追加：
+
+> - The blocking edges in the published tickets match the dependencies their acceptance criteria imply.
+
+## 非目标
+
+- 不改 docs 的固定框架（What it does / When to reach for it / Where it fits 等四节结构）。
+- 不新增 install 命令文字（按 writing-docs.md，页面不带 install 命令）。
+- 不重排既有小节顺序，不触碰其他 skill 的 docs。
