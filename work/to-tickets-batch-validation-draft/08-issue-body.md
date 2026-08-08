@@ -1,4 +1,4 @@
-# 草稿 08：mattpocock/skills Issue 正文（待用户确认后发布）
+# 草稿 08（修订版）：mattpocock/skills Issue 正文（已发布 + 已修订）
 
 ## Title
 
@@ -6,17 +6,30 @@
 to-tickets: validate ticket batches before publishing
 ```
 
-## Body
+## Body（2026-08-08 20:14 修订版，已应用到 Issue #818）
 
 ```markdown
 ## Problem
 
-`to-tickets` correctly asks for vertical slices and explicit blocking edges, but per-ticket correctness does not guarantee batch correctness. A ticket can look valid in isolation while the set fails as a dependency graph:
+This comes from a real run of `/to-tickets` on an approved spec: every ticket looked fine individually, and the batch still failed review. Per-ticket correctness does not guarantee batch correctness — a ticket can look valid in isolation while the set fails as a dependency graph:
 
 - **Hidden forward dependencies** — an acceptance criterion quietly needs a mechanism a parallel ticket will build, but no blocking edge declares it. The agent then re-implements the same logic (this is the failure described in #265).
 - **Ticket-invented contracts** — a source spec says "measure latency", and a ticket silently upgrades that to "fail if it exceeds 200 ms", creating a threshold the source never approved.
 - **Un-executable constraints** — a ticket is allowed to produce artifacts under a tracked directory while a hard rule forbids committing exactly those artifacts.
 - **Broken coverage** — a normative source requirement ends up with no ticket, prerequisite, or deferral attached, while the batch README claims no orphans.
+
+A minimal example of the first class:
+
+```text
+Ticket A:
+  Blocked by: None
+  Acceptance: User can see the item in the dashboard.
+
+Ticket B:
+  Implements dashboard rendering.
+```
+
+A declares no blocker, yet its acceptance needs B's output. Per-ticket review misses it; a walk over the graph in dependency order does not.
 
 ## Proposal
 
@@ -27,7 +40,9 @@ Add a small batch-validation step after drafting the vertical slices and before 
 3. **Constraint audit** — each ticket's allowed changes, produced artifacts, and hard constraints must be satisfiable at once.
 4. **Fix, don't publish** — cycles, hidden dependencies, coverage gaps, and contradictory constraints are fixed before the breakdown is presented.
 
-For a small batch this is a quick check; for a large graph it is a real topological simulation. It adds **no** fields to the ticket template and no coverage ceremony.
+A check, not a framework: no new ticket fields, no coverage spreadsheet, no graph tooling. For a small batch this is a quick mental check; for a large graph it is a real topological simulation.
+
+The docs already acknowledge the hidden-dependency shape — an acceptance criterion that can only be satisfied by work another ticket owns — and currently recommend checking by hand. This step makes that check structural.
 
 ## Non-goals
 
