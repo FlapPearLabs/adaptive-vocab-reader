@@ -459,7 +459,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
           }
         }
       }
-      if (textWorkMs > 0) {
+      if (textBatches > 0) {
         perfTotalMs += textWorkMs;
         if (textWorkMs > perfMaxBatchMs) perfMaxBatchMs = textWorkMs;
         perfBatches += textBatches;

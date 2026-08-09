@@ -53,6 +53,11 @@ function injectStyles(root: Document | ShadowRoot = document): void {
 
   const style = document.createElement('style');
   style.textContent = `
+    .avr-word {
+      border: 0;
+      background: transparent;
+      text-decoration: none;
+    }
     .avr-strong {
       text-decoration: underline;
       text-decoration-color: #e74c3c;

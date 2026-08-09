@@ -7,6 +7,7 @@
   <style>
     body { font-family: Georgia, serif; max-width: 720px; margin: 2rem auto; line-height: 1.8; }
     article { padding: 1rem; }
+    article span { color: rgb(190, 0, 190); border-bottom: 3px solid rgb(190, 0, 190); }
     nav { background: #f0f0f0; padding: 0.5rem; margin-bottom: 1rem; }
     button { margin-right: 0.5rem; padding: 0.4rem 0.8rem; }
   </style>
@@ -24,6 +25,7 @@
 
     <!-- 路由切换区 -->
     <div id="view"><p>Original view: a difficult question may teach us to grow and remember.</p></div>
+    <p id="character-data-target">12345</p>
 
     <!-- 非正文区：代码、表单、评论（均应被跳过，不标注） -->
     <pre><code id="codeblock">const challenge = require('language');</code></pre>

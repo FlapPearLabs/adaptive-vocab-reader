@@ -154,7 +154,7 @@ function onceListening(server) {
 }
 
 /** 启动一个独立 Chrome 实例（独立 user-data-dir = 独立本地存储），返回 browser 与 chrome 进程 */
-async function launchChrome(userDataDir, chromeForTesting) {
+async function launchChrome(userDataDir, chromeForTesting, loadExtension = true) {
   // 默认保留 Chrome 原生 sandbox（本机常规路径）。
   // 仅当显式设置环境变量 AVR_E2E_NO_SANDBOX=1 时，才关闭 sandbox 并绕过 /dev/shm 限制
   // （受限 CI / 沙箱环境需要）。两种模式均只改变测试运行环境，不影响任何被测行为或断言。
@@ -164,8 +164,7 @@ async function launchChrome(userDataDir, chromeForTesting) {
   const platformArgs = process.platform === 'darwin' ? ['--use-mock-keychain'] : [];
   const chrome = spawn(chromeForTesting, [
     `--user-data-dir=${userDataDir}`,
-    `--load-extension=${DIST_DIR}`,
-    `--disable-extensions-except=${DIST_DIR}`,
+    ...(loadExtension ? [`--load-extension=${DIST_DIR}`, `--disable-extensions-except=${DIST_DIR}`] : []),
     '--no-first-run', '--no-default-browser-check',
     '--ignore-certificate-errors', '--remote-debugging-port=0', '--enable-logging=stderr', '--v=1',
     '--headless=new',
@@ -1303,16 +1302,48 @@ async function main() {
   // ============================================================
   let browser3;
   let chrome3;
+  let bareBrowser;
+  let bareChrome;
   try {
     currentScenario = FAILURE_TABLE['3'];
+    ({ chrome: bareChrome, browser: bareBrowser } = await launchChrome(path.join(tempDir, 'profile-3-bare'), chromeForTesting, false));
+    const bareLongPage = (await bareBrowser.pages())[0] || (await bareBrowser.newPage());
+    await gotoSafe(bareLongPage, `https://localhost:${PORT}/long-read.html`, { waitUntil: 'networkidle0' });
+    const longBaseline = await bareLongPage.evaluate(() => ({
+      domNodes: document.getElementsByTagName('*').length,
+      scrollHeight: document.documentElement.scrollHeight,
+    }));
+    const bareSpaPage = await bareBrowser.newPage();
+    await gotoSafe(bareSpaPage, `https://localhost:${PORT}/spa-page.html`, { waitUntil: 'networkidle0' });
+    const spaBaseline = await bareSpaPage.evaluate(() => ({
+      domNodes: document.getElementsByTagName('*').length,
+      scrollHeight: document.documentElement.scrollHeight,
+    }));
+    bareBrowser.disconnect();
+    await killChrome(bareChrome);
+    bareBrowser = null;
+    bareChrome = null;
+
     ({ chrome: chrome3, browser: browser3 } = await launchChrome(path.join(tempDir, 'profile-3'), chromeForTesting));
     await wait(1_000);
     const spa = await browser3.newPage();
     spa.on('pageerror', (e) => pageLogs.push(`spa error: ${e.message}`));
+    const assetStarts = new Map();
+    const assetLoadMs = new Map();
+    spa.on('request', (request) => {
+      const asset = path.basename(new URL(request.url()).pathname);
+      if (asset === 'query-dictionary.json' || asset === 'query-forms.json') assetStarts.set(request.url(), performance.now());
+    });
+    spa.on('requestfinished', (request) => {
+      const startedAt = assetStarts.get(request.url());
+      if (startedAt !== undefined) assetLoadMs.set(path.basename(new URL(request.url()).pathname), performance.now() - startedAt);
+    });
+    const spaNavigationStartedAt = performance.now();
     await gotoSafe(spa, `https://localhost:${PORT}/spa-page.html`, { waitUntil: 'networkidle0' });
 
     // 静态正文初始标注
     await spa.waitForSelector('#intro .avr-word', { timeout: 10_000 });
+    const contentReadyMs = performance.now() - spaNavigationStartedAt;
     const introBefore = await spa.$eval('#intro', (el) => el.querySelectorAll('.avr-word').length);
     if (introBefore === 0) throw new Error('SPA 页面静态正文未标注');
 
@@ -1330,6 +1361,76 @@ async function main() {
     );
     const viewCount = await spa.$eval('#view', (el) => el.querySelectorAll('.avr-word').length);
     if (viewCount === 0) throw new Error('路由切换后的新正文未被重新标注');
+
+    const perfBeforeCharacterData = await spa.evaluate(() => JSON.parse(document.documentElement.dataset.avrPerf || '{}'));
+    await spa.evaluate(() => {
+      const text = document.querySelector('#character-data-target')?.firstChild;
+      if (text) text.textContent = 'serendipity';
+    });
+    await spa.waitForSelector('#character-data-target .avr-word[data-word="serendipity"]', { timeout: 10_000 });
+    const characterDataPerf = await spa.evaluate(() => JSON.parse(document.documentElement.dataset.avrPerf || '{}'));
+    const characterDataMeasurement = {
+      batches: characterDataPerf.batches - perfBeforeCharacterData.batches,
+      textNodesScanned: characterDataPerf.textNodesScanned - perfBeforeCharacterData.textNodesScanned,
+      wordsAnnotated: characterDataPerf.wordsAnnotated - perfBeforeCharacterData.wordsAnnotated,
+      totalScanMs: characterDataPerf.totalScanMs - perfBeforeCharacterData.totalScanMs,
+    };
+    if (characterDataMeasurement.batches < 1 || characterDataMeasurement.textNodesScanned < 1 || characterDataMeasurement.wordsAnnotated < 1) {
+      throw new Error(`characterData 增量观测缺失：${JSON.stringify(characterDataMeasurement)}`);
+    }
+
+    const cssIsolation = await spa.$eval('#character-data-target .avr-word', (word) => {
+      const stateClasses = ['avr-light', 'avr-strong', 'avr-strong-first'];
+      const originalClasses = stateClasses.filter((name) => word.classList.contains(name));
+      const read = () => {
+        const style = getComputedStyle(word);
+        return {
+          display: style.display,
+          borderStyle: style.borderBottomStyle,
+          borderWidth: style.borderBottomWidth,
+          decorationLine: style.textDecorationLine,
+          decorationStyle: style.textDecorationStyle,
+        };
+      };
+      word.classList.remove(...stateClasses);
+      const neutral = read();
+      word.classList.add('avr-light');
+      const light = read();
+      word.classList.remove('avr-light');
+      word.classList.add('avr-strong');
+      const strong = read();
+      word.classList.remove(...stateClasses);
+      word.classList.add(...originalClasses);
+      return { neutral, light, strong };
+    });
+    if (
+      cssIsolation.neutral.display !== 'inline'
+      || cssIsolation.neutral.borderStyle !== 'none'
+      || cssIsolation.neutral.borderWidth !== '0px'
+      || cssIsolation.neutral.decorationLine !== 'none'
+      || !cssIsolation.light.decorationLine.includes('underline')
+      || cssIsolation.light.decorationStyle !== 'dotted'
+      || cssIsolation.light.borderStyle !== 'none'
+      || !cssIsolation.strong.decorationLine.includes('underline')
+      || cssIsolation.strong.decorationStyle !== 'solid'
+      || cssIsolation.strong.borderStyle !== 'none'
+    ) {
+      throw new Error(`站点 CSS 破坏扩展透明包装：${JSON.stringify(cssIsolation)}`);
+    }
+    await spa.hover('#character-data-target .avr-word');
+    await spa.waitForSelector('.avr-tooltip', { visible: true, timeout: 5_000 });
+    const selectionTimeline = await dragSelectElementText(spa, '#character-data-target .avr-word');
+    if (!selectionTimeline.includes('mousedown') || !selectionTimeline.includes('mouseup')) {
+      throw new Error(`CSS 压力页真实选择失败：${selectionTimeline.join('>')}`);
+    }
+    await spa.click('body', { offset: { x: 2, y: 2 } });
+    await spa.click('#character-data-target .avr-word');
+    await spa.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true, timeout: 5_000 });
+    await spa.evaluate(() => document.querySelector('.avr-action-menu button[data-avr-status="known"]')?.click());
+    await spa.waitForFunction(
+      () => document.querySelector('#character-data-target .avr-word')?.className === 'avr-word',
+      { timeout: 5_000 },
+    );
 
     // 增量性：初次正文标注未被清空（未退化成全页重扫/丢失）
     const introAfter = await spa.$eval('#intro', (el) => el.querySelectorAll('.avr-word').length);
@@ -1382,12 +1483,24 @@ async function main() {
       await wait(150);
       const p = await readPerf(longPage);
       assertPerfShape(p, `long-read#${s}`);
-      samples.push(p);
+      const after = await longPage.evaluate(() => ({
+        domNodes: document.getElementsByTagName('*').length,
+        scrollHeight: document.documentElement.scrollHeight,
+      }));
+      samples.push({ ...p, baseline: longBaseline, after });
     }
 
     // SPA 页一次性能观测（新 schema；与长文一致调用 assertPerfShape 做 schema 断言，非仅记录）
     const spaPerf = await readPerf(spa);
     if (spaPerf) assertPerfShape(spaPerf, 'spa');
+    const spaAfter = await spa.evaluate(() => ({
+      domNodes: document.getElementsByTagName('*').length,
+      scrollHeight: document.documentElement.scrollHeight,
+    }));
+    const queryAssetLoadMs = Object.fromEntries(assetLoadMs);
+    if (!Number.isFinite(queryAssetLoadMs['query-dictionary.json']) || !Number.isFinite(queryAssetLoadMs['query-forms.json'])) {
+      throw new Error(`未捕获真实 query 资产加载时长：${JSON.stringify(queryAssetLoadMs)}`);
+    }
 
     const perfSummary = samples.map((p, i) => ({
       sample: i + 1,
@@ -1402,11 +1515,19 @@ async function main() {
       layoutShiftScore: p.layoutShiftScore,
       layoutShiftSupported: p.layoutShiftSupported,
       batches: p.batches,
+      domNodesBefore: p.baseline.domNodes,
+      domNodesAfter: p.after.domNodes,
+      domNodesDelta: p.after.domNodes - p.baseline.domNodes,
+      scrollHeightBefore: p.baseline.scrollHeight,
+      scrollHeightAfter: p.after.scrollHeight,
+      scrollHeightDelta: p.after.scrollHeight - p.baseline.scrollHeight,
     }));
-    console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, perf_samples=${JSON.stringify(perfSummary)}, spa_perf=${spaPerf ? JSON.stringify(spaPerf) : 'n/a'}`);
+    console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, query_asset_load_ms=${JSON.stringify(queryAssetLoadMs)}, content_ready_ms=${contentReadyMs.toFixed(1)}, character_data=${JSON.stringify(characterDataMeasurement)}, css_isolation=${JSON.stringify(cssIsolation)}, perf_samples=${JSON.stringify(perfSummary)}, spa_baseline=${JSON.stringify(spaBaseline)}, spa_after=${JSON.stringify(spaAfter)}, spa_perf=${spaPerf ? JSON.stringify(spaPerf) : 'n/a'}`);
   } finally {
     if (browser3) browser3.disconnect();
     await killChrome(chrome3);
+    if (bareBrowser) bareBrowser.disconnect();
+    await killChrome(bareChrome);
   }
 
   // ============================================================
