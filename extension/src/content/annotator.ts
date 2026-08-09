@@ -43,11 +43,11 @@ export interface UpdateResult {
 }
 
 /** CSS 样式注入（仅注入一次） */
-let styleInjected = false;
+let styleRoots = new WeakSet<Document | ShadowRoot>();
 
-function injectStyles(): void {
-  if (styleInjected) return;
-  styleInjected = true;
+function injectStyles(root: Document | ShadowRoot = document): void {
+  if (styleRoots.has(root)) return;
+  styleRoots.add(root);
 
   const style = document.createElement('style');
   style.textContent = `
@@ -121,7 +121,8 @@ function injectStyles(): void {
       box-shadow: 0 2px 8px rgba(0,0,0,0.25);
     }
   `;
-  document.head.appendChild(style);
+  const styleParent = (root as Document).head ?? root;
+  styleParent.appendChild(style);
 }
 
 /** 全局共享的提示浮层 */
@@ -129,6 +130,8 @@ let tooltipEl: HTMLDivElement | null = null;
 let actionMenuEl: HTMLDivElement | null = null;
 let handlersInstalled = false;
 let actionHandler: ((word: string, newStatus: 'known' | 'learning') => void) | null = null;
+let handlersAbortController: AbortController | null = null;
+const spansByWord = new Map<string, Set<HTMLSpanElement>>();
 
 function getTooltip(): HTMLDivElement {
   if (!tooltipEl) {
@@ -140,16 +143,42 @@ function getTooltip(): HTMLDivElement {
   return tooltipEl;
 }
 
-function positionTooltip(tip: HTMLDivElement, x: number, y: number): void {
-  tip.style.display = 'block';
-  tip.style.left = `${x}px`;
-  tip.style.top = `${y - 8}px`;
-  const rect = tip.getBoundingClientRect();
-  if (rect.bottom > window.innerHeight) tip.style.top = `${y - rect.height - 4}px`;
-  if (rect.right > window.innerWidth) tip.style.left = `${window.innerWidth - rect.width - 8}px`;
+export function calculateTooltipPosition(
+  target: Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>,
+  tip: Pick<DOMRect, 'width' | 'height'>,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeTop = 8,
+): { left: number; top: number } {
+  const margin = 8;
+  const left = Math.max(margin, Math.min(target.left, viewportWidth - tip.width - margin));
+  const above = target.top - tip.height - margin;
+  const top = above >= safeTop
+    ? above
+    : Math.min(viewportHeight - tip.height - margin, target.bottom + margin);
+  return { left, top: Math.max(safeTop, top) };
 }
 
-function showTooltip(surfaceForm: string, phonetic: string, pos: string, translation: string, x: number, y: number): void {
+function topSafeInset(): number {
+  let safeTop = 8;
+  for (const el of document.querySelectorAll<HTMLElement>('header, [data-avr-safe-top]')) {
+    const style = getComputedStyle(el);
+    if (style.position !== 'sticky' && style.position !== 'fixed') continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.top <= safeTop && rect.bottom > safeTop) safeTop = rect.bottom + 8;
+  }
+  return safeTop;
+}
+
+function positionTooltip(tip: HTMLDivElement, target: DOMRect): void {
+  tip.style.display = 'block';
+  const rect = tip.getBoundingClientRect();
+  const position = calculateTooltipPosition(target, rect, window.innerWidth, window.innerHeight, topSafeInset());
+  tip.style.left = `${position.left}px`;
+  tip.style.top = `${position.top}px`;
+}
+
+function showTooltip(surfaceForm: string, phonetic: string, pos: string, translation: string, target: DOMRect): void {
   const tip = getTooltip();
   tip.replaceChildren(
     ...[surfaceForm, phonetic, pos, translation].map((line) => {
@@ -158,13 +187,7 @@ function showTooltip(surfaceForm: string, phonetic: string, pos: string, transla
       return row;
     }),
   );
-  positionTooltip(tip, x, y);
-}
-
-function showTranslationTooltip(translation: string, x: number, y: number): void {
-  const tip = getTooltip();
-  tip.textContent = translation;
-  positionTooltip(tip, x, y);
+  positionTooltip(tip, target);
 }
 
 function hideTooltip(): void {
@@ -188,10 +211,19 @@ export function hideAnnotationActionMenu(): void {
   if (actionMenuEl) actionMenuEl.style.display = 'none';
 }
 
+function wordElementFromEvent(event: Event): HTMLElement | null {
+  for (const node of event.composedPath()) {
+    if (node instanceof HTMLElement && node.classList.contains(EXTENSION_CLASS)) return node;
+  }
+  return null;
+}
+
 function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 'learning') => void): void {
   actionHandler = onAction;
   if (handlersInstalled) return;
   handlersInstalled = true;
+  handlersAbortController = new AbortController();
+  const listenerOptions = { signal: handlersAbortController.signal };
 
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
@@ -204,7 +236,7 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
       return;
     }
 
-    const wordEl = target.closest<HTMLElement>(`.${EXTENSION_CLASS}`);
+    const wordEl = wordElementFromEvent(event);
     if (!wordEl) {
       hideAnnotationActionMenu();
       return;
@@ -219,31 +251,25 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
     menu.style.left = `${rect.left}px`;
     menu.style.top = `${rect.bottom + 4}px`;
     menu.style.display = 'flex';
-  });
+  }, listenerOptions);
 
   document.addEventListener('pointerover', (event) => {
-    const wordEl = (event.target as HTMLElement).closest<HTMLElement>(`.${EXTENSION_CLASS}`);
+    const wordEl = wordElementFromEvent(event);
     if (!wordEl) return;
     const rect = wordEl.getBoundingClientRect();
-    if (wordEl.classList.contains('avr-strong')) {
-      const translation = wordEl.dataset.translation;
-      if (translation) showTranslationTooltip(translation, rect.left, rect.top);
-      return;
-    }
-    if (!wordEl.classList.contains('avr-light')) return;
     const translation = wordEl.dataset.tooltipTranslation;
     const phonetic = wordEl.dataset.phonetic;
     const pos = wordEl.dataset.pos;
     if (!translation || !phonetic || !pos) return;
-    showTooltip(wordEl.textContent || '', phonetic, pos, translation, rect.left, rect.top);
-  });
+    showTooltip(wordEl.textContent || '', phonetic, pos, translation, rect);
+  }, listenerOptions);
 
   document.addEventListener('pointerout', (event) => {
-    const from = (event.target as HTMLElement).closest<HTMLElement>(`.${EXTENSION_CLASS}`);
+    const from = wordElementFromEvent(event);
     const related = event.relatedTarget as HTMLElement | null;
     const to = related?.closest?.(`.${EXTENSION_CLASS}`) as HTMLElement | null | undefined;
     if (from && from !== to) hideTooltip();
-  });
+  }, listenerOptions);
 }
 
 /** 根据 decision 决定 CSS 类名 */
@@ -251,7 +277,7 @@ function classForDecision(decision: DisplayDecision, showInlineTranslation: bool
   if (decision === 'strong') {
     return showInlineTranslation ? 'avr-strong-first' : 'avr-strong';
   }
-  return 'avr-light';
+  return decision === 'light' ? 'avr-light' : '';
 }
 
 /**
@@ -269,9 +295,9 @@ export function annotateTextNode(
 
   const text = textNode.textContent || '';
 
-  // 只保留需要标注（decision !== 'none'）且位置合法的项，按 startIndex 排序
+  // 所有 query-eligible 词都保留透明交互 span；decision 仅决定视觉样式。
   const sorted = annotations
-    .filter((a) => a.result.decision !== 'none' && a.startIndex >= 0 && a.endIndex <= text.length && a.startIndex < a.endIndex)
+    .filter((a) => a.startIndex >= 0 && a.endIndex <= text.length && a.startIndex < a.endIndex)
     .sort((a, b) => a.startIndex - b.startIndex);
 
   if (sorted.length === 0) return { spans: [], added: 0, removed: 0 };
@@ -318,7 +344,7 @@ export function annotateTextNode(
       container.appendChild(tn);
     } else {
       const span = document.createElement('span');
-      span.className = `${EXTENSION_CLASS} ${classForDecision(frag.result.decision, frag.result.showInlineTranslation)}`;
+      span.className = [EXTENSION_CLASS, classForDecision(frag.result.decision, frag.result.showInlineTranslation)].filter(Boolean).join(' ');
       span.textContent = frag.rawText; // 保留原文大小写
       if (frag.result.translation) {
         span.setAttribute('data-translation', `【${frag.result.translation}】`);
@@ -327,6 +353,9 @@ export function annotateTextNode(
       span.setAttribute('data-phonetic', frag.phonetic ?? '');
       span.setAttribute('data-pos', frag.pos ?? '');
       span.setAttribute('data-word', frag.result.word);
+      const wordSpans = spansByWord.get(frag.result.word) ?? new Set<HTMLSpanElement>();
+      wordSpans.add(span);
+      spansByWord.set(frag.result.word, wordSpans);
       container.appendChild(span);
       spans.push(span);
       if (generatedNodes) generatedNodes.add(span);
@@ -355,22 +384,8 @@ export function updateWordDisplay(
   showInlineTranslation: boolean,
   generatedNodes?: WeakSet<Node>,
 ): UpdateResult {
-  const spans = document.querySelectorAll<HTMLSpanElement>(`.${EXTENSION_CLASS}[data-word="${word}"]`);
-
-  if (decision === 'none') {
-    // 还原为纯文本节点（移除标注）：每个 span 被一个文本节点替换 → 移除 = 新增 = span 数
-    let removed = 0;
-    let added = 0;
-    spans.forEach((span) => {
-      const text = span.textContent || '';
-      const textNode = document.createTextNode(text);
-      if (generatedNodes) generatedNodes.add(textNode);
-      span.parentNode?.replaceChild(textNode, span);
-      removed++;
-      added++;
-    });
-    return { added, removed };
-  }
+  const spans = [...(spansByWord.get(word) ?? document.querySelectorAll<HTMLSpanElement>(`.${EXTENSION_CLASS}[data-word="${word}"]`))]
+    .filter((span) => span.isConnected);
 
   spans.forEach((span, index) => {
     // 清除旧的提示类，保留 avr-word
@@ -380,7 +395,7 @@ export function updateWordDisplay(
       // index===0 仅用于定位「同页首现的 span 位置」，行内中文的开关由策略的布尔决定。
       const showInline = index === 0 && showInlineTranslation;
       span.classList.add(showInline ? 'avr-strong-first' : 'avr-strong');
-    } else {
+    } else if (decision === 'light') {
       span.classList.add('avr-light');
     }
     if (translation) {
@@ -395,15 +410,18 @@ export function updateWordDisplay(
 /**
  * 初始化标注器（注入样式）
  */
-export function initAnnotator(): void {
-  injectStyles();
+export function initAnnotator(root: Document | ShadowRoot = document): void {
+  injectStyles(root);
 }
 
 /** 重置全局状态（仅供测试使用） */
 export function resetAnnotatorState(): void {
-  styleInjected = false;
+  styleRoots = new WeakSet<Document | ShadowRoot>();
   tooltipEl = null;
   actionMenuEl = null;
+  handlersAbortController?.abort();
+  handlersAbortController = null;
+  spansByWord.clear();
   handlersInstalled = false;
   actionHandler = null;
 }

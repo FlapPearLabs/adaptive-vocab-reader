@@ -20,6 +20,7 @@
 - `extension/src/content/pageScanner.ts` / `scanner.ts`：扫描/包装范围调整（query-eligible 全量而非仅 light/strong），事件委托挂载点。
 - `extension/src/content/index.ts`：内容脚本装配（若需要）。
 - `extension/src/content/dictionary.ts`：仅按 T-QD-1 已定合同消费，不在本票改变合同。
+- `extension/manifest.json`：仅限实现已批准的同源 iframe 独立 content-script injection；不得借此扩大 host、permission 或支持范围。
 - `e2e-verify.cjs`：AC-1/AC-2/AC-4/AC-8 真实 Chrome 场景（含 tooltip 几何机器测量）。
 - 相关单测（annotator/scanner）。
 

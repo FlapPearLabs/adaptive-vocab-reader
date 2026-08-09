@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { annotateTextNode, initAnnotator, resetAnnotatorState, updateWordDisplay, type WordAnnotation } from './annotator';
+import { annotateTextNode, calculateTooltipPosition, initAnnotator, resetAnnotatorState, updateWordDisplay, type WordAnnotation } from './annotator';
 import type { DisplayResult } from '../shared/types';
 
 function makeResult(overrides: Partial<DisplayResult> = {}): DisplayResult {
@@ -127,18 +127,39 @@ describe('annotateTextNode', () => {
   });
 
   // ============================================================
-  // decision=none 不创建 span
+  // decision=none 仍创建透明查询 span
   // ============================================================
 
-  it('decision=none 的词不创建 span', () => {
+  it('decision=none 的 query-eligible 词创建无视觉样式的透明 span', () => {
     const textNode = makeTextNode('Went home.');
     const ann = makeAnnotation(0, 4, { decision: 'none', translation: null });
 
     const { spans } = annotateTextNode(textNode, [ann], () => {});
 
-    expect(spans).toHaveLength(0);
-    // 文本节点未被替换
-    expect(textNode.textContent).toBe('Went home.');
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.className).toBe('avr-word');
+    expect(spans[0]!.textContent).toBe('Went');
+  });
+
+  it('透明 span 仍可经事件委托 hover 查询并 click 反馈', () => {
+    const textNode = makeTextNode('Went home.');
+    const actions: Array<[string, 'known' | 'learning']> = [];
+    const ann = {
+      ...makeAnnotation(0, 4, { word: 'go', decision: 'none', translation: '合成释义' }),
+      phonetic: 'synthetic-phonetic',
+      pos: 'v.',
+    };
+    const { spans } = annotateTextNode(textNode, [ann], (word, status) => actions.push([word, status]));
+
+    spans[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    expect([...document.querySelectorAll('.avr-tooltip > div')].map((row) => row.textContent)).toEqual([
+      'Went', 'synthetic-phonetic', 'v.', '合成释义',
+    ]);
+
+    spans[0]!.click();
+    const learning = document.querySelector<HTMLButtonElement>('.avr-action-menu button[data-avr-status="learning"]');
+    learning!.click();
+    expect(actions).toEqual([['go', 'learning']]);
   });
 
   // ============================================================
@@ -228,7 +249,7 @@ describe('annotateTextNode', () => {
     expect(res.spans).toHaveLength(1);
   });
 
-  it('updateWordDisplay 还原 span→Text：added === removed（每 span 变为一个文本节点）', () => {
+  it('updateWordDisplay 切到 none 时保留透明查询 span：不产生 DOM 增减', () => {
     const textNode = makeTextNode('challenge is here');
     const ann = makeAnnotation(0, 9, {
       word: 'challenge',
@@ -240,10 +261,35 @@ describe('annotateTextNode', () => {
     annotateTextNode(textNode, [ann], () => {});
 
     const res = updateWordDisplay('challenge', 'none', null, false);
-    // 1 个 span 被替换为 1 个文本节点：移除 1，新增 1（netNodes 修正为 0）
-    expect(res.removed).toBe(1);
-    expect(res.added).toBe(1);
-    expect(document.querySelectorAll('.avr-word[data-word="challenge"]').length).toBe(0);
+    expect(res.removed).toBe(0);
+    expect(res.added).toBe(0);
+    const span = document.querySelector<HTMLSpanElement>('.avr-word[data-word="challenge"]');
+    expect(span).not.toBeNull();
+    expect(span!.className).toBe('avr-word');
+  });
+});
+
+describe('tooltip 几何', () => {
+  it('优先放在目标上方，顶部不足时翻转到底部，并限制在视口内', () => {
+    expect(calculateTooltipPosition(
+      { left: 100, top: 100, right: 140, bottom: 120 },
+      { width: 80, height: 30 },
+      300,
+      200,
+    )).toEqual({ left: 100, top: 62 });
+    expect(calculateTooltipPosition(
+      { left: 290, top: 5, right: 300, bottom: 25 },
+      { width: 80, height: 30 },
+      300,
+      200,
+    )).toEqual({ left: 212, top: 33 });
+    expect(calculateTooltipPosition(
+      { left: 100, top: 70, right: 140, bottom: 90 },
+      { width: 80, height: 30 },
+      300,
+      200,
+      64,
+    )).toEqual({ left: 100, top: 98 });
   });
 });
 
@@ -258,7 +304,7 @@ describe('updateWordDisplay', () => {
     initAnnotator();
   });
 
-  it('标记会（none）→ 该词 span 还原为纯文本节点', () => {
+  it('标记会（none）→ 该词保留透明查询 span', () => {
     // 先标注一个 "challenge" 强提示
     const textNode = makeTextNode('challenge is here');
     const ann = makeAnnotation(0, 9, {
@@ -277,9 +323,10 @@ describe('updateWordDisplay', () => {
     // 标记会 → 增量更新为不提示
     updateWordDisplay('challenge', 'none', null, false);
 
-    // span 应被还原为纯文本
+    // span 保留以支持无视觉提示时的 hover/click 查询
     spans = document.querySelectorAll<HTMLSpanElement>('.avr-word[data-word="challenge"]');
-    expect(spans.length).toBe(0);
+    expect(spans.length).toBe(1);
+    expect(spans[0]!.className).toBe('avr-word');
     // 文本内容保留
     expect(document.body.textContent).toContain('challenge');
   });

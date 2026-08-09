@@ -60,6 +60,17 @@ function saveStateChange(word: string, newStatus: WordState['status']): void {
   });
 }
 
+function installOpenShadowRoots(pageScanner: PageScanner, root: ParentNode): void {
+  for (const host of root.querySelectorAll<HTMLElement>('*')) {
+    const shadow = host.shadowRoot;
+    if (!shadow) continue;
+    initAnnotator(shadow);
+    pageScanner.scanDocument(shadow);
+    pageScanner.observeDynamic(shadow);
+    installOpenShadowRoots(pageScanner, shadow);
+  }
+}
+
 // ============================================================
 // 启动
 // ============================================================
@@ -94,6 +105,8 @@ async function main(): Promise<void> {
 
   // 监听动态内容（增量处理，不重复扫描已处理节点）
   scanner.observeDynamic(document.body);
+  // 开放 Shadow Root 可直接扫描；同源 iframe 由 manifest 的 all_frames 独立注入。
+  installOpenShadowRoots(scanner, document);
 }
 
 // 监听来自 Service Worker 的状态更新（其他标签页的变更广播）

@@ -308,6 +308,14 @@ async function main() {
           return;
         }
       }
+      if (request.url === '/ux-frame.html') {
+        const f = path.join(tempDir, 'ux-frame.html');
+        if (fs.existsSync(f)) {
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          response.end(fs.readFileSync(f, 'utf8'));
+          return;
+        }
+      }
       // T5 跨标签同步页（sync-*.html）：由测试动态写入 tempDir，同一 wordKey 不同词形分页。
       const syncHit = /^\/sync-([a-z0-9-]+)\.html$/.exec(request.url || '');
       if (syncHit) {
@@ -401,11 +409,11 @@ async function main() {
     if (!persistedChallenge) throw new Error('刷新后无法对 challenge 执行“会”覆盖验收');
     await persistedChallenge.click();
     await page.click('.avr-action-menu button[data-avr-status="known"]');
-    await page.waitForFunction(() => document.querySelectorAll('.avr-word[data-word="challenge"]').length === 0);
+    await page.waitForFunction(() => [...document.querySelectorAll('.avr-word[data-word="challenge"]')].every((el) => !el.classList.contains('avr-light') && !el.classList.contains('avr-strong') && !el.classList.contains('avr-strong-first')));
     await page.reload({ waitUntil: 'networkidle0' });
     await wait(500);
-    const knownAfterReload = await page.evaluate(() => document.querySelectorAll('.avr-word[data-word="challenge"]').length);
-    if (knownAfterReload !== 0) throw new Error('“会”状态未立即覆盖并跨刷新保留');
+    const knownAfterReload = await page.evaluate(() => [...document.querySelectorAll('.avr-word[data-word="challenge"]')].every((el) => el.className === 'avr-word'));
+    if (!knownAfterReload) throw new Error('“会”状态未立即覆盖为透明查询 span 并跨刷新保留');
     const afterChallengeManual = (await worker1.evaluate(async () => chrome.storage.local.get('avr_vocab_snapshot'))).avr_vocab_snapshot;
     if (!isDeepStrictEqual(afterChallengeManual.assessmentEvidence, evidenceBeforeManual)) {
       throw new Error('R-EVD-1 失败：手动标记 challenge 改写了 AssessmentEvidence');
@@ -431,7 +439,7 @@ async function main() {
     await abilities.click();
     await page.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true });
     await page.click('.avr-action-menu button[data-avr-status="known"]');
-    await page.waitForFunction(() => document.querySelectorAll('.avr-word[data-word="ability"]').length === 0, { timeout: 5_000 });
+    await page.waitForFunction(() => [...document.querySelectorAll('.avr-word[data-word="ability"]')].every((el) => el.className === 'avr-word'), { timeout: 5_000 });
     const snapIso = (await worker1.evaluate(async () => chrome.storage.local.get('avr_vocab_snapshot'))).avr_vocab_snapshot;
     if (snapIso.words?.ability?.status !== 'known' || snapIso.words?.abilities) {
       throw new Error(`词形未以 core wordKey 合并存储：${JSON.stringify(Object.keys(snapIso.words || {}))}`);
@@ -441,8 +449,8 @@ async function main() {
     }
     await page.reload({ waitUntil: 'networkidle0' });
     await wait(400);
-    const abilAfter = await page.evaluate(() => document.querySelectorAll('.avr-word[data-word="ability"]').length);
-    if (abilAfter !== 0) throw new Error('共享 wordKey 的 known 状态未跨刷新保留');
+    const abilAfter = await page.evaluate(() => [...document.querySelectorAll('.avr-word[data-word="ability"]')].every((el) => el.className === 'avr-word'));
+    if (!abilAfter) throw new Error('共享 wordKey 的 known 状态未跨刷新保留为透明查询 span');
 
     console.log(`E2E #1 PASS: annotations=${initial.annotations}, unknown=${initial.unknown}, challenge_first=${persisted.first}, challenge_repeats=${persisted.repeats}, form_merge=abilities→ability(wordKey), local_snapshot=minimal`);
   } finally {
@@ -466,11 +474,20 @@ async function main() {
     if (lookupPack(absentWord, dictCore, forms) !== null) {
       throw new Error(`R-UX-S3 前置失败：未收录词 ${absentWord} 意外命中真实词包`);
     }
-    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><article><p><span id="ability-word">abilities</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article></body></html>`);
+    fs.writeFileSync(path.join(tempDir, 'ux-frame.html'), '<!doctype html><article><p>ability</p></article>');
+    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="ability-word">abilities</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article><div id="shadow-host"></div><iframe src="/ux-frame.html"></iframe><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML = '<article><p>ability</p></article>';</script></body></html>`);
     const uxPage = await browserUx1.newPage();
     uxPage.on('pageerror', (error) => pageLogs.push(`ux1 pageerror: ${error.message}`));
     await gotoSafe(uxPage, `https://localhost:${PORT}/ux-reading.html`, { waitUntil: 'networkidle0' });
     await uxPage.waitForSelector('.avr-light[data-word="ability"]', { timeout: 10_000 });
+
+    await uxPage.waitForFunction(() => document.getElementById('shadow-host')?.shadowRoot?.querySelector('.avr-word'));
+    await uxPage.evaluate(() => document.getElementById('shadow-host')?.shadowRoot?.querySelector('.avr-word')?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true })));
+    await uxPage.waitForSelector('.avr-action-menu button[data-avr-status="learning"]', { visible: true, timeout: 5_000 });
+    await uxPage.evaluate(() => document.body.click());
+    const iframe = uxPage.frames().find((frame) => frame.url().endsWith('/ux-frame.html'));
+    if (!iframe) throw new Error('R-INPUT-2 失败：同源 iframe 未加载');
+    await iframe.waitForSelector('.avr-word[data-word="ability"]', { timeout: 10_000 });
 
     // R-UX-T1/T2：tooltip 固定四行；surfaceForm=abilities，三项元数据逐项来自 ability core 条目。
     await uxPage.evaluate(() => document.querySelector('.avr-light[data-word="ability"]')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
@@ -479,6 +496,16 @@ async function main() {
     const [abilityPhonetic, abilityPos, abilityTranslation] = dictCore.ability;
     if (JSON.stringify(tooltipLines) !== JSON.stringify(['abilities', abilityPhonetic, abilityPos, abilityTranslation])) {
       throw new Error(`R-UX-T1/T2 失败：tooltip 四行或 ability 元数据不匹配：${JSON.stringify(tooltipLines)}`);
+    }
+    const tooltipGeometry = await uxPage.evaluate(() => {
+      const tip = document.querySelector('.avr-tooltip').getBoundingClientRect();
+      const target = document.querySelector('.avr-light[data-word="ability"]').getBoundingClientRect();
+      const header = document.querySelector('[data-avr-safe-top]').getBoundingClientRect();
+      return { tip: { left: tip.left, top: tip.top, right: tip.right, bottom: tip.bottom }, target: { left: target.left, top: target.top, right: target.right, bottom: target.bottom }, headerBottom: header.bottom };
+    });
+    const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    if (tooltipGeometry.tip.top < tooltipGeometry.headerBottom || overlaps(tooltipGeometry.tip, tooltipGeometry.target)) {
+      throw new Error(`R-TOOLTIP-3/AC-8 失败：tooltip 侵入 header 或遮挡目标：${JSON.stringify(tooltipGeometry)}`);
     }
 
     const workerUx1 = await getWorker(browserUx1);
@@ -532,7 +559,7 @@ async function main() {
     await uxPage.evaluate(() => document.querySelector('.avr-word[data-word="challenge"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await uxPage.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true, timeout: 5_000 });
     await uxPage.evaluate(() => document.querySelector('.avr-action-menu button[data-avr-status="known"]')?.click());
-    await uxPage.waitForFunction(() => document.querySelectorAll('.avr-word[data-word="challenge"]').length === 0, { timeout: 5_000 });
+    await uxPage.waitForFunction(() => [...document.querySelectorAll('.avr-word[data-word="challenge"]')].every((el) => el.className === 'avr-word'), { timeout: 5_000 });
     const afterKnown = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     if (afterKnown.words?.challenge?.status !== 'known' || afterKnown.words?.challenge?.source !== 'manual') {
       throw new Error(`R-UX-S4 失败：challenge 未写为 manual known：${JSON.stringify(afterKnown.words?.challenge)}`);
@@ -774,18 +801,18 @@ async function main() {
     console.log('[stage2] option0 clicked, waiting for sync...');
     await wait(200);
     await pageA.waitForFunction(
-      (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
+      (w) => [...document.querySelectorAll(`.avr-word[data-word="${w}"]`)].every((el) => el.className === 'avr-word'),
       { timeout: 10_000 }, word0,
     );
-    console.log('[stage2] pageA synced (word0 removed)');
+    console.log('[stage2] pageA synced (word0 became transparent query span)');
     await pageB.waitForFunction(
-      (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
+      (w) => [...document.querySelectorAll(`.avr-word[data-word="${w}"]`)].every((el) => el.className === 'avr-word'),
       { timeout: 8_000 }, word0,
     );
     console.log('[stage2] pageB synced');
     const afterA = await countWord(pageA);
     const afterB = await countWord(pageB);
-    if (afterA !== 0 || afterB !== 0) throw new Error(`多标签页未同步更新：${word0}（A=${afterA}, B=${afterB}）`);
+    if (afterA !== beforeA || afterB !== beforeB) throw new Error(`透明查询 span 数异常：${word0}（A=${afterA}, B=${afterB}）`);
 
     // 逐题作答剩余 49 题：第 1–24 题答对，第 25–49 题答错（第 0 题已在上一步答对）
     // 用 page.evaluate 点击（同上，规避 ElementHandle.click 协议超时）
@@ -834,7 +861,7 @@ async function main() {
       const word = plan.questions[i].word;
       const cls = pageUpdate[word];
       if (i < 25) {
-        if (cls !== undefined) detail.push(`${word} 应为 known 无标注，实际 ${cls}`);
+        if (cls !== 'none') detail.push(`${word} 应为 known 透明查询 span，实际 ${cls}`);
       } else if (cls !== 'strong') {
         detail.push(`${word} 应为 learning→strong，实际 ${cls}`);
       }
@@ -902,7 +929,7 @@ async function main() {
     });
     // 页面提示必须按 manual 动作发生变化：learning → known → 不再提示
     await page2.waitForFunction(
-      (w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length === 0,
+      (w) => [...document.querySelectorAll(`.avr-word[data-word="${w}"]`)].every((el) => el.className === 'avr-word'),
       { timeout: 5_000 }, manualWord,
     );
     // 证明 manual 没有改写 AssessmentEvidence（R-EVD-1）
@@ -1038,7 +1065,7 @@ async function main() {
     await popupUx2.evaluate((word) => {
       document.querySelector(`.notebook-row[data-word="${word}"] .notebook-known`)?.click();
     }, manualWord);
-    await readingAfterRestart.waitForFunction((word) => document.querySelectorAll(`.avr-word[data-word="${word}"]`).length === 0, { timeout: 10_000 }, manualWord);
+    await readingAfterRestart.waitForFunction((word) => [...document.querySelectorAll(`.avr-word[data-word="${word}"]`)].every((el) => el.className === 'avr-word'), { timeout: 10_000 }, manualWord);
     const afterManualKnown = await readSnapshotUx2();
     if (afterManualKnown.words?.[manualWord]?.status !== 'known' || afterManualKnown.words?.[manualWord]?.source !== 'manual') {
       throw new Error(`R-UX-N2 失败：popup 未写入 manual known：${JSON.stringify(afterManualKnown.words?.[manualWord])}`);
@@ -1597,7 +1624,7 @@ async function main() {
     // `.avr-strong` 选择器不匹配它，必须同时匹配两个 class。
     const strongSel = (w) => `.avr-word[data-word="${w}"].avr-strong, .avr-word[data-word="${w}"].avr-strong-first`;
     const waitNoAnnot = (page, w) =>
-      page.waitForFunction((ww) => document.querySelectorAll(`.avr-word[data-word="${ww}"]`).length === 0, { timeout: 10_000 }, w);
+      page.waitForFunction((ww) => [...document.querySelectorAll(`.avr-word[data-word="${ww}"]`)].every((el) => el.className === 'avr-word'), { timeout: 10_000 }, w);
 
     // ---- 构造受控 v3 快照（隔离测试状态 + 确定性 seed + 证据布置）----
     const core6 = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'dict-core.json'), 'utf8'));
@@ -1605,11 +1632,11 @@ async function main() {
     const bands6 = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'frequency-bands.json'), 'utf8'));
     const evenBands = [0, 2, 4, 6, 8]; // completedRoundIndex=0（偶数轮）选频段（R-DLY-1）
 
-    // 屈折候选：core 词有 forms 屈折映射、且该屈折形式不是 core 主词条。
-    // （若屈折形式本身是 core 词，页面将解析为其自身 wordKey，无法验证共享键。）
+    // 屈折候选同时满足固定测评包与 query 词典的主词条/词形合同。
+    // 若 query 资产把该词形收为精确主词条，它不会共享 core wordKey，不能用于此场景。
     const hasValidInflected = (w) => {
       const inf = Object.entries(forms6).find(([surface, wk]) => wk === w && surface !== w);
-      return !!inf && !Object.prototype.hasOwnProperty.call(core6, inf[0]);
+      return !!inf && !!queryDictionary[w] && queryForms[inf[0]] === w;
     };
     const inflectedCore = Object.keys(core6).filter(hasValidInflected);
     const dailyCandidates = inflectedCore.filter((w) => evenBands.includes(bands6[w] ?? 9));

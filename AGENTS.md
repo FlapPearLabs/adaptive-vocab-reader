@@ -97,6 +97,7 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 9. **失败先修 ticket**：validation 发现 cycle、隐藏依赖、coverage 缺口或矛盾约束时，先修 ticket，不进入 implementation。
 10. **复杂度适配**：简单 batch 可快速 mental/syntactic 检查；复杂 batch 必须系统走 topological simulation。不得为 validation 给所有 ticket 增加新字段或强制 coverage spreadsheet。
 11. **数据依赖示例验证**：当验收中的具体词形、canonicalization 或其他 identity 示例依赖已批准且可用的数据源时，必须先验证其前提；具体 fixture 或示例不得覆盖或抵触上位通用合同。
+12. **浏览器部署 seam**：ticket 验收涉及 frame 注入、扩展入口或其他声明式浏览器部署行为时，必须从真实交付路径反推并列出拥有该行为的配置文件；不得把它误当成纯内容脚本内部逻辑。
 
 ## 5. 实现与文件安全
 

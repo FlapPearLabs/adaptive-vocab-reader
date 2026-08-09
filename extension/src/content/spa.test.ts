@@ -69,7 +69,7 @@ describe('SPA 动态插入（规格 §11）', () => {
     expect(nav.querySelectorAll('.avr-word').length).toBe(0); // 非正文区跳过
   });
 
-  it('查询词典扩容不提前改变固定测评包的展示范围', () => {
+  it('查询词典包外词获得透明交互 span，但不提前获得固定测评包的视觉提示', () => {
     document.body.innerHTML = '<article><p id="intro">Alpha and queryonly are present.</p></article>';
     const dictionary = createDictionary(
       {
@@ -88,7 +88,9 @@ describe('SPA 动态插入（规格 §11）', () => {
     scanner.scanDocument(document.body);
 
     expect(document.querySelectorAll('.avr-word[data-word="alpha"]')).toHaveLength(1);
-    expect(document.querySelectorAll('.avr-word[data-word="queryonly"]')).toHaveLength(0);
+    const queryOnly = document.querySelector<HTMLSpanElement>('.avr-word[data-word="queryonly"]');
+    expect(queryOnly).not.toBeNull();
+    expect(queryOnly!.className).toBe('avr-word');
   });
 
   it('动态追加正文被增量标注，已标注内容不被重扫或重置（MutationObserver 路径）', async () => {
@@ -169,5 +171,18 @@ describe('SPA 动态插入（规格 §11）', () => {
     // 新插入的 "challenge" 被标注，旧词未变化
     expect(intro.querySelectorAll('.avr-word').length).toBe(3); // alpha, beta, challenge
     expect(document.querySelector<HTMLElement>('.avr-word[data-word="challenge"]')).not.toBeNull();
+  });
+
+  it('characterData 更新后重新扫描新的 query-eligible 词', async () => {
+    document.body.innerHTML = '<article><p id="target">plain text</p></article>';
+    const { scanner } = makeScanner();
+    scanner.scanDocument(document.body);
+    scanner.observeDynamic(document.body);
+
+    const textNode = document.getElementById('target')!.firstChild as Text;
+    textNode.data = 'Alpha appears after an in-place update.';
+    await tick();
+
+    expect(document.querySelectorAll('.avr-word[data-word="alpha"]')).toHaveLength(1);
   });
 });

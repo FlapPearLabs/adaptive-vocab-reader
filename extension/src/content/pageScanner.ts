@@ -8,7 +8,7 @@
 // - 已处理的文本节点通过 processedNodes 守卫，不会被重复标注（不全页重扫）
 // - MutationObserver 只把「新增的节点子树」交给 scanDocument，做增量标注
 // - 状态变更（applyWordDisplay）只更新匹配 data-word 的已有 span
-import type { FrequencyBands, WordState } from '../shared/types';
+import type { DisplayResult, FrequencyBands, WordState } from '../shared/types';
 import { createVocabStrategy } from '../strategy/index';
 import type { Dictionary } from './dictionary';
 import { extractWordsFromText, isContentNode } from './scanner';
@@ -104,14 +104,37 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   const generatedNodes: WeakSet<Node> = new WeakSet<Node>();
   let selectionActionEl: HTMLButtonElement | null = null;
 
-  function isAssessmentDisplayWord(wordKey: string): boolean {
-    return !deps.assessmentBands || Object.hasOwn(deps.assessmentBands, wordKey);
+  function canUseAssessmentDisplay(surfaceForm: string): boolean {
+    if (!deps.assessmentBands) return true;
+    const assessmentLookup = deps.assessmentDictionary?.lookup(surfaceForm) ?? deps.dictionary.lookup(surfaceForm);
+    return Boolean(assessmentLookup && Object.hasOwn(deps.assessmentBands, assessmentLookup.wordKey));
   }
 
-  function lookupForDisplay(surfaceForm: string) {
-    return deps.assessmentDictionary
-      ? deps.assessmentDictionary.lookup(surfaceForm)
-      : deps.dictionary.lookup(surfaceForm);
+  function getDisplayResult(surfaceForm: string, occurrenceCount: number): DisplayResult | null {
+    const lookup = deps.dictionary.lookup(surfaceForm);
+    if (!lookup) return null;
+
+    const state = vocabState[lookup.wordKey];
+    if (!canUseAssessmentDisplay(surfaceForm)) {
+      return {
+        word: lookup.wordKey,
+        decision: state?.status === 'learning' ? 'strong' : 'none',
+        surfaceForm,
+        translation: state?.status === 'learning' ? lookup.entry.translation : null,
+        showInlineTranslation: state?.status === 'learning' && occurrenceCount === 1,
+      };
+    }
+
+    return createVocabStrategy().getDisplayDecision(
+      {
+        word: lookup.wordKey,
+        surfaceForm,
+        entry: lookup.entry,
+        band: deps.assessmentBands?.[lookup.wordKey] ?? null,
+        occurrenceCount,
+      },
+      state,
+    );
   }
 
   function hideSelectionAction(): void {
@@ -284,38 +307,22 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       return;
     }
 
-    const strategy = createVocabStrategy();
     const annotations: WordAnnotation[] = [];
     for (const occ of occurrences) {
-      const lookup = lookupForDisplay(occ.word);
+      const lookup = deps.dictionary.lookup(occ.word);
       if (!lookup) continue;
       const wordKey = lookup.wordKey;
-      // T-QD-1 仅切换查询资产；主动展示仍保持固定测评包旧语义，待 T-INT-2/T-HINT-4 另行解耦。
-      if (!isAssessmentDisplayWord(wordKey)) continue;
       const occurrenceCount = (pageOccurrenceCounts.get(wordKey) ?? 0) + 1;
       pageOccurrenceCounts.set(wordKey, occurrenceCount);
-
-      const state = vocabState[wordKey];
-      const result = strategy.getDisplayDecision(
-        {
-          word: wordKey,
-          surfaceForm: occ.word,
-          entry: lookup.entry,
-          band: deps.assessmentBands?.[wordKey] ?? null,
-          occurrenceCount,
-        },
-        state,
-      );
-
-      if (result.decision !== 'none') {
-        annotations.push({
-          result,
-          phonetic: lookup.entry.phonetic,
-          pos: lookup.entry.pos,
-          startIndex: occ.startIndex,
-          endIndex: occ.endIndex,
-        });
-      }
+      const result = getDisplayResult(occ.word, occurrenceCount);
+      if (!result) continue;
+      annotations.push({
+        result,
+        phonetic: lookup.entry.phonetic,
+        pos: lookup.entry.pos,
+        startIndex: occ.startIndex,
+        endIndex: occ.endIndex,
+      });
     }
 
     if (annotations.length > 0) {
@@ -383,21 +390,9 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   }
 
   function applyWordDisplay(word: string): void {
-    const lookup = lookupForDisplay(word);
-    if (!lookup || !isAssessmentDisplayWord(lookup.wordKey)) return;
-
-    const strategy = createVocabStrategy();
-    const state = vocabState[word];
-    const result = strategy.getDisplayDecision(
-      {
-        word: lookup.wordKey,
-        surfaceForm: word,
-        entry: lookup.entry,
-        band: deps.assessmentBands?.[lookup.wordKey] ?? null,
-        occurrenceCount: 1, // 增量更新不依赖出现次数
-      },
-      state,
-    );
+    const lookup = deps.dictionary.lookup(word);
+    const result = getDisplayResult(word, 1);
+    if (!lookup || !result) return;
 
     const res = updateWordDisplay(lookup.wordKey, result.decision, result.translation, result.showInlineTranslation, generatedNodes);
     if (res.added > 0) perfDomNodesAdded += res.added;
@@ -410,6 +405,17 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       let textWorkMs = 0;
       let textBatches = 0;
       for (const mutation of mutations) {
+        if (mutation.type === 'characterData' && mutation.target.nodeType === Node.TEXT_NODE) {
+          const textNode = mutation.target as Text;
+          if (!generatedNodes.has(textNode) && !textNode.parentElement?.closest('.avr-word')) {
+            // 既有文本节点的内容更新需要重新进入扫描；WeakSet 守卫只抑制未变化节点。
+            processedNodes.delete(textNode);
+            const s = nowMs();
+            processTextNode(textNode);
+            textWorkMs += nowMs() - s;
+            textBatches++;
+          }
+        }
         for (const node of mutation.addedNodes) {
           // 彻底跳过扩展自身注入的标注节点（span 与文本碎片），杜绝 MutationObserver 自触发
           if (generatedNodes.has(node)) continue;
@@ -441,7 +447,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     observer.observe(root, {
       childList: true,
       subtree: true,
-      characterData: false,
+      characterData: true,
     });
 
     return observer;
