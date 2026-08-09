@@ -26,6 +26,8 @@ import {
 } from './strategy/index';
 import type { VocabStrategy } from './shared/types';
 import type { VocabularyEstimateResult } from './strategy/index';
+import { loadDictionaryFromJSON, type Dictionary } from './content/dictionary';
+import { selectNotebookEntries } from './popupNotebook';
 
 interface Profile {
   installSeed: string;
@@ -58,11 +60,13 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
 }
 
 /** 加载静态词典产物（与内容脚本相同来源） */
-async function loadDict(): Promise<{ core: DictCore; forms: FormsMap; bands: FrequencyBands }> {
-  const [coreJSON, formsJSON, bandsJSON] = await Promise.all([
+async function loadDict(): Promise<{ core: DictCore; forms: FormsMap; bands: FrequencyBands; queryDictionary: Dictionary }> {
+  const [coreJSON, formsJSON, bandsJSON, queryJSON, queryFormsJSON] = await Promise.all([
     fetch(chrome.runtime.getURL('data/dict-core.json')).then((r) => r.text()),
     fetch(chrome.runtime.getURL('data/forms.json')).then((r) => r.text()),
     fetch(chrome.runtime.getURL('data/frequency-bands.json')).then((r) => r.text()),
+    fetch(chrome.runtime.getURL('data/query-dictionary.json')).then((r) => r.text()),
+    fetch(chrome.runtime.getURL('data/query-forms.json')).then((r) => r.text()),
   ]);
 
   const rawCore: Record<string, [string, string, string]> = JSON.parse(coreJSON);
@@ -72,7 +76,7 @@ async function loadDict(): Promise<{ core: DictCore; forms: FormsMap; bands: Fre
   }
   const forms: FormsMap = JSON.parse(formsJSON);
   const bands: FrequencyBands = JSON.parse(bandsJSON);
-  return { core, forms, bands };
+  return { core, forms, bands, queryDictionary: loadDictionaryFromJSON(queryJSON, queryFormsJSON) };
 }
 
 // ============================================================
@@ -84,7 +88,7 @@ async function main(): Promise<void> {
   if (!app) return;
 
   const strategy: VocabStrategy = createVocabStrategy();
-  const [{ core, forms, bands }, profile, initialTest, dailyState, initialWords] = await Promise.all([
+  const [{ core, forms, bands, queryDictionary }, profile, initialTest, dailyState, initialWords] = await Promise.all([
     loadDict(),
     sendMessage<Profile>({ type: 'GET_PROFILE' }),
     sendMessage<{ test: InitialTestState | null }>({ type: 'GET_INITIAL_TEST' }).then((r) => r.test),
@@ -149,13 +153,11 @@ async function main(): Promise<void> {
     app!.append(tabs);
   }
 
-  /** 生词本只消费 WordState；wordKey 必须是当前 core 主词条，无法映射旧 key 保留在 storage 但不展示。 */
+  /** 生词本只消费 WordState；查询词典无法解析的历史 key 保留在 storage 但不展示。 */
   function renderNotebook(): void {
     const screen = el('div', 'screen notebook');
     screen.append(el('h1', 'title', '生词本'));
-    const learningWords = Object.entries(words)
-      .filter(([word, state]) => state.status === 'learning' && core[word] !== undefined)
-      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt);
+    const learningWords = selectNotebookEntries(words, queryDictionary);
     if (learningWords.length === 0) {
       screen.append(el('p', 'notebook-empty', '暂无生词。'));
       app!.append(screen);
@@ -163,19 +165,18 @@ async function main(): Promise<void> {
     }
 
     const list = el('div', 'notebook-list');
-    for (const [word, state] of learningWords) {
-      const entry = core[word]!;
+    for (const entry of learningWords) {
       const row = el('div', 'notebook-row');
-      row.dataset.word = word;
+      row.dataset.word = entry.word;
       row.append(
-        el('div', 'notebook-word', word),
+        el('div', 'notebook-word', entry.word),
         el('div', 'notebook-phonetic', entry.phonetic),
         el('div', 'notebook-pos', entry.pos),
         el('div', 'notebook-translation', entry.translation),
       );
       const known = el('button', 'notebook-known', '已掌握') as HTMLButtonElement;
       known.type = 'button';
-      known.onclick = () => void markNotebookWordKnown(word);
+      known.onclick = () => void markNotebookWordKnown(entry.word);
       row.append(known);
       list.append(row);
     }

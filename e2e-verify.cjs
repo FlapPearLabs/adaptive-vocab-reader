@@ -358,6 +358,14 @@ async function main() {
           return;
         }
       }
+      if (request.url === '/outside-query.html') {
+        const f = path.join(tempDir, 'outside-query.html');
+        if (fs.existsSync(f)) {
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          response.end(fs.readFileSync(f, 'utf8'));
+          return;
+        }
+      }
       // T5 跨标签同步页（sync-*.html）：由测试动态写入 tempDir，同一 wordKey 不同词形分页。
       const syncHit = /^\/sync-([a-z0-9-]+)\.html$/.exec(request.url || '');
       if (syncHit) {
@@ -1140,7 +1148,61 @@ async function main() {
     await popupUx2.waitForSelector('.summary', { timeout: 10_000 });
     await popupUx2.waitForSelector('.estimate-point', { timeout: 10_000 });
     const estimateBeforeNotebook = await popupUx2.$eval('.estimate', (el) => el.textContent || '');
-    const evidenceBeforeNotebook = (await readSnapshotUx2()).assessmentEvidence;
+    const snapshotBeforeNotebook = await readSnapshotUx2();
+    const evidenceBeforeNotebook = snapshotBeforeNotebook.assessmentEvidence;
+    if (dictCore.serendipity || !queryDictionary.serendipity) {
+      throw new Error('T-NB-6 前置失败：serendipity 必须是 query dictionary 内、assessment core 外词');
+    }
+    fs.writeFileSync(path.join(tempDir, 'outside-query.html'), '<!doctype html><html><body><article><p><span id="outside-word">serendipity</span></p></article></body></html>');
+    const outsidePageA = await browserUx2.newPage();
+    const outsidePageB = await browserUx2.newPage();
+    await gotoSafe(outsidePageA, `https://localhost:${PORT}/outside-query.html`, { waitUntil: 'networkidle0' });
+    await gotoSafe(outsidePageB, `https://localhost:${PORT}/outside-query.html`, { waitUntil: 'networkidle0' });
+    await outsidePageA.waitForSelector('.avr-word[data-word="serendipity"]', { timeout: 10_000 });
+    await outsidePageB.waitForSelector('.avr-word[data-word="serendipity"]', { timeout: 10_000 });
+    await outsidePageA.evaluate(() => document.querySelector('.avr-word[data-word="serendipity"]')?.click());
+    await outsidePageA.evaluate(() => document.querySelector('.avr-action-menu button[data-avr-status="learning"]')?.click());
+    await outsidePageA.waitForSelector('.avr-strong-first[data-word="serendipity"]', { timeout: 5_000 });
+    await outsidePageB.waitForSelector('.avr-strong-first[data-word="serendipity"]', { timeout: 5_000 });
+    const afterOutsideLearning = await readSnapshotUx2();
+    if (afterOutsideLearning.words?.serendipity?.status !== 'learning' || afterOutsideLearning.words?.serendipity?.source !== 'manual' || !isDeepStrictEqual(afterOutsideLearning.assessmentEvidence, evidenceBeforeNotebook)) {
+      throw new Error('T-NB-6 失败：包外 learning 未写入 manual 状态或污染 Evidence');
+    }
+    await popupUx2.evaluate(() => document.querySelector('.notebook-tab')?.click());
+    await popupUx2.waitForSelector('.notebook-row[data-word="serendipity"]', { timeout: 10_000 });
+    const outsideMetadata = await popupUx2.$eval('.notebook-row[data-word="serendipity"]', (row) => ({
+      phonetic: row.querySelector('.notebook-phonetic')?.textContent,
+      pos: row.querySelector('.notebook-pos')?.textContent,
+      translation: row.querySelector('.notebook-translation')?.textContent,
+    }));
+    const [outsidePhonetic, outsidePos, outsideTranslation] = queryDictionary.serendipity;
+    if (JSON.stringify(outsideMetadata) !== JSON.stringify({ phonetic: outsidePhonetic, pos: outsidePos, translation: outsideTranslation })) {
+      throw new Error(`T-NB-6 失败：popup 未展示 query metadata：${JSON.stringify(outsideMetadata)}`);
+    }
+    await popupUx2.evaluate(() => document.querySelector('.notebook-row[data-word="serendipity"] .notebook-known')?.click());
+    await outsidePageA.waitForFunction(() => document.querySelector('.avr-word[data-word="serendipity"]')?.className === 'avr-word', { timeout: 10_000 });
+    await outsidePageB.waitForFunction(() => document.querySelector('.avr-word[data-word="serendipity"]')?.className === 'avr-word', { timeout: 10_000 });
+    const afterOutsideKnown = await readSnapshotUx2();
+    if (afterOutsideKnown.words?.serendipity?.status !== 'known' || afterOutsideKnown.words?.serendipity?.source !== 'manual' || !isDeepStrictEqual(afterOutsideKnown.assessmentEvidence, evidenceBeforeNotebook)) {
+      throw new Error('T-NB-6 失败：popup 已掌握未同步或污染 Evidence');
+    }
+    if (afterOutsideKnown.schemaVersion !== snapshotBeforeNotebook.schemaVersion || !isDeepStrictEqual(afterOutsideKnown.initialTest, snapshotBeforeNotebook.initialTest) || !isDeepStrictEqual(afterOutsideKnown.dailyTest, snapshotBeforeNotebook.dailyTest) || afterOutsideKnown.completedRoundIndex !== snapshotBeforeNotebook.completedRoundIndex) {
+      throw new Error('T-NB-6 失败：包外词反馈改变了 schema 或测评状态');
+    }
+    if (await popupUx2.$$eval('.notebook-row[data-word="serendipity"]', (rows) => rows.length)) {
+      throw new Error('T-NB-6 失败：已掌握包外词未移出生词本');
+    }
+    await popupUx2.evaluate(() => document.querySelector('.popup-tab:not(.notebook-tab)')?.click());
+    await popupUx2.waitForSelector('.estimate-point', { timeout: 10_000 });
+    const estimateAfterOutside = await popupUx2.$eval('.estimate', (el) => el.textContent || '');
+    if (estimateAfterOutside !== estimateBeforeNotebook) throw new Error('T-NB-6 失败：包外词反馈改变了点估计或保守范围');
+    await outsidePageA.evaluate(() => document.querySelector('.avr-word[data-word="serendipity"]')?.click());
+    await outsidePageA.evaluate(() => document.querySelector('.avr-action-menu button[data-avr-status="learning"]')?.click());
+    await outsidePageB.waitForSelector('.avr-strong-first[data-word="serendipity"]', { timeout: 5_000 });
+    const afterOutsideRoundTrip = await readSnapshotUx2();
+    if (afterOutsideRoundTrip.words?.serendipity?.status !== 'learning' || !isDeepStrictEqual(afterOutsideRoundTrip.assessmentEvidence, evidenceBeforeNotebook)) {
+      throw new Error('T-NB-6 失败：包外词已掌握后无法重新纠错');
+    }
     const planWords = new Set(ux2Plan.questions.map((question) => question.word));
     const manualWord = Object.keys(dictCore).find((word) => !planWords.has(word));
     if (!manualWord) throw new Error('R-UX-N3 前置失败：无法从真实词包找到首测计划外词');
@@ -1181,7 +1243,7 @@ async function main() {
     const snapshotWithLegacy = await readSnapshotUx2();
     if (!snapshotWithLegacy.words.bogusword) throw new Error('R-UX-N4 失败：无法映射旧 key 未保留在 storage');
     const expectedNotebookWords = Object.entries(snapshotWithLegacy.words)
-      .filter(([word, state]) => state.status === 'learning' && dictCore[word])
+      .filter(([word, state]) => state.status === 'learning' && queryDictionary[word])
       .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
       .map(([word]) => word);
     const displayedNotebookWords = await popupUx2.$$eval('.notebook-row', (rows) => rows.map((row) => row.getAttribute('data-word')));
@@ -1195,7 +1257,7 @@ async function main() {
       pos: row.querySelector('.notebook-pos')?.textContent,
       translation: row.querySelector('.notebook-translation')?.textContent,
     }));
-    const [expectedPhonetic, expectedPos, expectedTranslation] = dictCore[firstWord];
+    const [expectedPhonetic, expectedPos, expectedTranslation] = queryDictionary[firstWord];
     if (JSON.stringify(firstMetadata) !== JSON.stringify({ phonetic: expectedPhonetic, pos: expectedPos, translation: expectedTranslation })) {
       throw new Error(`R-UX-N1 失败：生词本元数据不匹配：${JSON.stringify(firstMetadata)}`);
     }
