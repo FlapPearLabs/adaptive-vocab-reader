@@ -135,6 +135,38 @@ describe('SPA 动态插入（规格 §11）', () => {
     expect(state).toEqual(before);
   });
 
+  it('选区按钮放行同一 mouseup 手势的 click，外部 click 与清空选区仍关闭', () => {
+    document.body.innerHTML = '<article><p id="target">alpha</p></article>';
+    const { scanner } = makeScanner();
+    scanner.scanDocument(document.body);
+    const target = document.getElementById('target')!;
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    expect(document.querySelector('.avr-selection-action')).not.toBeNull();
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(document.querySelector('.avr-selection-action')).not.toBeNull();
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(document.querySelector('.avr-selection-action')).toBeNull();
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    expect(document.querySelector('.avr-selection-action')).not.toBeNull();
+    selection.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+    expect(document.querySelector('.avr-selection-action')).toBeNull();
+
+    selection.addRange(range);
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    (document.querySelector('.avr-selection-action') as HTMLButtonElement).click();
+    expect(document.querySelector('.avr-selection-action')).toBeNull();
+  });
+
   it('动态追加正文被增量标注，已标注内容不被重扫或重置（MutationObserver 路径）', async () => {
     document.body.innerHTML = `
       <nav>Go to settings now.</nav>

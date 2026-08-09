@@ -112,6 +112,8 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   // 杜绝 MutationObserver 因自身注入节点而触发的重复扫描（自触发）。
   const generatedNodes: WeakSet<Node> = new WeakSet<Node>();
   let selectionActionEl: HTMLButtonElement | null = null;
+  // mouseup 后浏览器还会派发同一手势的 click；仅放行同一 target 的那一次 click。
+  let pendingSelectionGestureTarget: EventTarget | null = null;
 
   function getDisplayResult(surfaceForm: string, occurrenceCount: number): DisplayResult | null {
     const lookup = deps.dictionary.lookup(surfaceForm);
@@ -135,6 +137,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   function hideSelectionAction(): void {
     selectionActionEl?.remove();
     selectionActionEl = null;
+    pendingSelectionGestureTarget = null;
   }
 
   function normalizedSelectedWord(): string | null {
@@ -182,11 +185,21 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
     const rect = range?.getBoundingClientRect();
     showSelectionAction(lookup.wordKey, rect?.left ?? event.clientX, rect?.bottom ?? event.clientY);
+    pendingSelectionGestureTarget = event.target;
   });
 
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    if (!target.closest('.avr-selection-action')) hideSelectionAction();
+    if (target.closest('.avr-selection-action')) return;
+    if (pendingSelectionGestureTarget === event.target) {
+      pendingSelectionGestureTarget = null;
+      return;
+    }
+    hideSelectionAction();
+  });
+
+  document.addEventListener('selectionchange', () => {
+    if (!window.getSelection()?.toString().trim()) hideSelectionAction();
   });
 
   // 真实布局偏移（Layout Instability API）：累计 layout-shift 条目值（排除近期用户输入）。

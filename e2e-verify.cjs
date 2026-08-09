@@ -106,6 +106,27 @@ async function selectElementText(page, selector) {
   }, selector);
 }
 
+/** 通过 Puppeteer 鼠标真实 down/move/up 选择完整单词；不伪造 Range 或 mouseup。 */
+async function dragSelectElementText(page, selector) {
+  await page.evaluate(() => {
+    const timeline = [];
+    for (const type of ['mousedown', 'mouseup', 'click', 'selectionchange']) {
+      document.addEventListener(type, () => timeline.push(type), { capture: true, once: false });
+    }
+    window.__avrSelectionTimeline = timeline;
+  });
+  const element = await page.$(selector);
+  const box = await element?.boundingBox();
+  if (!box || box.width < 4 || box.height < 4) throw new Error(`真实拖选目标没有可用几何：${selector}`);
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 1, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, y, { steps: 6 });
+  await page.mouse.up();
+  await wait(100);
+  return page.evaluate(() => window.__avrSelectionTimeline || []);
+}
+
 /**
  * 对 page.goto 加重试：Chrome for Testing 151 经 puppeteer-core connect 后，
  * 首帧偶尔未就绪会抛「Requesting main frame too early」，短暂等待后重试即可。
@@ -496,7 +517,7 @@ async function main() {
       throw new Error(`R-UX-S3 前置失败：未收录词 ${absentWord} 意外命中真实词包`);
     }
     fs.writeFileSync(path.join(tempDir, 'ux-frame.html'), '<!doctype html><article><p>ability</p></article>');
-    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="ability-word">abilities</span> <span id="hint-light-word">${hintLightWord}</span> <span id="hint-boundary-word">${hintBoundaryWord}</span> <span id="hint-common-word">${hintCommonWord}</span> <span id="missing-frequency-word">${missingFrequencyWord}</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article><div id="shadow-host"></div><iframe src="/ux-frame.html"></iframe><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML = '<article><p>ability</p></article>';</script></body></html>`);
+    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="ability-word">abilities</span> <span id="hint-light-word">${hintLightWord}</span> <span id="hint-boundary-word">${hintBoundaryWord}</span> <span id="hint-common-word">${hintCommonWord}</span> <span id="missing-frequency-word">${missingFrequencyWord}</span> <span id="selection-query-word">serendipity</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article><div id="shadow-host"></div><iframe src="/ux-frame.html"></iframe><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML = '<article><p>ability</p></article>';</script></body></html>`);
     const uxPage = await browserUx1.newPage();
     uxPage.on('pageerror', (error) => pageLogs.push(`ux1 pageerror: ${error.message}`));
     await gotoSafe(uxPage, `https://localhost:${PORT}/ux-reading.html`, { waitUntil: 'networkidle0' });
@@ -599,6 +620,47 @@ async function main() {
     await uxPage.click('#hint-light-word .avr-word');
     await uxPage.click('.avr-action-menu button[data-avr-status="learning"]');
     await uxPage.waitForFunction(() => document.querySelector('#hint-light-word .avr-word')?.classList.contains('avr-strong-first'), { timeout: 5_000 });
+
+    // T-SEL-5 / AC-9：真实拖选后的浏览器 click 不得抢先关闭浮条；包外 query identity 可写 learning。
+    const realSelectionBefore = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    const evidenceBeforeRealSelection = realSelectionBefore.assessmentEvidence;
+    const firstSelectionTimeline = await dragSelectElementText(uxPage, '#selection-query-word .avr-word');
+    await uxPage.waitForSelector('.avr-selection-action[data-word="serendipity"]', { visible: true, timeout: 5_000 });
+    const downIndex = firstSelectionTimeline.indexOf('mousedown');
+    const upIndex = firstSelectionTimeline.indexOf('mouseup');
+    const clickIndex = firstSelectionTimeline.indexOf('click');
+    if (!(downIndex >= 0 && downIndex < upIndex && upIndex < clickIndex)) {
+      throw new Error(`AC-9 失败：真实拖选时间线未按 down→up→click 排列：${JSON.stringify(firstSelectionTimeline)}`);
+    }
+    const afterGestureClick = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(afterGestureClick, realSelectionBefore)) {
+      throw new Error('AC-9 失败：同手势 click 不应写入状态');
+    }
+    await uxPage.click('body');
+    await uxPage.waitForFunction(() => document.querySelectorAll('.avr-selection-action').length === 0, { timeout: 5_000 });
+    const afterOutsideClick = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(afterOutsideClick, afterGestureClick)) throw new Error('AC-9 失败：外部 click 关闭选区按钮时产生了存储写入');
+
+    await dragSelectElementText(uxPage, '#selection-query-word .avr-word');
+    await uxPage.waitForSelector('.avr-selection-action[data-word="serendipity"]', { visible: true, timeout: 5_000 });
+    await uxPage.evaluate(() => window.getSelection()?.removeAllRanges());
+    await uxPage.waitForFunction(() => document.querySelectorAll('.avr-selection-action').length === 0, { timeout: 5_000 });
+    const afterSelectionClear = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(afterSelectionClear, afterOutsideClick)) throw new Error('AC-9 失败：清空选区关闭按钮时产生了存储写入');
+
+    const selectionTimeline = await dragSelectElementText(uxPage, '#selection-query-word .avr-word');
+    await uxPage.waitForSelector('.avr-selection-action[data-word="serendipity"]', { visible: true, timeout: 5_000 });
+    await uxPage.click('.avr-selection-action');
+    await uxPage.waitForSelector('.avr-strong-first[data-word="serendipity"]', { timeout: 5_000 });
+    if (await uxPage.$$eval('.avr-selection-action', (els) => els.length)) throw new Error('AC-9 失败：选区按钮写入后未关闭');
+    const afterRealSelection = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (afterRealSelection.words?.serendipity?.status !== 'learning' || afterRealSelection.words?.serendipity?.source !== 'manual') {
+      throw new Error('AC-9 失败：包外 query identity 未写为 manual learning');
+    }
+    if (!isDeepStrictEqual(afterRealSelection.assessmentEvidence, evidenceBeforeRealSelection)) {
+      throw new Error('AC-9 失败：真实拖选写入了 AssessmentEvidence');
+    }
+    console.log(`E2E SELECTION PASS: timeline=${selectionTimeline.join('>')}, query_outside_assessment=true, evidence_unchanged=true`);
 
     // R-UX-S1/S2/T3：整体选中命中 → 浮条 → manual learning，且同页即时强提示。
     await selectElementText(uxPage, '#selection-word');
