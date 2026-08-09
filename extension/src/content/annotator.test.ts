@@ -162,6 +162,19 @@ describe('annotateTextNode', () => {
     expect(actions).toEqual([['go', 'learning']]);
   });
 
+  it('未收录透明 span hover/click 只显示固定提示且不触发状态动作', () => {
+    const textNode = makeTextNode('Unlisted token.');
+    const actions: Array<[string, 'known' | 'learning']> = [];
+    const ann = { ...makeAnnotation(0, 8, { word: 'unlisted', decision: 'none', translation: null }), unresolved: true };
+    const { spans } = annotateTextNode(textNode, [ann], (word, status) => actions.push([word, status]));
+
+    spans[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    expect(document.querySelector('.avr-tooltip')?.textContent).toBe('当前词典未收录');
+    spans[0]!.click();
+    expect((document.querySelector('.avr-action-menu') as HTMLElement | null)?.style.display).not.toBe('flex');
+    expect(actions).toEqual([]);
+  });
+
   // ============================================================
   // 强提示与行内中文
   // ============================================================

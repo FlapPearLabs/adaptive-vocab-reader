@@ -249,10 +249,18 @@ async function main() {
     throw new Error('dist/ 未包含已验证的 1,000 词 ECDICT 核心包');
   }
   const queryEntries = Object.values(queryDictionary);
+  const missingFrequencyWord = Object.entries(queryDictionary).find(([word, entry]) => (
+    /^[a-z]{3,}$/.test(word) &&
+    !word.endsWith('s') &&
+    Array.isArray(entry) &&
+    entry[3] === null &&
+    entry.slice(0, 3).every(Boolean)
+  ))?.[0];
   const frequencyEligibleEntries = queryEntries.filter((entry) => Array.isArray(entry) && entry[3] !== null);
   const frequencyIneligibleEntries = queryEntries.filter((entry) => Array.isArray(entry) && entry[3] === null);
   if (
     queryEntries.length === 0 ||
+    !missingFrequencyWord ||
     frequencyEligibleEntries.length === 0 ||
     frequencyIneligibleEntries.length === 0 ||
     frequencyEligibleEntries.length + frequencyIneligibleEntries.length !== queryEntries.length ||
@@ -475,7 +483,7 @@ async function main() {
       throw new Error(`R-UX-S3 前置失败：未收录词 ${absentWord} 意外命中真实词包`);
     }
     fs.writeFileSync(path.join(tempDir, 'ux-frame.html'), '<!doctype html><article><p>ability</p></article>');
-    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="ability-word">abilities</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article><div id="shadow-host"></div><iframe src="/ux-frame.html"></iframe><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML = '<article><p>ability</p></article>';</script></body></html>`);
+    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="ability-word">abilities</span> <span id="missing-frequency-word">${missingFrequencyWord}</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article><div id="shadow-host"></div><iframe src="/ux-frame.html"></iframe><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML = '<article><p>ability</p></article>';</script></body></html>`);
     const uxPage = await browserUx1.newPage();
     uxPage.on('pageerror', (error) => pageLogs.push(`ux1 pageerror: ${error.message}`));
     await gotoSafe(uxPage, `https://localhost:${PORT}/ux-reading.html`, { waitUntil: 'networkidle0' });
@@ -511,6 +519,35 @@ async function main() {
     const workerUx1 = await getWorker(browserUx1);
     if (!workerUx1) throw new Error('R-UX-S2 失败：未找到 Service Worker');
     const evidenceBeforeManual = (await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot)).assessmentEvidence;
+
+    // T-UNR-3 / AC-10：未收录词只给明确响应，不显示菜单、不写入状态或证据。
+    const unresolvedBefore = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    await uxPage.hover('#negative-unrecorded .avr-word[data-unresolved="true"]');
+    await uxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.textContent === '当前词典未收录', { timeout: 5_000 });
+    await uxPage.click('#negative-unrecorded .avr-word[data-unresolved="true"]');
+    await wait(100);
+    if (await uxPage.$$eval('.avr-action-menu', (menus) => menus.some((menu) => getComputedStyle(menu).display !== 'none'))) {
+      throw new Error('AC-10 失败：未收录词 click 不得弹出会/不会菜单');
+    }
+    const unresolvedAfter = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(unresolvedAfter, unresolvedBefore)) {
+      throw new Error('AC-10 失败：未收录词 hover/click 产生了持久化写入');
+    }
+    const unresolvedClasses = await uxPage.$eval('#negative-unrecorded .avr-word', (el) => el.className);
+    if (/avr-light|avr-strong/.test(unresolvedClasses)) throw new Error(`AC-10 失败：未收录词出现提示样式：${unresolvedClasses}`);
+    const missingFrequencyFlags = await uxPage.$eval('#missing-frequency-word .avr-word', (el) => ({
+      className: el.className,
+      unresolved: el.getAttribute('data-unresolved'),
+    }));
+    if (missingFrequencyFlags.unresolved === 'true' || /avr-light|avr-strong/.test(missingFrequencyFlags.className)) {
+      throw new Error(`AC-10 失败：无频率的可查询词被误判：${JSON.stringify(missingFrequencyFlags)}`);
+    }
+    await uxPage.$eval('#missing-frequency-word .avr-word', (el) => el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    await wait(100);
+    const missingFrequencyTooltipLines = await uxPage.$$eval('.avr-tooltip > div', (lines) => lines.map((line) => line.textContent));
+    if (missingFrequencyTooltipLines.length !== 4) {
+      throw new Error(`AC-10 失败：无频率的可查询词未展示完整 tooltip：${JSON.stringify(missingFrequencyTooltipLines)}`);
+    }
 
     // R-UX-S1/S2/T3：整体选中命中 → 浮条 → manual learning，且同页即时强提示。
     await selectElementText(uxPage, '#selection-word');

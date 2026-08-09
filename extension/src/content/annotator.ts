@@ -18,6 +18,8 @@ export interface WordAnnotation {
   phonetic?: string;
   /** wordKey 对应 core 词条的词性（仅运行时 DOM 展示） */
   pos?: string;
+  /** 查询词典未收录：仅提供固定响应，不允许状态动作。 */
+  unresolved?: boolean;
   /** 该词原始文本在文本节点中的起始位置 */
   startIndex: number;
   /** 该词原始文本在文本节点中的结束位置（不包含） */
@@ -243,6 +245,10 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
     }
 
     event.preventDefault();
+    if (wordEl.dataset.unresolved === 'true') {
+      showUnresolvedTooltip(wordEl.getBoundingClientRect());
+      return;
+    }
     const word = wordEl.dataset.word;
     if (!word) return;
     const menu = getActionMenu();
@@ -257,6 +263,10 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
     const wordEl = wordElementFromEvent(event);
     if (!wordEl) return;
     const rect = wordEl.getBoundingClientRect();
+    if (wordEl.dataset.unresolved === 'true') {
+      showUnresolvedTooltip(rect);
+      return;
+    }
     const translation = wordEl.dataset.tooltipTranslation;
     const phonetic = wordEl.dataset.phonetic;
     const pos = wordEl.dataset.pos;
@@ -270,6 +280,12 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
     const to = related?.closest?.(`.${EXTENSION_CLASS}`) as HTMLElement | null | undefined;
     if (from && from !== to) hideTooltip();
   }, listenerOptions);
+}
+
+function showUnresolvedTooltip(target: DOMRect): void {
+  const tip = getTooltip();
+  tip.textContent = '当前词典未收录';
+  positionTooltip(tip, target);
 }
 
 /** 根据 decision 决定 CSS 类名 */
@@ -302,7 +318,7 @@ export function annotateTextNode(
 
   if (sorted.length === 0) return { spans: [], added: 0, removed: 0 };
 
-  type Fragment = string | { result: DisplayResult; rawText: string; phonetic?: string; pos?: string };
+  type Fragment = string | { result: DisplayResult; rawText: string; phonetic?: string; pos?: string; unresolved?: boolean };
   const fragments: Fragment[] = [];
   let lastEnd = 0;
 
@@ -320,6 +336,7 @@ export function annotateTextNode(
       rawText: text.slice(ann.startIndex, ann.endIndex),
       phonetic: ann.phonetic,
       pos: ann.pos,
+      unresolved: ann.unresolved,
     });
     lastEnd = ann.endIndex;
   }
@@ -353,6 +370,7 @@ export function annotateTextNode(
       span.setAttribute('data-phonetic', frag.phonetic ?? '');
       span.setAttribute('data-pos', frag.pos ?? '');
       span.setAttribute('data-word', frag.result.word);
+      if (frag.unresolved) span.dataset.unresolved = 'true';
       const wordSpans = spansByWord.get(frag.result.word) ?? new Set<HTMLSpanElement>();
       wordSpans.add(span);
       spansByWord.set(frag.result.word, wordSpans);

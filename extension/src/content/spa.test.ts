@@ -65,7 +65,8 @@ describe('SPA 动态插入（规格 §11）', () => {
 
     const intro = document.getElementById('intro')!;
     const nav = document.querySelector('nav')!;
-    expect(intro.querySelectorAll('.avr-word').length).toBe(3); // alpha, beta, challenge
+    expect(intro.querySelectorAll('.avr-word[data-word="alpha"], .avr-word[data-word="beta"], .avr-word[data-word="challenge"]')).toHaveLength(3);
+    expect(intro.querySelector('.avr-word[data-unresolved="true"]')).not.toBeNull();
     expect(nav.querySelectorAll('.avr-word').length).toBe(0); // 非正文区跳过
   });
 
@@ -91,6 +92,12 @@ describe('SPA 动态插入（规格 §11）', () => {
     const queryOnly = document.querySelector<HTMLSpanElement>('.avr-word[data-word="queryonly"]');
     expect(queryOnly).not.toBeNull();
     expect(queryOnly!.className).toBe('avr-word');
+    expect(queryOnly!.dataset.unresolved).toBeUndefined();
+    expect(queryOnly!.dataset.tooltipTranslation).toBe('合成查询释义');
+    queryOnly!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    expect([...document.querySelectorAll('.avr-tooltip > div')].map((row) => row.textContent)).toEqual([
+      'queryonly', 'q', 'n.', '合成查询释义',
+    ]);
   });
 
   it('动态追加正文被增量标注，已标注内容不被重扫或重置（MutationObserver 路径）', async () => {
@@ -107,7 +114,7 @@ describe('SPA 动态插入（规格 §11）', () => {
 
     const intro = document.getElementById('intro')!;
     const introSpans = intro.querySelectorAll('.avr-word');
-    expect(introSpans.length).toBe(3);
+    expect(introSpans.length).toBe(9);
     const introFirst = introSpans[0]!; // 捕获引用，验证后续不被重置
 
     // 模拟 SPA 无限滚动追加
@@ -117,15 +124,15 @@ describe('SPA 动态插入（规格 §11）', () => {
     feed.appendChild(p);
     await tick();
 
-    expect(feed.querySelectorAll('.avr-word').length).toBe(2); // alpha, challenge
+    expect(feed.querySelectorAll('.avr-word').length).toBe(4);
     // 已标注的旧正文引用仍存活、未被重扫重置
     expect(intro.contains(introFirst)).toBe(true);
-    expect(intro.querySelectorAll('.avr-word').length).toBe(3);
+    expect(intro.querySelectorAll('.avr-word').length).toBe(9);
 
     // 再次扫描整页不应产生重复 span（processedNodes 守卫）
     scanner.scanDocument(document.body);
-    expect(intro.querySelectorAll('.avr-word').length).toBe(3);
-    expect(feed.querySelectorAll('.avr-word').length).toBe(2);
+    expect(intro.querySelectorAll('.avr-word').length).toBe(9);
+    expect(feed.querySelectorAll('.avr-word').length).toBe(4);
   });
 
   it('路由切换（innerHTML 重写）标注新视图，旧正文不受影响', async () => {
@@ -141,16 +148,16 @@ describe('SPA 动态插入（规格 §11）', () => {
     scanner.observeDynamic(document.body);
 
     const intro = document.getElementById('intro')!;
-    expect(intro.querySelectorAll('.avr-word').length).toBe(3);
+    expect(intro.querySelectorAll('.avr-word').length).toBe(9);
     const view = document.getElementById('view')!;
 
     // 模拟 SPA 路由切换：innerHTML 重写
     view.innerHTML = '<p>Beta and go somewhere.</p>';
     await tick();
 
-    expect(view.querySelectorAll('.avr-word').length).toBe(2); // beta, go
+    expect(view.querySelectorAll('.avr-word').length).toBe(4);
     // 旧正文未被触碰
-    expect(intro.querySelectorAll('.avr-word').length).toBe(3);
+    expect(intro.querySelectorAll('.avr-word').length).toBe(9);
     // nav 仍被跳过
     expect(document.querySelector('nav')!.querySelectorAll('.avr-word').length).toBe(0);
   });
@@ -169,7 +176,7 @@ describe('SPA 动态插入（规格 §11）', () => {
     scanner.processTextNode(tn);
 
     // 新插入的 "challenge" 被标注，旧词未变化
-    expect(intro.querySelectorAll('.avr-word').length).toBe(3); // alpha, beta, challenge
+    expect(intro.querySelectorAll('.avr-word').length).toBe(8);
     expect(document.querySelector<HTMLElement>('.avr-word[data-word="challenge"]')).not.toBeNull();
   });
 
@@ -179,8 +186,7 @@ describe('SPA 动态插入（规格 §11）', () => {
     scanner.scanDocument(document.body);
     scanner.observeDynamic(document.body);
 
-    const textNode = document.getElementById('target')!.firstChild as Text;
-    textNode.data = 'Alpha appears after an in-place update.';
+    document.getElementById('target')!.textContent = 'Alpha appears after an in-place update.';
     await tick();
 
     expect(document.querySelectorAll('.avr-word[data-word="alpha"]')).toHaveLength(1);

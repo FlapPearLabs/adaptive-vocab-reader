@@ -116,12 +116,14 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
 
     const state = vocabState[lookup.wordKey];
     if (!canUseAssessmentDisplay(surfaceForm)) {
+      const isLearning = state?.status === 'learning';
       return {
         word: lookup.wordKey,
-        decision: state?.status === 'learning' ? 'strong' : 'none',
+        decision: isLearning ? 'strong' : 'none',
         surfaceForm,
-        translation: state?.status === 'learning' ? lookup.entry.translation : null,
-        showInlineTranslation: state?.status === 'learning' && occurrenceCount === 1,
+        // 查询词典中未进入固定测评词包的词保持透明，但仍需完整 tooltip 元数据。
+        translation: lookup.entry.translation,
+        showInlineTranslation: isLearning && occurrenceCount === 1,
       };
     }
 
@@ -310,7 +312,15 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     const annotations: WordAnnotation[] = [];
     for (const occ of occurrences) {
       const lookup = deps.dictionary.lookup(occ.word);
-      if (!lookup) continue;
+      if (!lookup) {
+        annotations.push({
+          result: { word: occ.word, decision: 'none', surfaceForm: occ.word, translation: null, showInlineTranslation: false },
+          startIndex: occ.startIndex,
+          endIndex: occ.endIndex,
+          unresolved: true,
+        });
+        continue;
+      }
       const wordKey = lookup.wordKey;
       const occurrenceCount = (pageOccurrenceCounts.get(wordKey) ?? 0) + 1;
       pageOccurrenceCounts.set(wordKey, occurrenceCount);
