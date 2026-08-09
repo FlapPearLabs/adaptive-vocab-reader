@@ -139,6 +139,8 @@ async function launchChrome(userDataDir, chromeForTesting) {
   // （受限 CI / 沙箱环境需要）。两种模式均只改变测试运行环境，不影响任何被测行为或断言。
   const disableSandbox = process.env.AVR_E2E_NO_SANDBOX === '1';
   const sandboxArgs = disableSandbox ? ['--no-sandbox', '--disable-dev-shm-usage'] : [];
+  // macOS 使用 mock keychain，避免系统权限对话框阻塞无人值守 E2E。
+  const platformArgs = process.platform === 'darwin' ? ['--use-mock-keychain'] : [];
   const chrome = spawn(chromeForTesting, [
     `--user-data-dir=${userDataDir}`,
     `--load-extension=${DIST_DIR}`,
@@ -146,6 +148,7 @@ async function launchChrome(userDataDir, chromeForTesting) {
     '--no-first-run', '--no-default-browser-check',
     '--ignore-certificate-errors', '--remote-debugging-port=0', '--enable-logging=stderr', '--v=1',
     '--headless=new',
+    ...platformArgs,
     ...sandboxArgs,
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
