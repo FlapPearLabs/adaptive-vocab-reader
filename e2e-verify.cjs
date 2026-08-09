@@ -1179,6 +1179,15 @@ async function main() {
       throw new Error(`T-NB-6 失败：popup 未展示 query metadata：${JSON.stringify(outsideMetadata)}`);
     }
     await popupUx2.evaluate(() => document.querySelector('.notebook-row[data-word="serendipity"] .notebook-known')?.click());
+    let notebookKnownSnapshot;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      notebookKnownSnapshot = await readSnapshotUx2();
+      if (notebookKnownSnapshot.words?.serendipity?.status === 'known' && notebookKnownSnapshot.words?.serendipity?.source === 'manual') break;
+      await wait(250);
+    }
+    if (notebookKnownSnapshot.words?.serendipity?.status !== 'known' || notebookKnownSnapshot.words?.serendipity?.source !== 'manual') {
+      throw new Error('T-NB-6 失败：popup 已掌握未写入 worker 真值');
+    }
     await outsidePageA.waitForFunction(() => document.querySelector('.avr-word[data-word="serendipity"]')?.className === 'avr-word', { timeout: 10_000 });
     await outsidePageB.waitForFunction(() => document.querySelector('.avr-word[data-word="serendipity"]')?.className === 'avr-word', { timeout: 10_000 });
     const afterOutsideKnown = await readSnapshotUx2();
