@@ -23,6 +23,8 @@ export interface DictEntry {
   pos: string;
   /** 简短中文释义 */
   translation: string;
+  /** 查询词典只读频率输入；null 表示可查询但不具备灰线候选资格。 */
+  effectiveFrequencyRank?: number | null;
 }
 
 /** 规范化单词 → 词典条目的映射 */

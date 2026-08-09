@@ -10,7 +10,7 @@
 // ============================================================
 
 import type { WordState } from '../shared/types';
-import { createDictionary, Dictionary } from './dictionary';
+import { loadDictionaryFromJSON, Dictionary } from './dictionary';
 import { initAnnotator } from './annotator';
 import { createPageScanner, type PageScanner } from './pageScanner';
 
@@ -25,23 +25,23 @@ let scanner: PageScanner | null = null;
 // 初始化
 // ============================================================
 
-async function loadDictionary(): Promise<Dictionary> {
-  const [coreJSON, formsJSON, bandsJSON] = await Promise.all([
+async function loadDictionary(): Promise<{
+  dictionary: Dictionary;
+  assessmentDictionary: Dictionary;
+  assessmentBands: Record<string, number>;
+}> {
+  const [queryJSON, queryFormsJSON, assessmentJSON, assessmentFormsJSON, bandsJSON] = await Promise.all([
+    fetch(chrome.runtime.getURL('data/query-dictionary.json')).then((r) => r.text()),
+    fetch(chrome.runtime.getURL('data/query-forms.json')).then((r) => r.text()),
     fetch(chrome.runtime.getURL('data/dict-core.json')).then((r) => r.text()),
     fetch(chrome.runtime.getURL('data/forms.json')).then((r) => r.text()),
     fetch(chrome.runtime.getURL('data/frequency-bands.json')).then((r) => r.text()),
   ]);
-
-  // 手动转换 JSON 数组格式为 DictEntry
-  const rawCore: Record<string, [string, string, string]> = JSON.parse(coreJSON);
-  const core: Record<string, { phonetic: string; pos: string; translation: string }> = {};
-  for (const [word, arr] of Object.entries(rawCore)) {
-    core[word] = { phonetic: arr[0]!, pos: arr[1]!, translation: arr[2]! };
-  }
-  const forms: Record<string, string> = JSON.parse(formsJSON);
-  const bands: Record<string, number> = JSON.parse(bandsJSON);
-
-  return createDictionary(core, forms, bands);
+  return {
+    dictionary: loadDictionaryFromJSON(queryJSON, queryFormsJSON),
+    assessmentDictionary: loadDictionaryFromJSON(assessmentJSON, assessmentFormsJSON),
+    assessmentBands: JSON.parse(bandsJSON),
+  };
 }
 
 async function loadState(): Promise<Record<string, WordState>> {
@@ -67,11 +67,14 @@ function saveStateChange(word: string, newStatus: WordState['status']): void {
 async function main(): Promise<void> {
   initAnnotator();
   // 并行加载词典和状态
-  const [dict, state] = await Promise.all([loadDictionary(), loadState()]);
+  const [loadedDictionary, state] = await Promise.all([loadDictionary(), loadState()]);
+  const dict = loadedDictionary.dictionary;
   dictionary = dict;
 
   scanner = createPageScanner({
     dictionary: dict,
+    assessmentDictionary: loadedDictionary.assessmentDictionary,
+    assessmentBands: loadedDictionary.assessmentBands,
     getState: () => state,
     onUserAction: saveStateChange,
     // 非持久化性能观测：写入 documentElement dataset（仅内存 DOM 属性，绝不进 storage；

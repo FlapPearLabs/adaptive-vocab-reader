@@ -1,6 +1,6 @@
 // esbuild 构建脚本：将 TypeScript 源码打包为 Chrome MV3 扩展产物
 import * as esbuild from 'esbuild';
-import { readFileSync, writeFileSync, mkdirSync, cpSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,6 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXT_DIR = resolve(__dirname, 'extension');
 const DIST_DIR = resolve(__dirname, 'dist');
 const SRC_DIR = resolve(EXT_DIR, 'src');
+const QUERY_DATA_DIR = resolve(__dirname, 'data', 'derived', 'ecdict-query');
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -64,6 +65,13 @@ async function build() {
 
   // 复制 data 目录
   cpSync(resolve(EXT_DIR, 'data'), resolve(DIST_DIR, 'data'), { recursive: true });
+  for (const filename of ['query-dictionary.json', 'query-forms.json']) {
+    const source = resolve(QUERY_DATA_DIR, filename);
+    if (!existsSync(source)) {
+      throw new Error(`缺少本地查询词典资产 ${source}；先按 data/README.md 从固定 ECDICT 快照生成。`);
+    }
+    cpSync(source, resolve(DIST_DIR, 'data', filename));
+  }
 
   console.log('✅ Build complete:', DIST_DIR);
 }

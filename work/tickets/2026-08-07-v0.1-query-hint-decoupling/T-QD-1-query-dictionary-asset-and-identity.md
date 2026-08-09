@@ -47,7 +47,7 @@
 **真实 Chrome 用户路径验收**（Chrome for Testing + 隔离 profile）：
 1. 构造含测评包外但 query-eligible 的词（如 `serendipity`）的静态英文正文 fixture；加载插件后，该词被解析为查询身份键且有音标/词性/中文释义元数据（可通过 E2E 断言工具检查或 debug 面板）。
 2. 同一 fixture 中 1,000 词包内词（如 `ability`、屈折 `abilities`）仍正常解析、身份键不变（core 优先、forms 映射）。
-3. 屈折词形 `abilities` → 查询身份 `ability`；`went/going/gone` → `go`（E2E 断言身份映射）。
+3. 屈折词形 `abilities` → 查询身份 `ability`；依次归一化、精确合法 query 主词条优先、再回退词形映射：当前完整快照中 `went → go`，`going → going`，`gone → gone`（E2E 断言身份映射）。
 4. **负断言**：查询词典扩容后，空 profile 下首测题目数量仍为 50、每日轮仍五题、估计展示仍标注「基于当前 1,000 词覆盖估计，不做外推」；`AssessmentEvidence` snapshot 结构与 schemaVersion 不变。
 5. 无有效 frq/bnc 的 query-eligible 词（如仅音标词性释义齐全但双缺失的词）可解析出条目（不被判为 lookup-unresolved、不被淘汰）——但本票不验证其候选行为（T-HINT-4）。
 

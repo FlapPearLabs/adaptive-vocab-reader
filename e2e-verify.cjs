@@ -243,8 +243,30 @@ async function main() {
   const dictCore = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'dict-core.json'), 'utf8'));
   const forms = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'forms.json'), 'utf8'));
   const report = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'build-report.json'), 'utf8'));
+  const queryDictionary = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'query-dictionary.json'), 'utf8'));
+  const queryForms = JSON.parse(fs.readFileSync(path.join(DIST_DIR, 'data', 'query-forms.json'), 'utf8'));
   if (Object.keys(dictCore).length !== 1_000 || Object.keys(forms).length === 0 || report.selected_count !== 1_000) {
     throw new Error('dist/ 未包含已验证的 1,000 词 ECDICT 核心包');
+  }
+  const queryEntries = Object.values(queryDictionary);
+  const frequencyEligibleEntries = queryEntries.filter((entry) => Array.isArray(entry) && entry[3] !== null);
+  const frequencyIneligibleEntries = queryEntries.filter((entry) => Array.isArray(entry) && entry[3] === null);
+  if (
+    queryEntries.length === 0 ||
+    frequencyEligibleEntries.length === 0 ||
+    frequencyIneligibleEntries.length === 0 ||
+    frequencyEligibleEntries.length + frequencyIneligibleEntries.length !== queryEntries.length ||
+    !queryDictionary.serendipity ||
+    queryDictionary.serendipity.length !== 4 ||
+    queryForms.abilities !== 'ability' ||
+    !queryDictionary.go ||
+    !queryDictionary.going ||
+    !queryDictionary.gone ||
+    queryForms.went !== 'go' ||
+    Object.hasOwn(queryForms, 'going') ||
+    Object.hasOwn(queryForms, 'gone')
+  ) {
+    throw new Error('dist/ 查询词典资产未满足 T-QD-1 的可查询/频率/词形合同');
   }
 
   execFileSync('openssl', [
@@ -328,15 +350,17 @@ async function main() {
       forbiddenInNav: document.querySelectorAll('nav .avr-word').length,
       forbiddenInCode: document.querySelectorAll('code .avr-word').length,
       forbiddenInComment: document.querySelectorAll('.comment-section .avr-word').length,
-      challengesFormHit: [...document.querySelectorAll('.avr-word[data-word="challenge"]')]
-        .some((element) => element.textContent?.toLowerCase() === 'challenges'),
+      abilitiesFormHit: [...document.querySelectorAll('.avr-word[data-word="ability"]')]
+        .some((element) => element.textContent?.toLowerCase() === 'abilities'),
     }));
     if (initial.annotations === 0 || initial.unknown === 0) throw new Error(`未获得未知词轻提示：${JSON.stringify(initial)}`);
     if (initial.forbiddenInNav || initial.forbiddenInCode || initial.forbiddenInComment) throw new Error(`扫描了应跳过区域：${JSON.stringify(initial)}`);
-    // 场景 3（局部）wordKey 断言：challenges → challenge 共享 wordKey，
+    // 场景 3（局部）wordKey 断言：abilities → ability 共享 wordKey。
+    // challenges 在全量查询词典中也是合法主词条，按主词条优先规则不能再作为词形断言。
     // 失败必须归责 T2/R-KEY-1,3（BLOCKER-3 三轮修复），不得留在 1a/T5 上下文。
     currentScenario = FAILURE_TABLE['1c'];
-    if (!initial.challengesFormHit) throw new Error(`词形映射/wordKey 合并未在真实页面命中：${JSON.stringify(initial)}`);
+    if (!initial.abilitiesFormHit) throw new Error(`词形映射/wordKey 合并未在真实页面命中：${JSON.stringify(initial)}`);
+
     // 断言通过：切回手动标记与 WordState 持久化路径（R-EVD-1 → T2）
     currentScenario = FAILURE_TABLE['1b'];
 

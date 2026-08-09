@@ -111,7 +111,13 @@ def _input_sha256(input_path: Path) -> str:
     return digest.hexdigest()
 
 
-def _candidate_from_row(row: dict[str, str], rejections: Counter[str]) -> dict[str, Any] | None:
+def _candidate_from_row(
+    row: dict[str, str],
+    rejections: Counter[str],
+    *,
+    require_frequency: bool,
+    require_short_translation: bool,
+) -> dict[str, Any] | None:
     required_values = (row.get(field) for field in ("word", "phonetic", "translation", "pos", "bnc", "frq", "exchange"))
     if any(_has_invalid_utf8(value) for value in required_values):
         rejections["invalid_utf8_row"] += 1
@@ -133,15 +139,24 @@ def _candidate_from_row(row: dict[str, str], rejections: Counter[str]) -> dict[s
     if not pos:
         rejections["missing_pos"] += 1
         return None
-    if len(translation) > MAX_TRANSLATION_LENGTH:
+    if require_short_translation and len(translation) > MAX_TRANSLATION_LENGTH:
         rejections["translation_too_long"] += 1
         return None
 
     frq = _positive_rank(row.get("frq"))
     bnc = _positive_rank(row.get("bnc"))
-    if frq is None and bnc is None:
+    if require_frequency and frq is None and bnc is None:
         rejections["missing_frequency_rank"] += 1
         return None
+
+    effective_frequency_rank = frq if frq is not None else bnc
+    rank_key = (
+        (0, frq, word)
+        if frq is not None
+        else (1, bnc, word)
+        if bnc is not None
+        else (2, 0, word)
+    )
 
     return {
         "word": word,
@@ -149,11 +164,18 @@ def _candidate_from_row(row: dict[str, str], rejections: Counter[str]) -> dict[s
         "pos": pos,
         "translation": translation,
         "exchange": _compact_text(row.get("exchange")),
-        "rank_key": (0, frq, word) if frq is not None else (1, bnc, word),
+        "effective_frequency_rank": effective_frequency_rank,
+        "rank_key": rank_key,
     }
 
 
-def _select_candidates(input_path: Path, limit: int) -> tuple[list[dict[str, Any]], Counter[str], int, int]:
+def _select_candidates(
+    input_path: Path,
+    limit: int | None,
+    *,
+    require_frequency: bool,
+    require_short_translation: bool,
+) -> tuple[list[dict[str, Any]], Counter[str], int, int]:
     rejections: Counter[str] = Counter()
     candidates_by_word: dict[str, dict[str, Any]] = {}
     input_rows = 0
@@ -165,7 +187,12 @@ def _select_candidates(input_path: Path, limit: int) -> tuple[list[dict[str, Any
             raise ValueError(f"CSV missing required columns: {', '.join(sorted(missing_columns))}")
         for row in reader:
             input_rows += 1
-            candidate = _candidate_from_row(row, rejections)
+            candidate = _candidate_from_row(
+                row,
+                rejections,
+                require_frequency=require_frequency,
+                require_short_translation=require_short_translation,
+            )
             if candidate is None:
                 continue
             existing = candidates_by_word.get(candidate["word"])
@@ -178,12 +205,12 @@ def _select_candidates(input_path: Path, limit: int) -> tuple[list[dict[str, Any
 
     candidates = sorted(candidates_by_word.values(), key=lambda item: item["rank_key"])
     eligible_count = len(candidates)
-    if eligible_count < limit:
+    if limit is not None and eligible_count < limit:
         raise ValueError(
             f"eligible records ({eligible_count}) are fewer than requested limit ({limit}); "
             f"rejections={dict(sorted(rejections.items()))}"
         )
-    return candidates[:limit], rejections, input_rows, eligible_count
+    return candidates if limit is None else candidates[:limit], rejections, input_rows, eligible_count
 
 
 def build_core(
@@ -199,7 +226,12 @@ def build_core(
         raise ValueError("limit must be positive")
     input_path = Path(input_path)
     output_dir = Path(output_dir)
-    selected, rejections, input_rows, eligible_count = _select_candidates(input_path, limit)
+    selected, rejections, input_rows, eligible_count = _select_candidates(
+        input_path,
+        limit,
+        require_frequency=True,
+        require_short_translation=True,
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     core = {
@@ -296,22 +328,118 @@ def build_core(
     return report
 
 
+def build_query_dictionary(
+    input_path: Path,
+    output_dir: Path,
+    *,
+    source_ref: str = "UNSPECIFIED",
+    source_date: str = "UNSPECIFIED",
+) -> dict[str, Any]:
+    """生成仅供本地 dogfood 使用的全量查询词典与词形映射。"""
+    input_path = Path(input_path)
+    output_dir = Path(output_dir)
+    selected, rejections, input_rows, eligible_count = _select_candidates(
+        input_path,
+        None,
+        require_frequency=False,
+        require_short_translation=False,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    entries = {
+        item["word"]: [
+            item["phonetic"],
+            item["pos"],
+            item["translation"],
+            item["effective_frequency_rank"],
+        ]
+        for item in sorted(selected, key=lambda item: item["word"])
+    }
+
+    form_candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in selected:
+        for form in _parse_exchange(item["exchange"], item["word"]):
+            form_candidates[form].append(item)
+
+    forms: dict[str, str] = {}
+    collisions: dict[str, list[str]] = {}
+    for form, candidates in sorted(form_candidates.items()):
+        unique_candidates = {candidate["word"]: candidate for candidate in candidates}
+        ranked = sorted(unique_candidates.values(), key=lambda item: item["rank_key"])
+        forms[form] = ranked[0]["word"]
+        if len(ranked) > 1:
+            collisions[form] = [candidate["word"] for candidate in ranked]
+
+    core_form_collisions = sorted(form for form in forms if form in entries)
+    forms = {key: value for key, value in forms.items() if key not in entries}
+    if any(form in entries for form in forms):
+        raise ValueError("query forms key must not be a query headword")
+    if any(target not in entries for target in forms.values()):
+        raise ValueError("query forms target must be a query headword")
+
+    entries_path = output_dir / "query-dictionary.json"
+    forms_path = output_dir / "query-forms.json"
+    _write_json(entries_path, entries)
+    _write_json(forms_path, forms)
+    artifacts = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (entries_path, forms_path)
+    }
+    frequency_eligible_count = sum(item["effective_frequency_rank"] is not None for item in selected)
+    report = {
+        "schema_version": 1,
+        "source": {
+            "path": str(input_path),
+            "reference": source_ref,
+            "acquired_on": source_date,
+            "sha256": _input_sha256(input_path),
+        },
+        "query_eligibility": {
+            "word_rule": "ASCII lowercase letters only",
+            "required_metadata": ["phonetic", "pos", "translation"],
+            "effective_frequency_rank": "frq positive preferred; bnc positive fallback; null when both are invalid",
+        },
+        "input_rows": input_rows,
+        "query_eligible_count": eligible_count,
+        "frequency_eligible_count": frequency_eligible_count,
+        "frequency_ineligible_count": eligible_count - frequency_eligible_count,
+        "rejections": dict(sorted(rejections.items())),
+        "form_collisions": collisions,
+        "core_form_collisions": core_form_collisions,
+        "artifacts": artifacts,
+        "license": "ECDICT repository LICENSE is MIT; Chinese-definition redistribution chain remains UNKNOWN; dogfood only.",
+    }
+    _write_json(output_dir / "query-build-report.json", report)
+    return report
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a deterministic local ECDICT core package")
     parser.add_argument("--input", type=Path, required=True, help="fixed ECDICT CSV snapshot")
     parser.add_argument("--output-dir", type=Path, required=True, help="directory for derived JSON files")
-    parser.add_argument("--limit", type=int, default=1000, help="number of core headwords (default: 1000)")
+    parser.add_argument("--mode", choices=("core", "query"), default="core")
+    parser.add_argument("--limit", type=int, default=1000, help="number of core headwords (core mode only; default: 1000)")
     parser.add_argument("--source-ref", required=True, help="fixed upstream commit, release, or URL")
     parser.add_argument("--source-date", required=True, help="acquisition date in YYYY-MM-DD")
     args = parser.parse_args()
-    report = build_core(
-        args.input,
-        args.output_dir,
-        limit=args.limit,
-        source_ref=args.source_ref,
-        source_date=args.source_date,
-    )
-    print(json.dumps({"selected_count": report["selected_count"], "output_dir": str(args.output_dir)}, ensure_ascii=False))
+    if args.mode == "core":
+        report = build_core(
+            args.input,
+            args.output_dir,
+            limit=args.limit,
+            source_ref=args.source_ref,
+            source_date=args.source_date,
+        )
+        selected_count = report["selected_count"]
+    else:
+        report = build_query_dictionary(
+            args.input,
+            args.output_dir,
+            source_ref=args.source_ref,
+            source_date=args.source_date,
+        )
+        selected_count = report["query_eligible_count"]
+    print(json.dumps({"selected_count": selected_count, "output_dir": str(args.output_dir)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

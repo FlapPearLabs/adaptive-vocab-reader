@@ -97,7 +97,7 @@ describe('eligibleCandidates', () => {
     };
     // 每个翻译互异，保证都能凑齐四选项
     const forms: FormsMap = { could: 'can', books: 'book' };
-    const dict = createDictionary(core, forms, {});
+    const dict = createDictionary(core, forms);
 
     const eligible = eligibleCandidates(core, forms);
     // could 与 can 都入选（不再因 forms 重定向被排除）

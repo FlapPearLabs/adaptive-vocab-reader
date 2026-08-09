@@ -20,6 +20,35 @@ def load_builder_module():
 
 
 class EcdictCoreBuildTests(unittest.TestCase):
+    def test_builds_query_dictionary_without_rejecting_missing_frequency(self):
+        builder = load_builder_module()
+        csv_bytes = (
+            b"word,phonetic,translation,pos,tag,bnc,frq,exchange\n"
+            b"baseword,bas,\xe5\x90\x88\xe6\x88\x90\xe6\xb5\x8b\xe8\xaf\x95\xe9\x87\x8a\xe4\xb9\x89,v.,,20,10,p:pastform/i:presentform/3:thirdform\n"
+            b"fallbackword,fal,\xe5\x90\x88\xe6\x88\x90\xe5\x9b\x9e\xe9\x80\x80\xe9\x87\x8a\xe4\xb9\x89,n.,,20,,\n"
+            b"queryonly,que,\xe8\xbf\x99\xe6\x98\xaf\xe4\xb8\x80\xe4\xb8\xaa\xe6\x98\x8e\xe6\x98\xbe\xe8\xb6\x85\xe8\xbf\x87\xe5\x9b\xba\xe5\xae\x9a\xe6\xb5\x8b\xe8\xaf\x84\xe8\xaf\x8d\xe5\x8c\x85\xe7\x9f\xad\xe9\x87\x8a\xe4\xb9\x89\xe4\xb8\x8a\xe9\x99\x90\xe7\x9a\x84\xe5\x90\x88\xe6\x88\x90\xe6\x9f\xa5\xe8\xaf\xa2\xe9\x87\x8a\xe4\xb9\x89,n.,,,,\n"
+            b"missingmeta,,\xe5\x90\x88\xe6\x88\x90\xe7\xbc\xba\xe5\xa4\xb1,n.,,1,1,\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            input_path = root / "query.csv"
+            input_path.write_bytes(csv_bytes)
+            report = builder.build_query_dictionary(input_path, root / "query")
+            entries = json.loads((root / "query" / "query-dictionary.json").read_text(encoding="utf-8"))
+            forms = json.loads((root / "query" / "query-forms.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(entries["baseword"], ["bas", "v.", "合成测试释义", 10])
+        self.assertEqual(entries["fallbackword"], ["fal", "n.", "合成回退释义", 20])
+        self.assertEqual(
+            entries["queryonly"],
+            ["que", "n.", "这是一个明显超过固定测评词包短释义上限的合成查询释义", None],
+        )
+        self.assertEqual(forms, {"pastform": "baseword", "presentform": "baseword", "thirdform": "baseword"})
+        self.assertEqual(report["query_eligible_count"], 3)
+        self.assertEqual(report["frequency_eligible_count"], 2)
+        self.assertEqual(report["frequency_ineligible_count"], 1)
+        self.assertEqual(report["rejections"]["missing_phonetic"], 1)
+
     def test_builds_compact_core_forms_bands_and_report(self):
         builder = load_builder_module()
         with tempfile.TemporaryDirectory() as temporary_dir:

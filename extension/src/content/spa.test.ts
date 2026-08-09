@@ -9,7 +9,7 @@
 // 直接复用生产用的 createPageScanner，不复制标注逻辑。
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createDictionary } from './dictionary';
-import type { DictCore, FormsMap, FrequencyBands } from '../shared/types';
+import type { DictCore, FormsMap } from '../shared/types';
 import { createPageScanner } from './pageScanner';
 import { initAnnotator, resetAnnotatorState } from './annotator';
 import type { WordState } from '../shared/types';
@@ -23,10 +23,9 @@ const FIXTURE_CORE: DictCore = {
   challenge: { phonetic: 'ˈtʃælɪndʒ', pos: 'n./v.', translation: '挑战' },
 };
 const FIXTURE_FORMS: FormsMap = { goes: 'go', going: 'go', gone: 'go', went: 'go', challenged: 'challenge' };
-const FIXTURE_BANDS: FrequencyBands = { alpha: 5, beta: 7, go: 0, wend: 2, challenge: 3 };
 
 function makeScanner() {
-  const dict = createDictionary(FIXTURE_CORE, FIXTURE_FORMS, FIXTURE_BANDS);
+  const dict = createDictionary(FIXTURE_CORE, FIXTURE_FORMS);
   const state: Record<string, WordState> = {};
   const actions: Array<[string, WordState['status']]> = [];
   const scanner = createPageScanner({
@@ -68,6 +67,28 @@ describe('SPA 动态插入（规格 §11）', () => {
     const nav = document.querySelector('nav')!;
     expect(intro.querySelectorAll('.avr-word').length).toBe(3); // alpha, beta, challenge
     expect(nav.querySelectorAll('.avr-word').length).toBe(0); // 非正文区跳过
+  });
+
+  it('查询词典扩容不提前改变固定测评包的展示范围', () => {
+    document.body.innerHTML = '<article><p id="intro">Alpha and queryonly are present.</p></article>';
+    const dictionary = createDictionary(
+      {
+        alpha: FIXTURE_CORE.alpha!,
+        queryonly: { phonetic: 'q', pos: 'n.', translation: '合成查询释义', effectiveFrequencyRank: null },
+      },
+      {},
+    );
+    const scanner = createPageScanner({
+      dictionary,
+      assessmentBands: { alpha: 0 },
+      getState: () => ({}),
+      onUserAction: () => {},
+    });
+
+    scanner.scanDocument(document.body);
+
+    expect(document.querySelectorAll('.avr-word[data-word="alpha"]')).toHaveLength(1);
+    expect(document.querySelectorAll('.avr-word[data-word="queryonly"]')).toHaveLength(0);
   });
 
   it('动态追加正文被增量标注，已标注内容不被重扫或重置（MutationObserver 路径）', async () => {

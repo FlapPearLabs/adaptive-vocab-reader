@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createDictionary } from './dictionary';
-import type { DictCore, FormsMap, FrequencyBands } from '../shared/types';
+import { createDictionary, loadDictionaryFromJSON } from './dictionary';
+import type { DictCore, FormsMap } from '../shared/types';
 
 // 最小独立词典 fixture；不依赖本机 ECDICT 产物。
 const FIXTURE_CORE: DictCore = {
   alpha: { phonetic: 'ˈælfə', pos: 'n.', translation: '阿尔法；开始' },
   beta: { phonetic: 'ˈbiːtə', pos: 'n.', translation: '贝塔；测试版' },
   go: { phonetic: 'ɡəʊ', pos: 'v.', translation: '去；走' },
+  going: { phonetic: 'synthetic-going', pos: 'v.', translation: '合成进行条目' },
+  gone: { phonetic: 'synthetic-gone', pos: 'v.', translation: '合成完成条目' },
   wend: { phonetic: 'wɛnd', pos: 'v.', translation: '绕行' },
   challenge: { phonetic: 'ˈtʃælɪndʒ', pos: 'n./v.', translation: '挑战' },
   // core 主词条优先：could 自身是合法主词条，不应被 forms[could]=can 遮蔽
@@ -24,24 +26,25 @@ const FIXTURE_FORMS: FormsMap = {
   could: 'can',
 };
 
-const FIXTURE_BANDS: FrequencyBands = {
-  alpha: 5,
-  beta: 7,
-  go: 0,
-  wend: 2,
-  challenge: 3,
-  could: 4,
-  can: 1,
-};
-
 describe('Dictionary', () => {
   let dict: ReturnType<typeof createDictionary>;
 
   beforeAll(() => {
-    dict = createDictionary(FIXTURE_CORE, FIXTURE_FORMS, FIXTURE_BANDS);
+    dict = createDictionary(FIXTURE_CORE, FIXTURE_FORMS);
   });
 
   describe('lookup', () => {
+    it('查询词典条目保留频率元数据，双缺失词仍可查询', () => {
+      const queryOnly = loadDictionaryFromJSON(
+        JSON.stringify({ queryentry: ['q', 'n.', '合成查询释义', null] }),
+        JSON.stringify({}),
+      );
+
+      const entry = queryOnly.lookup('QueryEntry');
+      expect(entry?.wordKey).toBe('queryentry');
+      expect(entry?.entry.effectiveFrequencyRank).toBeNull();
+    });
+
     it('直接查主词条命中（wordKey === entryKey === 自身）', () => {
       const entry = dict.lookup('go');
       expect(entry).not.toBeNull();
@@ -50,7 +53,6 @@ describe('Dictionary', () => {
       expect(entry!.entry.phonetic).toBe('ɡəʊ');
       expect(entry!.entry.pos).toBe('v.');
       expect(entry!.entry.translation).toBe('去；走');
-      expect(entry!.band).toBe(0);
     });
 
     it('core 主词条优先：could 不被 forms[could]=can 遮蔽（wordKey/entryKey 均为 could 自身）', () => {
@@ -77,11 +79,18 @@ describe('Dictionary', () => {
       expect(entry!.entry.translation).toBe('去；走');
     });
 
-    it('通过词形映射命中 going（wordKey=go, entryKey=go）', () => {
+    it('词形映射与主词条碰撞时，going 作为主词条优先命中自身', () => {
       const entry = dict.lookup('going');
       expect(entry).not.toBeNull();
-      expect(entry!.wordKey).toBe('go');
-      expect(entry!.entryKey).toBe('go');
+      expect(entry!.wordKey).toBe('going');
+      expect(entry!.entryKey).toBe('going');
+    });
+
+    it('词形映射与主词条碰撞时，gone 作为主词条优先命中自身', () => {
+      const entry = dict.lookup('gone');
+      expect(entry).not.toBeNull();
+      expect(entry!.wordKey).toBe('gone');
+      expect(entry!.entryKey).toBe('gone');
     });
 
     it('大小写不敏感（surface form 保留原大小写，wordKey 为 core 小写）', () => {

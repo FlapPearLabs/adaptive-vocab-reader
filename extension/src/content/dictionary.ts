@@ -1,21 +1,19 @@
-import type { DictCore, FormsMap, FrequencyBands, DictEntry } from '../shared/types';
+import type { DictCore, FormsMap, DictEntry } from '../shared/types';
 
 export interface LookupResult {
-  /** wordKey（core 主词条小写）：用于单词状态/页面 data-word */
+  /** wordKey（查询 canonical lemma 小写）：用于单词状态/页面 data-word */
   wordKey: string;
-  /** 取义主词条（词形映射目标或自身）：用于取音标/词性/释义/频段 */
+  /** 取义主词条（词形映射目标或自身）：用于取音标/词性/释义 */
   entryKey: string;
   /** 原始 surface form（保留大小写，用于 DOM 定位） */
   surfaceForm: string;
   /** 词典条目（entryKey 对应） */
   entry: DictEntry;
-  /** 词频段 (0-9) */
-  band: number;
 }
 
 export interface Dictionary {
   /**
-   * 查询一个词形，返回 wordKey、取义主词条、原始词形、词典条目与频段。
+   * 查询一个词形，返回 wordKey、取义主词条、原始词形与词典条目。
    * 规则（core 主词条优先，词形映射到同一个 wordKey）：
    * 1. 先查 core：若 surface form 本身是 core 主词条（如 could），直接命中所取义，
    *    wordKey = entryKey = 自身（不被词形映射遮蔽）。
@@ -37,7 +35,6 @@ export interface Dictionary {
 export function createDictionary(
   core: DictCore,
   forms: FormsMap,
-  bands: FrequencyBands,
 ): Dictionary {
   return {
     lookup(surfaceForm: string): LookupResult | null {
@@ -51,7 +48,6 @@ export function createDictionary(
           entryKey: form,
           surfaceForm,
           entry: coreEntry,
-          band: bands[form] ?? 9,
         };
       }
 
@@ -65,7 +61,6 @@ export function createDictionary(
             entryKey: mappedWord,
             surfaceForm,
             entry,
-            band: bands[mappedWord] ?? 9,
           };
         }
       }
@@ -81,23 +76,22 @@ export function createDictionary(
 
 /**
  * 从 JSON 字符串创建词典。
- * JSON 中词条存储为 [phonetic, pos, translation] 数组格式。
+ * 查询词典词条存储为 [phonetic, pos, translation, effectiveFrequencyRank]；
+ * 固定测评词典的旧三元组也可读取，缺少的频率元数据归一为 null。
  * 用于内容脚本从 chrome.runtime.getURL 拉取数据后初始化。
  */
 export function loadDictionaryFromJSON(
   coreJSON: string,
   formsJSON: string,
-  bandsJSON: string,
 ): Dictionary {
-  const rawCore: Record<string, [string, string, string]> = JSON.parse(coreJSON);
+  const rawCore: Record<string, [string, string, string, (number | null)?]> = JSON.parse(coreJSON);
   const forms: FormsMap = JSON.parse(formsJSON);
-  const bands: FrequencyBands = JSON.parse(bandsJSON);
 
   // 将数组格式转换为 DictEntry 对象
   const core: DictCore = {};
   for (const [word, arr] of Object.entries(rawCore)) {
-    core[word] = { phonetic: arr[0], pos: arr[1], translation: arr[2] };
+    core[word] = { phonetic: arr[0], pos: arr[1], translation: arr[2], effectiveFrequencyRank: arr[3] ?? null };
   }
 
-  return createDictionary(core, forms, bands);
+  return createDictionary(core, forms);
 }

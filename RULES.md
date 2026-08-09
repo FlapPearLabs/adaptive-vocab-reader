@@ -28,8 +28,8 @@
 
 ## 词汇键（wordKey）与词形
 
-- **[已确认]** 个人词汇状态与测试证据的唯一身份键是 `wordKey`（ECDICT core 主词条的小写形式）。纯屈折变化的页面词形与映射到的 core 主词条共享同一 `wordKey`，例如 `went / going / gone → go`。**本规则描述当前 main 实现与固定测评包（ECDICT assessment 范围）的身份事实。OPEN_DECISIONS E/F 已决议并生效（2026-08-07，限定范围）**：查询词典方向为 ECDICT 全量本地——E 已验证通过（限定个人本地 dogfood、不公开发布），包外词沿用与包内相同的字符串身份键、不区分来源、不升级 schema；公开再分发需 E/F 返回用户重新决策，不得自行替换词典或静默改变身份模型（见「查询、交互、主动提示与测评词包解耦」与 Spec DEFINITIONS/OPEN_DECISIONS E/F/§18）。
-- **[已确认]** core 主词条优先：页面词形本身若是合法 core 主词条，就使用自身作为 `wordKey`；因此 `could` 与 `can` 独立。不做派生词、词族、义项、MWE 或俚语的状态传播。
+- **[已确认]** 个人词汇状态与测试证据的唯一身份键是 `wordKey`（ECDICT core 主词条的小写形式）。纯屈折变化的页面词形与映射到的 core 主词条共享同一 `wordKey`，例如当前固定测评包的历史 main 事实中 `went / going / gone → go`。**本规则描述当前 main 实现与固定测评包（ECDICT assessment 范围）的身份事实。OPEN_DECISIONS E/F 已决议并生效（2026-08-07，限定范围）**：查询词典方向为 ECDICT 全量本地——E 已验证通过（限定个人本地 dogfood、不公开发布），包外词沿用与包内相同的字符串身份键、不区分来源、不升级 schema；公开再分发需 E/F 返回用户重新决策，不得自行替换词典或静默改变身份模型（见「查询、交互、主动提示与测评词包解耦」与 Spec DEFINITIONS/OPEN_DECISIONS E/F/§18）。
+- **[已确认]** core 主词条优先：页面词形本身若是合法 core 主词条，就使用自身作为 `wordKey`；否则才回退 `exchange` 词形映射。因此 `could` 与 `can` 独立；扩展 query snapshot 中 `went → go`、`going → going`、`gone → gone`。前一条的固定测评包历史示例不得覆盖该通用 canonicalization 合同。不做派生词、词族、义项、MWE 或俚语的状态传播。
 - **[已确认]** 页面 `data-word`、存储状态键与测试候选键三者统一为 `wordKey`。旧实现的 surface stateKey（`went` 与 `go` 状态各自独立）被本规则取代，必须经 schema 3 迁移并入 `wordKey`（见「存储与迁移」）。
 
 ## 词汇状态与测试证据（双真相源）

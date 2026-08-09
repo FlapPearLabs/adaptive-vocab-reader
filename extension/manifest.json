@@ -17,7 +17,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["data/dict-core.json", "data/forms.json", "data/frequency-bands.json"],
+      "resources": ["data/dict-core.json", "data/forms.json", "data/frequency-bands.json", "data/query-dictionary.json", "data/query-forms.json"],
       "matches": ["https://*/*", "https://localhost/*"]
     }
   ],
