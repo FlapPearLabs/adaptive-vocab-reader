@@ -36,11 +36,11 @@ export interface AnnotateResult {
   removed: number;
 }
 
-/** updateWordDisplay 的真实 DOM 节点统计 */
+/** updateWordDisplay 的真实 DOM 节点统计（透明 span 只更新样式，不产生节点变化） */
 export interface UpdateResult {
-  /** 新增节点数（还原为纯文本时 = 被还原的 span 数） */
+  /** 新增节点数 */
   added: number;
-  /** 移除节点数（被替换的 span / 被替换的原文节点） */
+  /** 移除节点数 */
   removed: number;
 }
 
@@ -394,7 +394,7 @@ export function annotateTextNode(
  * 增量更新某个词在当前页面已有 span 的显示。
  * 不做全页重扫——只更新 data-word 匹配的 span。
  *
- * - decision='none'：把 span 还原为纯文本节点（移除标注）
+ * - decision='none'：保留透明 span，仅移除视觉样式
  * - decision='strong'：第一个 span 用 strong-first（行内中文），其余用 strong（仅下划线）
  * - decision='light'：所有 span 用 avr-light（悬停查看）
  *
@@ -407,8 +407,14 @@ export function updateWordDisplay(
   showInlineTranslation: boolean,
   generatedNodes?: WeakSet<Node>,
 ): UpdateResult {
-  const spans = [...(spansByWord.get(word) ?? document.querySelectorAll<HTMLSpanElement>(`.${EXTENSION_CLASS}[data-word="${word}"]`))]
+  const registered = spansByWord.get(word);
+  const spans = [...(registered ?? document.querySelectorAll<HTMLSpanElement>(`.${EXTENSION_CLASS}[data-word="${word}"]`))]
     .filter((span) => span.isConnected);
+  if (registered) {
+    registered.clear();
+    spans.forEach((span) => registered.add(span));
+    if (registered.size === 0) spansByWord.delete(word);
+  }
 
   spans.forEach((span, index) => {
     // 清除旧的提示类，保留 avr-word

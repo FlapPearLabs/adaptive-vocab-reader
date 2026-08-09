@@ -65,6 +65,28 @@ function installOpenShadowRoots(pageScanner: PageScanner, root: ParentNode): voi
   }
 }
 
+/** all_frames 仅用于同源 iframe；跨源 frame 无法安全读取顶层 origin 时 fail-closed。 */
+function isSupportedFrame(): boolean {
+  const topWindow = window.top;
+  if (!topWindow) return false;
+  if (topWindow === window) return true;
+  try {
+    return topWindow.location.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** 仅本地 fixture 可覆盖 bootstrap 值，供真实 Chrome 校准 seam 验收；不持久化也不暴露给普通网页。 */
+function hintThresholdForDocument(dict: Dictionary): number | null {
+  const testValue = location.hostname === 'localhost'
+    ? Number(document.documentElement.dataset.avrTestHintThreshold)
+    : Number.NaN;
+  return Number.isFinite(testValue) && testValue > 0
+    ? testValue
+    : bootstrapHintThreshold(dict.effectiveFrequencyRanks());
+}
+
 // ============================================================
 // 启动
 // ============================================================
@@ -78,7 +100,7 @@ async function main(): Promise<void> {
 
   scanner = createPageScanner({
     dictionary: dict,
-    hintThreshold: bootstrapHintThreshold(dict.effectiveFrequencyRanks()),
+    hintThreshold: hintThresholdForDocument(dict),
     getState: () => state,
     onUserAction: saveStateChange,
     // 非持久化性能观测：写入 documentElement dataset（仅内存 DOM 属性，绝不进 storage；
@@ -116,5 +138,5 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// 启动
-main().catch(console.error);
+// 启动：同源 iframe 独立初始化；跨源 iframe 不扫描、不注入 UI。
+if (isSupportedFrame()) main().catch(console.error);

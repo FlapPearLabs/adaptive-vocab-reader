@@ -349,6 +349,14 @@ async function main() {
           return;
         }
       }
+      if (request.url === '/ux-calibration.html') {
+        const f = path.join(tempDir, 'ux-calibration.html');
+        if (fs.existsSync(f)) {
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          response.end(fs.readFileSync(f, 'utf8'));
+          return;
+        }
+      }
       if (request.url === '/ux-frame.html') {
         const f = path.join(tempDir, 'ux-frame.html');
         if (fs.existsSync(f)) {
@@ -556,6 +564,51 @@ async function main() {
     if (tooltipGeometry.tip.top < tooltipGeometry.headerBottom || overlaps(tooltipGeometry.tip, tooltipGeometry.target)) {
       throw new Error(`R-TOOLTIP-3/AC-8 失败：tooltip 侵入 header 或遮挡目标：${JSON.stringify(tooltipGeometry)}`);
     }
+    const placeTooltip = async (top, left, scrollY = 0) => {
+      await uxPage.evaluate(({ targetTop, targetLeft, targetScrollY }) => {
+        document.body.style.minHeight = '1600px';
+        const host = document.getElementById('ability-word');
+        if (!host) throw new Error('缺少 tooltip 几何目标');
+        Object.assign(host.style, {
+          position: 'absolute',
+          top: `${targetTop}px`,
+          left: `${targetLeft}px`,
+        });
+        window.scrollTo(0, targetScrollY);
+        document.querySelector('.avr-word[data-word="ability"]')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+      }, { targetTop: top, targetLeft: left, targetScrollY: scrollY });
+      await uxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.style.display === 'block', { timeout: 5_000 });
+      return uxPage.evaluate(() => {
+        const toRect = (rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+        const tip = document.querySelector('.avr-tooltip');
+        const target = document.querySelector('.avr-word[data-word="ability"]');
+        const header = document.querySelector('[data-avr-safe-top]');
+        if (!tip || !target || !header) throw new Error('缺少 tooltip 几何节点');
+        return {
+          tip: toRect(tip.getBoundingClientRect()),
+          target: toRect(target.getBoundingClientRect()),
+          headerBottom: header.getBoundingClientRect().bottom,
+          viewportWidth: window.innerWidth,
+        };
+      });
+    };
+    const normalTooltip = await placeTooltip(260, 120);
+    if (normalTooltip.tip.bottom > normalTooltip.target.top || overlaps(normalTooltip.tip, normalTooltip.target)) {
+      throw new Error(`R-TOOLTIP-3/AC-8 失败：普通位置未优先显示在目标上方：${JSON.stringify(normalTooltip)}`);
+    }
+    const topTooltip = await placeTooltip(70, 120);
+    if (topTooltip.tip.top < topTooltip.target.bottom || topTooltip.tip.top < topTooltip.headerBottom) {
+      throw new Error(`R-TOOLTIP-3/AC-8 失败：顶部空间不足时未下方翻转或侵入 header：${JSON.stringify(topTooltip)}`);
+    }
+    const rightTooltip = await placeTooltip(260, await uxPage.evaluate(() => window.innerWidth - 2));
+    if (rightTooltip.tip.right > rightTooltip.viewportWidth - 8) {
+      throw new Error(`R-TOOLTIP-3/AC-8 失败：右边界溢出视口：${JSON.stringify(rightTooltip)}`);
+    }
+    const scrolledTooltip = await placeTooltip(940, 120, 400);
+    if (scrolledTooltip.tip.top < scrolledTooltip.headerBottom || overlaps(scrolledTooltip.tip, scrolledTooltip.target)) {
+      throw new Error(`R-TOOLTIP-3/AC-8 失败：滚动后 tooltip 几何错误：${JSON.stringify(scrolledTooltip)}`);
+    }
+    await uxPage.evaluate(() => window.scrollTo(0, 0));
 
     const workerUx1 = await getWorker(browserUx1);
     if (!workerUx1) throw new Error('R-UX-S2 失败：未找到 Service Worker');
@@ -620,7 +673,20 @@ async function main() {
     if (!isDeepStrictEqual(hintSnapshotAfter, hintSnapshotBefore)) {
       throw new Error('R-HINT-4/R-STATE-5 失败：候选判定写入了 storage');
     }
-    console.log(`E2E HINT PASS: T0=${hintThreshold}, n=${effectiveRanks.length}, index=${Math.floor(effectiveRanks.length / 2)}(0-based upper-middle), light_per_100=${hintDisplay.perf.lightHintsPer100Words}`);
+    fs.writeFileSync(path.join(tempDir, 'ux-calibration.html'), `<!doctype html><html data-avr-test-hint-threshold="${Number.MAX_SAFE_INTEGER}"><body><article><p id="calibration-word">${hintLightWord}</p></article></body></html>`);
+    const calibrationPage = await browserUx1.newPage();
+    await gotoSafe(calibrationPage, `https://localhost:${PORT}/ux-calibration.html`, { waitUntil: 'networkidle0' });
+    await calibrationPage.waitForSelector('#calibration-word .avr-word', { timeout: 10_000 });
+    const calibrationClassName = await calibrationPage.$eval('#calibration-word .avr-word', (word) => word.className);
+    if (calibrationClassName !== 'avr-word') {
+      throw new Error(`AC-7 失败：校准阈值未改变灰线集合：${JSON.stringify({ hintLightWord, calibrationClassName })}`);
+    }
+    const calibrationSnapshot = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(calibrationSnapshot, hintSnapshotBefore)) {
+      throw new Error('R-HINT-4/R-STATE-5 失败：校准 seam 写入了 storage');
+    }
+    await calibrationPage.close();
+    console.log(`E2E HINT PASS: T0=${hintThreshold}, n=${effectiveRanks.length}, index=${Math.floor(effectiveRanks.length / 2)}(0-based upper-middle), light_per_100=${hintDisplay.perf.lightHintsPer100Words}, calibration_threshold=${Number.MAX_SAFE_INTEGER}, calibration_light=false`);
     await uxPage.click('#hint-light-word .avr-word');
     await uxPage.click('.avr-action-menu button[data-avr-status="known"]');
     await uxPage.waitForFunction(() => document.querySelector('#hint-light-word .avr-word')?.className === 'avr-word', { timeout: 5_000 });
