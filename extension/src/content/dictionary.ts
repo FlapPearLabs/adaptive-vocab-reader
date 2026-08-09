@@ -26,6 +26,9 @@ export interface Dictionary {
    * 检查词形是否在词典中（含词形映射）。
    */
   has(surfaceForm: string): boolean;
+
+  /** 查询词典中可用于主动提示 bootstrap 的只读有效频率列表。 */
+  effectiveFrequencyRanks(): Array<number | null>;
 }
 
 /**
@@ -70,6 +73,10 @@ export function createDictionary(
 
     has(surfaceForm: string): boolean {
       return this.lookup(surfaceForm) !== null;
+    },
+
+    effectiveFrequencyRanks(): Array<number | null> {
+      return Object.values(core).map((entry) => entry.effectiveFrequencyRank ?? null);
     },
   };
 }

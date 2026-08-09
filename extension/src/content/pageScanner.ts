@@ -8,8 +8,9 @@
 // - 已处理的文本节点通过 processedNodes 守卫，不会被重复标注（不全页重扫）
 // - MutationObserver 只把「新增的节点子树」交给 scanDocument，做增量标注
 // - 状态变更（applyWordDisplay）只更新匹配 data-word 的已有 span
-import type { DisplayResult, FrequencyBands, WordState } from '../shared/types';
+import type { DisplayResult, WordState } from '../shared/types';
 import { createVocabStrategy } from '../strategy/index';
+import { bootstrapHintThreshold, hintDisplayDecision } from '../strategy/hint';
 import type { Dictionary } from './dictionary';
 import { extractWordsFromText, isContentNode } from './scanner';
 import { annotateTextNode, hideAnnotationActionMenu, updateWordDisplay, type WordAnnotation } from './annotator';
@@ -24,6 +25,12 @@ export interface PerfReport {
   textNodesScanned: number;
   /** 累计标注的单词数 */
   wordsAnnotated: number;
+  /** 本次页面扫描中被主动提示策略判为 light 的词数（仅内存）。 */
+  lightHints: number;
+  /** 每百个已标注词的灰线数，供 dogfood 人工记录参考；不设合格阈值。 */
+  lightHintsPer100Words: number;
+  /** 本次运行使用的频率下界阈值；null 表示没有有效频率输入。 */
+  hintThreshold: number | null;
   /** 实际新增到 DOM 的标注 span 数（annotateTextNode 真实返回的插入节点数） */
   domNodesAdded: number;
   /** 实际从 DOM 移除的标注 span 数（updateWordDisplay 还原为纯文本时） */
@@ -53,14 +60,12 @@ export interface PerfReport {
 export interface PageScannerDeps {
   /** 已加载的词典 */
   dictionary: Dictionary;
-  /** T-QD-1 期间保留旧展示语义的固定测评词典；T-INT-2 再改为全量查询包装。 */
-  assessmentDictionary?: Dictionary;
   /** 返回当前内存中的词汇状态（初始加载时调用一次） */
   getState: () => Record<string, WordState>;
   /** 用户在页面上标记会/不会时回调（用于持久化与广播） */
   onUserAction: (word: string, newStatus: WordState['status']) => void;
-  /** 固定测评词包的频段；只为既有 strategy seam 提供兼容上下文，不属于查询词典。 */
-  assessmentBands?: FrequencyBands;
+  /** dogfood 校准可注入的频率下界；未提供时按查询词典 bootstrap。 */
+  hintThreshold?: number | null;
   /** 可选：每次扫描结束后回调性能观测（非持久化，仅内存） */
   onPerfReport?: (report: PerfReport) => void;
 }
@@ -84,6 +89,9 @@ export interface PageScanner {
 
 export function createPageScanner(deps: PageScannerDeps): PageScanner {
   let vocabState: Record<string, WordState> = deps.getState();
+  const hintThreshold = deps.hintThreshold === undefined
+    ? bootstrapHintThreshold(deps.dictionary.effectiveFrequencyRanks())
+    : deps.hintThreshold;
   const processedNodes = new WeakSet<Node>();
   const pageOccurrenceCounts = new Map<string, number>();
 
@@ -92,6 +100,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   let perfMaxBatchMs = 0;
   let perfTextNodesScanned = 0;
   let perfWordsAnnotated = 0;
+  let perfLightHints = 0;
   let perfDomNodesAdded = 0;
   let perfDomNodesRemoved = 0;
   let perfHeightDeltaPx = 0;
@@ -104,39 +113,23 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
   const generatedNodes: WeakSet<Node> = new WeakSet<Node>();
   let selectionActionEl: HTMLButtonElement | null = null;
 
-  function canUseAssessmentDisplay(surfaceForm: string): boolean {
-    if (!deps.assessmentBands) return true;
-    const assessmentLookup = deps.assessmentDictionary?.lookup(surfaceForm) ?? deps.dictionary.lookup(surfaceForm);
-    return Boolean(assessmentLookup && Object.hasOwn(deps.assessmentBands, assessmentLookup.wordKey));
-  }
-
   function getDisplayResult(surfaceForm: string, occurrenceCount: number): DisplayResult | null {
     const lookup = deps.dictionary.lookup(surfaceForm);
     if (!lookup) return null;
 
     const state = vocabState[lookup.wordKey];
-    if (!canUseAssessmentDisplay(surfaceForm)) {
-      const isLearning = state?.status === 'learning';
-      return {
-        word: lookup.wordKey,
-        decision: isLearning ? 'strong' : 'none',
-        surfaceForm,
-        // 查询词典中未进入固定测评词包的词保持透明，但仍需完整 tooltip 元数据。
-        translation: lookup.entry.translation,
-        showInlineTranslation: isLearning && occurrenceCount === 1,
-      };
-    }
-
-    return createVocabStrategy().getDisplayDecision(
-      {
-        word: lookup.wordKey,
-        surfaceForm,
-        entry: lookup.entry,
-        band: deps.assessmentBands?.[lookup.wordKey] ?? null,
-        occurrenceCount,
-      },
-      state,
-    );
+    const isLearning = state?.status === 'learning';
+    return {
+      word: lookup.wordKey,
+      decision: isLearning ? 'strong' : hintDisplayDecision({
+        effectiveFrequencyRank: lookup.entry.effectiveFrequencyRank,
+        status: state?.status,
+        threshold: hintThreshold,
+      }),
+      surfaceForm,
+      translation: lookup.entry.translation,
+      showInlineTranslation: isLearning && occurrenceCount === 1,
+    };
   }
 
   function hideSelectionAction(): void {
@@ -230,6 +223,9 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       maxBatchMs: Math.round(perfMaxBatchMs * 1000) / 1000,
       textNodesScanned: perfTextNodesScanned,
       wordsAnnotated: perfWordsAnnotated,
+      lightHints: perfLightHints,
+      lightHintsPer100Words: perfWordsAnnotated === 0 ? 0 : Math.round((perfLightHints * 10000) / perfWordsAnnotated) / 100,
+      hintThreshold,
       domNodesAdded: perfDomNodesAdded,
       domNodesRemoved: perfDomNodesRemoved,
       netNodes: perfDomNodesAdded - perfDomNodesRemoved,
@@ -246,6 +242,9 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       maxBatchMs: Math.round(perfMaxBatchMs * 1000) / 1000,
       textNodesScanned: perfTextNodesScanned,
       wordsAnnotated: perfWordsAnnotated,
+      lightHints: perfLightHints,
+      lightHintsPer100Words: perfWordsAnnotated === 0 ? 0 : Math.round((perfLightHints * 10000) / perfWordsAnnotated) / 100,
+      hintThreshold,
       domNodesAdded: perfDomNodesAdded,
       domNodesRemoved: perfDomNodesRemoved,
       netNodes: perfDomNodesAdded - perfDomNodesRemoved,
@@ -326,6 +325,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       pageOccurrenceCounts.set(wordKey, occurrenceCount);
       const result = getDisplayResult(occ.word, occurrenceCount);
       if (!result) continue;
+      if (result.decision === 'light') perfLightHints++;
       annotations.push({
         result,
         phonetic: lookup.entry.phonetic,

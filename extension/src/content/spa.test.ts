@@ -81,7 +81,6 @@ describe('SPA 动态插入（规格 §11）', () => {
     );
     const scanner = createPageScanner({
       dictionary,
-      assessmentBands: { alpha: 0 },
       getState: () => ({}),
       onUserAction: () => {},
     });
@@ -98,6 +97,42 @@ describe('SPA 动态插入（规格 §11）', () => {
     expect([...document.querySelectorAll('.avr-tooltip > div')].map((row) => row.textContent)).toEqual([
       'queryonly', 'q', 'n.', '合成查询释义',
     ]);
+  });
+
+  it('灰线只来自频率候选；等阈值、缺频率与 known/learning 保持显式语义', () => {
+    document.body.innerHTML = '<article><p>common boundary rare knownrare learningrare nofrequency</p></article>';
+    const dictionary = createDictionary(
+      {
+        common: { phonetic: 'c', pos: 'n.', translation: '常见', effectiveFrequencyRank: 10 },
+        boundary: { phonetic: 'b', pos: 'n.', translation: '边界', effectiveFrequencyRank: 20 },
+        rare: { phonetic: 'r', pos: 'n.', translation: '生僻', effectiveFrequencyRank: 30 },
+        knownrare: { phonetic: 'kr', pos: 'n.', translation: '已会', effectiveFrequencyRank: 30 },
+        learningrare: { phonetic: 'lr', pos: 'n.', translation: '不会', effectiveFrequencyRank: 30 },
+        nofrequency: { phonetic: 'nf', pos: 'n.', translation: '无频率', effectiveFrequencyRank: null },
+      },
+      {},
+    );
+    const state: Record<string, WordState> = {
+      knownrare: { status: 'known', source: 'manual', updatedAt: 1, version: 1 },
+      learningrare: { status: 'learning', source: 'manual', updatedAt: 1, version: 1 },
+    };
+    const before = structuredClone(state);
+    const scanner = createPageScanner({
+      dictionary,
+      hintThreshold: 20,
+      getState: () => state,
+      onUserAction: () => {},
+    });
+
+    scanner.scanDocument(document.body);
+
+    expect(document.querySelector('[data-word="common"]')!.className).toBe('avr-word');
+    expect(document.querySelector('[data-word="boundary"]')!.className).toBe('avr-word');
+    expect(document.querySelector('[data-word="rare"]')!.className).toBe('avr-word avr-light');
+    expect(document.querySelector('[data-word="knownrare"]')!.className).toBe('avr-word');
+    expect(document.querySelector('[data-word="learningrare"]')!.className).toBe('avr-word avr-strong-first');
+    expect(document.querySelector('[data-word="nofrequency"]')!.className).toBe('avr-word');
+    expect(state).toEqual(before);
   });
 
   it('动态追加正文被增量标注，已标注内容不被重扫或重置（MutationObserver 路径）', async () => {

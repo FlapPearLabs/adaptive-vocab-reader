@@ -13,6 +13,7 @@ import type { WordState } from '../shared/types';
 import { loadDictionaryFromJSON, Dictionary } from './dictionary';
 import { initAnnotator } from './annotator';
 import { createPageScanner, type PageScanner } from './pageScanner';
+import { bootstrapHintThreshold } from '../strategy/hint';
 
 // ============================================================
 // 全局状态
@@ -27,20 +28,13 @@ let scanner: PageScanner | null = null;
 
 async function loadDictionary(): Promise<{
   dictionary: Dictionary;
-  assessmentDictionary: Dictionary;
-  assessmentBands: Record<string, number>;
 }> {
-  const [queryJSON, queryFormsJSON, assessmentJSON, assessmentFormsJSON, bandsJSON] = await Promise.all([
+  const [queryJSON, queryFormsJSON] = await Promise.all([
     fetch(chrome.runtime.getURL('data/query-dictionary.json')).then((r) => r.text()),
     fetch(chrome.runtime.getURL('data/query-forms.json')).then((r) => r.text()),
-    fetch(chrome.runtime.getURL('data/dict-core.json')).then((r) => r.text()),
-    fetch(chrome.runtime.getURL('data/forms.json')).then((r) => r.text()),
-    fetch(chrome.runtime.getURL('data/frequency-bands.json')).then((r) => r.text()),
   ]);
   return {
     dictionary: loadDictionaryFromJSON(queryJSON, queryFormsJSON),
-    assessmentDictionary: loadDictionaryFromJSON(assessmentJSON, assessmentFormsJSON),
-    assessmentBands: JSON.parse(bandsJSON),
   };
 }
 
@@ -84,8 +78,7 @@ async function main(): Promise<void> {
 
   scanner = createPageScanner({
     dictionary: dict,
-    assessmentDictionary: loadedDictionary.assessmentDictionary,
-    assessmentBands: loadedDictionary.assessmentBands,
+    hintThreshold: bootstrapHintThreshold(dict.effectiveFrequencyRanks()),
     getState: () => state,
     onUserAction: saveStateChange,
     // 非持久化性能观测：写入 documentElement dataset（仅内存 DOM 属性，绝不进 storage；

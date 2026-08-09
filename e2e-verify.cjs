@@ -249,6 +249,15 @@ async function main() {
     throw new Error('dist/ 未包含已验证的 1,000 词 ECDICT 核心包');
   }
   const queryEntries = Object.values(queryDictionary);
+  const effectiveRanks = queryEntries
+    .map((entry) => Array.isArray(entry) ? entry[3] : null)
+    .filter((rank) => typeof rank === 'number' && Number.isFinite(rank) && rank > 0)
+    .sort((a, b) => a - b);
+  const hintThreshold = effectiveRanks[Math.floor(effectiveRanks.length / 2)];
+  const isStableHintFixtureWord = (word, entry) => /^[a-z]{3,}$/.test(word) && !word.endsWith('s') && Array.isArray(entry) && entry.slice(0, 3).every(Boolean);
+  const hintLightWord = Object.entries(queryDictionary).find(([word, entry]) => isStableHintFixtureWord(word, entry) && entry[3] > hintThreshold)?.[0];
+  const hintBoundaryWord = Object.entries(queryDictionary).find(([word, entry]) => isStableHintFixtureWord(word, entry) && entry[3] === hintThreshold)?.[0];
+  const hintCommonWord = Object.entries(queryDictionary).find(([word, entry]) => isStableHintFixtureWord(word, entry) && entry[3] < hintThreshold)?.[0];
   const missingFrequencyWord = Object.entries(queryDictionary).find(([word, entry]) => (
     /^[a-z]{3,}$/.test(word) &&
     !word.endsWith('s') &&
@@ -260,6 +269,10 @@ async function main() {
   const frequencyIneligibleEntries = queryEntries.filter((entry) => Array.isArray(entry) && entry[3] === null);
   if (
     queryEntries.length === 0 ||
+    effectiveRanks.length === 0 ||
+    !hintLightWord ||
+    !hintBoundaryWord ||
+    !hintCommonWord ||
     !missingFrequencyWord ||
     frequencyEligibleEntries.length === 0 ||
     frequencyIneligibleEntries.length === 0 ||
@@ -483,11 +496,11 @@ async function main() {
       throw new Error(`R-UX-S3 前置失败：未收录词 ${absentWord} 意外命中真实词包`);
     }
     fs.writeFileSync(path.join(tempDir, 'ux-frame.html'), '<!doctype html><article><p>ability</p></article>');
-    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="ability-word">abilities</span> <span id="missing-frequency-word">${missingFrequencyWord}</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article><div id="shadow-host"></div><iframe src="/ux-frame.html"></iframe><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML = '<article><p>ability</p></article>';</script></body></html>`);
+    fs.writeFileSync(path.join(tempDir, 'ux-reading.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="ability-word">abilities</span> <span id="hint-light-word">${hintLightWord}</span> <span id="hint-boundary-word">${hintBoundaryWord}</span> <span id="hint-common-word">${hintCommonWord}</span> <span id="missing-frequency-word">${missingFrequencyWord}</span> <span id="selection-word">challenge</span> <span id="selection-punctuation">“AbIlItY!”</span> <span id="negative-leading-number">123ability</span> <span id="negative-trailing-number">ability123</span> <span id="negative-numbered-context">1. ability 2</span> <span id="negative-unrecorded">${absentWord}</span> <span id="negative-multi">ability challenge</span> <span id="negative-partial">abilitie</span> <span id="negative-blank">   </span> <span id="negative-number">12345</span></p><p>challenge appears twice.</p></article><div id="shadow-host"></div><iframe src="/ux-frame.html"></iframe><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML = '<article><p>ability</p></article>';</script></body></html>`);
     const uxPage = await browserUx1.newPage();
     uxPage.on('pageerror', (error) => pageLogs.push(`ux1 pageerror: ${error.message}`));
     await gotoSafe(uxPage, `https://localhost:${PORT}/ux-reading.html`, { waitUntil: 'networkidle0' });
-    await uxPage.waitForSelector('.avr-light[data-word="ability"]', { timeout: 10_000 });
+    await uxPage.waitForSelector('.avr-word[data-word="ability"]', { timeout: 10_000 });
 
     await uxPage.waitForFunction(() => document.getElementById('shadow-host')?.shadowRoot?.querySelector('.avr-word'));
     await uxPage.evaluate(() => document.getElementById('shadow-host')?.shadowRoot?.querySelector('.avr-word')?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true })));
@@ -498,7 +511,7 @@ async function main() {
     await iframe.waitForSelector('.avr-word[data-word="ability"]', { timeout: 10_000 });
 
     // R-UX-T1/T2：tooltip 固定四行；surfaceForm=abilities，三项元数据逐项来自 ability core 条目。
-    await uxPage.evaluate(() => document.querySelector('.avr-light[data-word="ability"]')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    await uxPage.evaluate(() => document.querySelector('.avr-word[data-word="ability"]')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
     await uxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.style.display === 'block', { timeout: 5_000 });
     const tooltipLines = await uxPage.$$eval('.avr-tooltip > div', (rows) => rows.map((row) => row.textContent || ''));
     const [abilityPhonetic, abilityPos, abilityTranslation] = dictCore.ability;
@@ -507,7 +520,7 @@ async function main() {
     }
     const tooltipGeometry = await uxPage.evaluate(() => {
       const tip = document.querySelector('.avr-tooltip').getBoundingClientRect();
-      const target = document.querySelector('.avr-light[data-word="ability"]').getBoundingClientRect();
+      const target = document.querySelector('.avr-word[data-word="ability"]').getBoundingClientRect();
       const header = document.querySelector('[data-avr-safe-top]').getBoundingClientRect();
       return { tip: { left: tip.left, top: tip.top, right: tip.right, bottom: tip.bottom }, target: { left: target.left, top: target.top, right: target.right, bottom: target.bottom }, headerBottom: header.bottom };
     });
@@ -548,6 +561,44 @@ async function main() {
     if (missingFrequencyTooltipLines.length !== 4) {
       throw new Error(`AC-10 失败：无频率的可查询词未展示完整 tooltip：${JSON.stringify(missingFrequencyTooltipLines)}`);
     }
+    const evidenceBeforeMissingFrequencyFeedback = (await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot)).assessmentEvidence;
+    await uxPage.click('#missing-frequency-word .avr-word');
+    await uxPage.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true, timeout: 5_000 });
+    await uxPage.click('.avr-action-menu button[data-avr-status="known"]');
+    await uxPage.waitForFunction(() => document.querySelector('#missing-frequency-word .avr-word')?.className === 'avr-word', { timeout: 5_000 });
+    const missingFrequencyAfterFeedback = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (missingFrequencyAfterFeedback.words?.[missingFrequencyWord]?.status !== 'known' || missingFrequencyAfterFeedback.words?.[missingFrequencyWord]?.source !== 'manual') {
+      throw new Error('AC-7 失败：缺频率的可查询词 click 未写入其自身 manual known WordState');
+    }
+    if (!isDeepStrictEqual(missingFrequencyAfterFeedback.assessmentEvidence, evidenceBeforeMissingFrequencyFeedback)) {
+      throw new Error('AC-7 失败：缺频率的可查询词反馈污染了 AssessmentEvidence');
+    }
+
+    // T-HINT-4 / AC-7：bootstrap 阈值只来自查询词典 rank；候选不写状态，边界严格大于。
+    const hintSnapshotBefore = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    const hintDisplay = await uxPage.evaluate(() => ({
+      light: document.querySelector('#hint-light-word .avr-word')?.className,
+      boundary: document.querySelector('#hint-boundary-word .avr-word')?.className,
+      common: document.querySelector('#hint-common-word .avr-word')?.className,
+      perf: JSON.parse(document.documentElement.dataset.avrPerf || '{}'),
+    }));
+    if (hintDisplay.light !== 'avr-word avr-light' || hintDisplay.boundary !== 'avr-word' || hintDisplay.common !== 'avr-word') {
+      throw new Error(`AC-7 失败：频率候选或严格边界错误：${JSON.stringify(hintDisplay)}`);
+    }
+    if (hintDisplay.perf.hintThreshold !== hintThreshold || hintDisplay.perf.lightHintsPer100Words <= 0) {
+      throw new Error(`AC-7 失败：T₀ 或灰线密度观测错误：${JSON.stringify(hintDisplay.perf)}`);
+    }
+    const hintSnapshotAfter = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(hintSnapshotAfter, hintSnapshotBefore)) {
+      throw new Error('R-HINT-4/R-STATE-5 失败：候选判定写入了 storage');
+    }
+    console.log(`E2E HINT PASS: T0=${hintThreshold}, n=${effectiveRanks.length}, index=${Math.floor(effectiveRanks.length / 2)}(0-based upper-middle), light_per_100=${hintDisplay.perf.lightHintsPer100Words}`);
+    await uxPage.click('#hint-light-word .avr-word');
+    await uxPage.click('.avr-action-menu button[data-avr-status="known"]');
+    await uxPage.waitForFunction(() => document.querySelector('#hint-light-word .avr-word')?.className === 'avr-word', { timeout: 5_000 });
+    await uxPage.click('#hint-light-word .avr-word');
+    await uxPage.click('.avr-action-menu button[data-avr-status="learning"]');
+    await uxPage.waitForFunction(() => document.querySelector('#hint-light-word .avr-word')?.classList.contains('avr-strong-first'), { timeout: 5_000 });
 
     // R-UX-S1/S2/T3：整体选中命中 → 浮条 → manual learning，且同页即时强提示。
     await selectElementText(uxPage, '#selection-word');
@@ -1036,7 +1087,7 @@ async function main() {
     fs.writeFileSync(path.join(tempDir, 'plan-words.html'), `<!DOCTYPE html><html><body><article><p><span id="ux2-manual-word">${manualWord}</span></p></article></body></html>`);
     const readingUx2 = await browserUx2.newPage();
     await gotoSafe(readingUx2, `https://localhost:${PORT}/plan-words.html`, { waitUntil: 'networkidle0' });
-    await readingUx2.waitForSelector(`.avr-light[data-word="${manualWord}"]`, { timeout: 10_000 });
+    await readingUx2.waitForSelector(`.avr-word[data-word="${manualWord}"]`, { timeout: 10_000 });
     await selectElementText(readingUx2, '#ux2-manual-word');
     await readingUx2.waitForSelector('.avr-selection-action', { visible: true, timeout: 5_000 });
     await readingUx2.evaluate(() => document.querySelector('.avr-selection-action')?.click());
@@ -1768,10 +1819,10 @@ async function main() {
     pageB.on('pageerror', (e) => pageLogs.push(`syncB error: ${e.message}`));
     await gotoSafe(pageB, `https://localhost:${PORT}/sync-b.html`, { waitUntil: 'networkidle0' });
     await pageB.waitForSelector(`.avr-word[data-word="${M}"]`, { timeout: 10_000 });
-    const preA = await pageA.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, M);
-    const preB = await pageB.evaluate((w) => document.querySelectorAll(`.avr-light[data-word="${w}"]`).length, M);
+    const preA = await pageA.evaluate((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length, M);
+    const preB = await pageB.evaluate((w) => document.querySelectorAll(`.avr-word[data-word="${w}"]`).length, M);
     if (preA !== 1 || preB !== 1) {
-      throw new Error(`跨标签前置失败：两页应各 1 个 light（A=${preA}, B=${preB}，word=${M}）`);
+      throw new Error(`跨标签前置失败：两页应各 1 个透明或 light 查询 span（A=${preA}, B=${preB}）`);
     }
     await pageA.evaluate((w) => { document.querySelector(`.avr-word[data-word="${w}"]`)?.click(); }, M);
     await pageA.waitForSelector('.avr-action-menu button[data-avr-status="learning"]', { visible: true });
