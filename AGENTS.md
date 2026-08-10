@@ -106,6 +106,12 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 - 使用 `apply_patch` 完成手工文件编辑；格式化、代码生成器和经过审查的批量机械变换除外。
 - 不得修改全局 Skill 文件来绕过项目配置。
 - 中间研究、草稿和临时产物放在 `work/`；用户可直接使用的交付物放在 `outputs/`。根目录规则、上下文和 ADR 按其约定位置保存。
+- **Ignored/local build artifact 可恢复性（2026-08-11 用户确认）**：当生产构建、真实 E2E 或 dogfood 依赖 `.gitignore` 中的 local-only 数据/生成物时：
+  1. tracked 文档必须记录确定性恢复路径；
+  2. 至少包含：source identity/hash、exact regeneration command、expected artifact names、build consumer、commit prohibition；
+  3. 不得因为当前开发 worktree 恰好已有缓存资产，就假设新的 worktree 或 main 合并后也存在；
+  4. 交付 build/dogfood readiness 前，应检查缺失资产时是否能依据 tracked 文档 fail-closed 并恢复；
+  5. ignored asset 不得为追求“开箱即用”而被直接提交；若数据许可/隐私边界禁止提交则必须继续 local-only。
 - 未经用户明确授权，不得 commit、push、创建 Issue/PR、发布包、部署、修改生产配置、创建远端标签或发送外部消息。
 - 用户授权创建某个文件或本地成果，不等于授权任何 Git 或远端操作。
 - **Git 同步常驻授权（2026-08-01 用户显式确认）**：当用户对某次改动给出肯定确认（如“可以 / 做吧 / 同意 / OK / yes”等），即视为授权将该改动 commit 并 push 到 GitHub；这是本条默认规则的显式覆盖。若当时无远端仓库，应先新建仓库（归属 `FlapPearLabs/adaptive-vocab-reader` 或用户指定）再推送。沉默或“先别动”不算同意。推送流程沿用第 3 节约定：先 `unset GH_TOKEN`，不修改 main、不强合并、不关闭 Issue（另行授权除外）。
