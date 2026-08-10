@@ -9,7 +9,17 @@
 
 ## 加载与扫描实测
 
-本机本轮 SPA 导航中，真实 extension 请求的 query dictionary 为 `66.9 ms`，query forms 为 `66.3 ms`；从开始导航到首个内容脚本标注出现为 `855.6 ms`。后者是端到端 content-script ready 时间，含页面导航和扩展初始化，不能解释成纯 JavaScript 初始化时间。
+本机修复后 SPA 真实 Chrome 运行的四项分离测量如下；均为当前页面内存中的聚合数字，不持久化、不含 URL 或正文：
+
+| 指标 | 实测 | 边界 |
+| --- | ---: | --- |
+| query dictionary asset load | `4.6 ms` | 扩展资源请求开始至完成 |
+| query forms asset load | `0.9 ms` | 扩展资源请求开始至完成 |
+| content-script initialization | `147.1 ms` | 内容脚本入口至词典/状态加载完成、scanner 装配及 state 设置完成；**初始扫描前** |
+| navigation → first annotation | `891.5 ms` | 导航开始至首个 `.avr-word`；保留为端到端观察值，不等同初始化 |
+| initial scan | `1.1 ms` | scanner 首次初始正文扫描的 `totalScanMs` |
+
+此前报告只有 navigation → first annotation（旧样本 `855.6 ms`），并已注明它混入导航和扩展启动。最终 CODE review 据此指出不能替代 ticket 所需的独立 initialization metric；本轮新增的 `avrContentScriptInitMs` 只在当前 document dataset 中存在，恰好在 `scanDocument` 前写入。它不是遥测、SLA 或性能优化输入。
 
 | 场景 | 扫描墙钟 ms | 单批最大 ms | 文本节点 | 注释词数 | DOM 前→后（Δ） | scrollHeight 前→后（Δ） | 高度变化 px | CLS | 批次 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -36,15 +46,20 @@ article span { color: rgb(190, 0, 190); border-bottom: 3px solid rgb(190, 0, 190
 
 修复前透明 `.avr-word` 的 computed `border-bottom` 为 `3px solid`，是用户可见的 CSS isolation failure，故按 T-PERF-7 STOP 合同暂停并派生 T-PERF-7A。根因分类为 `OTHER`：宿主 selector 直接匹配透明 wrapper，而扩展 CSS owner `extension/src/content/annotator.ts` 没有拥有 `border` 属性；这不是 cascade order、specificity 或 `!important` 问题（宿主页声明也没有 `!important`）。
 
-获授权的最小修复只在 `.avr-word` 声明 `border: 0`、透明 background 和无 decoration；字体、字号、行高、字距与颜色继续继承页面。没有使用 `!important`、广泛 reset、Shadow DOM 路线或产品状态变更。修复后同一真实压力页的 computed 结果为：
+获授权的第一处最小修复只在 `.avr-word` 声明 `border: 0`、透明 background 和无 decoration；没有使用 `!important`、广泛 reset、Shadow DOM 路线或产品状态变更。
 
-| 状态 | border | decoration |
+最终 CODE review 随后发现相同 fixture 的 `article span` 还直接设置了紫色 `color`。虽然 wrapper 没有声明颜色，但它新插入的 `span` 会命中该宿主 selector，导致透明词的 computed color 不再等于父正文。这是第二个已复现的 CSS isolation failure，根因仍是宿主 selector 直接匹配 wrapper，而不是 cascade order 或 specificity。第二处最小修复仅补 `.avr-word { color: inherit; }`：字体、字号、行高、字距和颜色均从正文父元素继承，未扩展为通用 reset。
+
+修复后同一真实压力页的 computed 结果为（parent 正文 `rgb(0, 0, 0)`，宿主 generic `article span` 的紫色为 `rgb(190, 0, 190)`）：
+
+| 状态 | color | border | decoration |
 | --- | --- | --- |
-| transparent / known | `none 0px` | `none` |
-| light | `none 0px` | `underline dotted` |
-| strong | `none 0px` | `underline solid` |
+| transparent | `rgb(0, 0, 0)`（等于 parent） | `none 0px` | `none` |
+| known | `rgb(0, 0, 0)`（等于 parent） | `none 0px` | `none` |
+| light | `rgb(0, 0, 0)`（等于 parent） | `none 0px` | `underline dotted` |
+| strong | `rgb(0, 0, 0)`（等于 parent） | `none 0px` | `underline solid` |
 
-同一 E2E 继续通过 hover、click/feedback、tooltip/action menu、selection、SPA、iframe、open Shadow DOM、跨标签同步、heightDelta 和 CLS 验收。`T-PERF-7A-css-isolation-repair.md` 记录其最小范围和验收。
+真实 E2E 现在会对四个状态读取 computed color，断言均等于正文 parent 且 parent 不是 fixture 的紫色；同次 CSS 压力页 `heightDeltaPx=0`、`CLS=0`。它继续通过 hover、click/feedback、tooltip/action menu、selection、SPA、iframe、open Shadow DOM 与跨标签同步。`T-PERF-7A-css-isolation-repair.md` 记录其最小范围和验收。
 
 ## 对照与结论
 

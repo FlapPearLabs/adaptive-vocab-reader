@@ -1419,6 +1419,17 @@ async function main() {
     // 静态正文初始标注
     await spa.waitForSelector('#intro .avr-word', { timeout: 10_000 });
     const contentReadyMs = performance.now() - spaNavigationStartedAt;
+    await spa.waitForFunction(
+      () => Boolean(document.documentElement.dataset.avrPerf),
+      { timeout: 10_000 },
+    );
+    const initialScanPerf = await spa.evaluate(() => JSON.parse(document.documentElement.dataset.avrPerf || '{}'));
+    const contentScriptInitializationMs = await spa.evaluate(
+      () => Number(document.documentElement.dataset.avrContentScriptInitMs),
+    );
+    if (!Number.isFinite(contentScriptInitializationMs) || contentScriptInitializationMs < 0) {
+      throw new Error(`内容脚本初始化耗时缺失或非法：${contentScriptInitializationMs}`);
+    }
     const introBefore = await spa.$eval('#intro', (el) => el.querySelectorAll('.avr-word').length);
     if (introBefore === 0) throw new Error('SPA 页面静态正文未标注');
 
@@ -1460,6 +1471,7 @@ async function main() {
       const read = () => {
         const style = getComputedStyle(word);
         return {
+          color: style.color,
           display: style.display,
           borderStyle: style.borderBottomStyle,
           borderWidth: style.borderBottomWidth,
@@ -1467,8 +1479,11 @@ async function main() {
           decorationStyle: style.textDecorationStyle,
         };
       };
+      const parentColor = getComputedStyle(word.parentElement).color;
       word.classList.remove(...stateClasses);
-      const neutral = read();
+      const transparent = read();
+      // known 与 transparent 都没有状态样式；分别保留测量字段以避免混淆验收语义。
+      const known = read();
       word.classList.add('avr-light');
       const light = read();
       word.classList.remove('avr-light');
@@ -1476,19 +1491,22 @@ async function main() {
       const strong = read();
       word.classList.remove(...stateClasses);
       word.classList.add(...originalClasses);
-      return { neutral, light, strong };
+      return { parentColor, transparent, known, light, strong };
     });
     if (
-      cssIsolation.neutral.display !== 'inline'
-      || cssIsolation.neutral.borderStyle !== 'none'
-      || cssIsolation.neutral.borderWidth !== '0px'
-      || cssIsolation.neutral.decorationLine !== 'none'
+      cssIsolation.transparent.display !== 'inline'
+      || cssIsolation.transparent.borderStyle !== 'none'
+      || cssIsolation.transparent.borderWidth !== '0px'
+      || cssIsolation.transparent.decorationLine !== 'none'
       || !cssIsolation.light.decorationLine.includes('underline')
       || cssIsolation.light.decorationStyle !== 'dotted'
       || cssIsolation.light.borderStyle !== 'none'
       || !cssIsolation.strong.decorationLine.includes('underline')
       || cssIsolation.strong.decorationStyle !== 'solid'
       || cssIsolation.strong.borderStyle !== 'none'
+      || cssIsolation.parentColor === 'rgb(190, 0, 190)'
+      || [cssIsolation.transparent, cssIsolation.known, cssIsolation.light, cssIsolation.strong]
+        .some((sample) => sample.color !== cssIsolation.parentColor)
     ) {
       throw new Error(`站点 CSS 破坏扩展透明包装：${JSON.stringify(cssIsolation)}`);
     }
@@ -1568,6 +1586,7 @@ async function main() {
     // SPA 页一次性能观测（新 schema；与长文一致调用 assertPerfShape 做 schema 断言，非仅记录）
     const spaPerf = await readPerf(spa);
     if (spaPerf) assertPerfShape(spaPerf, 'spa');
+    assertPerfShape(initialScanPerf, 'spa-initial');
     const spaAfter = await spa.evaluate(() => ({
       domNodes: document.getElementsByTagName('*').length,
       scrollHeight: document.documentElement.scrollHeight,
@@ -1597,7 +1616,7 @@ async function main() {
       scrollHeightAfter: p.after.scrollHeight,
       scrollHeightDelta: p.after.scrollHeight - p.baseline.scrollHeight,
     }));
-    console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, query_asset_load_ms=${JSON.stringify(queryAssetLoadMs)}, content_ready_ms=${contentReadyMs.toFixed(1)}, character_data=${JSON.stringify(characterDataMeasurement)}, css_isolation=${JSON.stringify(cssIsolation)}, perf_samples=${JSON.stringify(perfSummary)}, spa_baseline=${JSON.stringify(spaBaseline)}, spa_after=${JSON.stringify(spaAfter)}, spa_perf=${spaPerf ? JSON.stringify(spaPerf) : 'n/a'}`);
+    console.log(`E2E #3 PASS: intro=${introBefore}, feed=${feedCount}, view=${viewCount}, nav_skipped=${navHit === 0}, code/form/comment_skipped=${skipHits.code === 0 && skipHits.form === 0 && skipHits.comment === 0}, query_asset_load_ms=${JSON.stringify(queryAssetLoadMs)}, content_script_initialization_ms=${contentScriptInitializationMs.toFixed(1)}, navigation_to_first_annotation_ms=${contentReadyMs.toFixed(1)}, initial_scan_ms=${initialScanPerf.totalScanMs}, character_data=${JSON.stringify(characterDataMeasurement)}, css_isolation=${JSON.stringify(cssIsolation)}, perf_samples=${JSON.stringify(perfSummary)}, spa_baseline=${JSON.stringify(spaBaseline)}, spa_after=${JSON.stringify(spaAfter)}, spa_perf=${spaPerf ? JSON.stringify(spaPerf) : 'n/a'}`);
   } finally {
     if (browser3) browser3.disconnect();
     await killChrome(chrome3);

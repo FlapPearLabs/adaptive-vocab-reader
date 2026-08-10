@@ -57,6 +57,7 @@ function injectStyles(root: Document | ShadowRoot = document): void {
       border: 0;
       background: transparent;
       text-decoration: none;
+      color: inherit;
     }
     .avr-strong {
       text-decoration: underline;

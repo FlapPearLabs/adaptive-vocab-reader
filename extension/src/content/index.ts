@@ -21,6 +21,8 @@ import { bootstrapHintThreshold } from '../strategy/hint';
 
 let dictionary: Dictionary | null = null;
 let scanner: PageScanner | null = null;
+// 仅用于本页真实 Chrome 测量：从内容脚本入口到扫描器装配完成，初始扫描不计入。
+const contentScriptStartedAt = performance.now();
 
 // ============================================================
 // 初始化
@@ -114,6 +116,9 @@ async function main(): Promise<void> {
     },
   });
   scanner.setState(state);
+
+  // 非持久化初始化测量 seam。与导航到首个标注、初始扫描耗时分开，且不含页面内容。
+  document.documentElement.dataset.avrContentScriptInitMs = String(performance.now() - contentScriptStartedAt);
 
   // 扫描页面
   scanner.scanDocument(document.body);
