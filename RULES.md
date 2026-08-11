@@ -1,6 +1,8 @@
 # 浏览器词汇学习插件：现行产品规则
 
-更新时间：2026-08-06
+更新时间：2026-08-12
+
+**2026-08-12 V0.1 Dogfood Realignment（D1–D17 已确认）**：依据首次真实 dogfood（Hacker News 等）暴露的 6 个产品问题，经 Grill（Q1–Q8 + 澄清 Q9/Q10）逐题确认 D1–D17（决议记录 `work/2026-08-11-v0.1-dogfood-realignment-grill-decisions.md`，已通过网页版 GPT DOCUMENT 复审 PASS）。**本节取代以下旧合同**（旧表述在各自小节保留为历史，不再作为 active contract）：① 旧「核心交互路径＝悬停出 tooltip、点击词弹会/不会菜单」→ 由「Ctrl+hover＝LOOKUP_UI_GATE、正文 click 永远归网页、tooltip 交互会话」取代；② 旧 OPEN_DECISIONS B（未收录仅提示不进生词本）→ 由「未收录词可反馈会/不会、可进生词本（临时 surface token 键，D10）」取代；③ 旧 OPEN_DECISIONS C 候选输入（仅频率 frq/bnc + 显式状态过滤，不含 Evidence/band）→ 由「AssessmentEvidence 可参与 hint policy（频段近期画像 D16 + 已测单词特例），但不得创建 WordState」取代；④ 旧「不新增远程查词」（local-first 中该句）→ 由「用户主动、单词级、按需远程回退（provider 未确认前 fail-closed，D11）」有界取代；⑤ 旧无明确语义的「重新测评」（保留 Evidence）→ 由「半重置（清 Evidence/daily/轮次、保留 WordState，D12）」取代。未取代的既有规则继续有效（测评包保持固定 1,000、Evidence≠WordState、manual 不进估计、schema 3、冻结项等）。本轮只修订 RULES 并新建唯一待审 Spec（`docs/specs/2026-08-11-V0.1-Dogfood-交互个性化回退与测评重对齐规格.md`，状态 DRAFT/待审），未授权任何开发/ticket/schema/词典变更。
 
 本文件是当前唯一的产品规则来源。用户最新明确指示优先；研究笔记只提供事实或建议，不自动成为需求。2026-07-30/31 Grill 阶段用户逐题确认的决定（GR-01～GR-11、CR-01～CR-06，完整追踪见 `docs/specs/2026-07-30-V0.1-重新对齐规格.md`）固化为现行规则，并删除或修正与其冲突的旧表述。2026-08-04 依据用户真实 Chrome 试用反馈新增三条阅读体验规则（轻提示 tooltip 补音标词性、拖选选区加词入口、popup 生词本页签），2026-08-05 按 DOCUMENT 审查补全其语义。2026-08-06 依据只读架构调查（`outputs/2026-08-06-architecture-coupling-investigation.md`）与用户最新产品目标，把查询能力、用户交互、主动提示与测评词包解耦：普通英文词原则上可查询并反馈，灰线只用于「用户潜在可能不会」的少量候选，known 与无灰线词仍可查询和纠错。本轮只修订本文件并新建唯一待审 Spec，未授权任何开发、ticket、schema 或词典变更。本轮 DOCUMENT 审查修订把「已确认但尚未实现」的高层产品方向与 OPEN_DECISIONS A–F 的待确认参数/路线明确区分，并澄清「部分既有行为已实现或部分实现、完整解耦未实现」的当前状态；已确认方向不构成对 A–F 任何选项的批准。2026-08-06 晚间用户逐项决议 OPEN_DECISIONS A–F（A=dogfood 驱动覆盖验收；B=未收录仅提示不进生词本；E=ECDICT 全量本地（条件决议）；F=包外词同键、不区分来源、不升级 schema（条件决议，前提同 E）；D=开发前可丢弃原型对比透明包装与 caret 定位；C=dogfood 密度参考 + 不必要提示人工验收），决议已落点本文件与唯一 Spec §14。**2026-08-07 完成发现与对齐并回写**：E 验证通过（E_VALIDATED，限定个人本地 dogfood、不公开发布，公开再分发仍 UNKNOWN），F 随 E 生效；D 可丢弃原型完成（推荐「透明 span 包装 + 事件委托」为实施候选，caret 不作唯一交互基础，当时最终选择待批准）；C 输入/算法已对齐（仅频率 frq/bnc + 显式状态过滤，不含 Evidence/band；频率下界阈值，**首轮阈值 T₀＝有效频率 rank 升序列表中间索引阈值 S[⌊n/2⌋]（0-based；偶数 n 时取两个中间元素中的上侧元素），light 方向与边界 rank > T₀（严格大于，等于不提示）；随后 dogfood 校准分位点**）；**query eligibility 与 hint eligibility 独立**——缺有效频率排名的可查询词仍可查询、可反馈，不因缺频率失去查询资格（「缺 frequency 淘汰」仅属固定测评包/旧构建规则）。Spec 保持 DRAFT；**第二道门（DOCUMENT 复审 + 用户批准）通过前不得拆生产 ticket**。**2026-08-07 晚间第二道门通过并批准**：DOCUMENT 复审 `PASS`（审查基线 be4f289）+ 用户最终批准（2026-08-07）；唯一 Spec 正式收尾为 **APPROVED / 已批准**，D 从「候选/待批准」同步为「已批准生产实施路线＝透明 span 包装 + 事件委托」（prototype 仅设计证据，真实长文 DOM/CSS/性能仍须 R-PERF-1 正式验证），C bootstrap 公式不变（T₀ = S[⌊n/2⌋]，0-based，偶数取上侧元素，light iff rank > T₀）。**批准 ≠ 实现**：生产实现差距以 Spec §16 为准；下一阶段才允许 `/to-tickets` 拆生产垂直切片（本收尾任务未运行 `/to-tickets`）。
 
@@ -41,7 +43,7 @@
 - **[已确认]** 词汇量估计、“是否已测过”、“最久未测”只读取 `AssessmentEvidence`，不读取 `WordState`，也不能通过过滤 `WordState.source` 实现。页面 manual 标记只影响当前提示，不进入估计分子或分母。
 - **[已确认]** 普通曝光、查看释义和浏览次数不改变状态，也不产生测试证据。
 - **[已确认]** 活跃生词表是“当前确认不会”的显示与状态核验清单，不是学习计划或按时间到期的复习队列。
-- **[已确认]** 内容脚本只根据 `wordKey` 对应的 `WordState` 决定提示，不读取 `AssessmentEvidence`。新目标下展示决策拆为两个来源：显式状态提示（known 不提示 / learning 强提示）＋候选提示（仅对未显式反馈词是否显示灰线）。**OPEN_DECISIONS C 已决议验收方式并完成输入/算法/bootstrap 对齐（2026-08-07）**：验收＝dogfood 记录每百词灰线密度 + 复用「不必要提示」人工验收，数据积累后再定阈值；**候选输入＝仅查询词典频率（frq/bnc）+ 用户显式状态过滤（排除 known/learning），不含 Evidence/band；算法＝频率下界阈值；首轮 bootstrap 公式（用户确认）＝有效频率 rank 升序列表中间索引阈值 S[⌊n/2⌋]（0-based；偶数 n 时取两个中间元素中的上侧元素），任何代理同一输入得同一阈值**；light 候选判定方向与边界（用户确认）：`effectiveFrequencyRank > 阈值`（严格大于，等于不提示）；frq/bnc 均无效时 hint-ineligible 但仍 queryable；随后由 dogfood 密度数据校准分位点。缺有效频率排名的可查询词不参与候选判定，但仍保持可查询。实现须经后续 `/to-tickets` 阶段与用户“开始开发”授权。
+- **[已确认]** 内容脚本只根据 `wordKey` 对应的 `WordState` 决定提示，不读取 `AssessmentEvidence`。新目标下展示决策拆为两个来源：显式状态提示（known 不提示 / learning 强提示）＋候选提示（仅对未显式反馈词是否显示灰线）。**OPEN_DECISIONS C 已决议验收方式并完成输入/算法/bootstrap 对齐（2026-08-07）**：验收＝dogfood 记录每百词灰线密度 + 复用「不必要提示」人工验收，数据积累后再定阈值；**候选输入＝仅查询词典频率（frq/bnc）+ 用户显式状态过滤（排除 known/learning），不含 Evidence/band；算法＝频率下界阈值；首轮 bootstrap 公式（用户确认）＝有效频率 rank 升序列表中间索引阈值 S[⌊n/2⌋]（0-based；偶数 n 时取两个中间元素中的上侧元素），任何代理同一输入得同一阈值**；light 候选判定方向与边界（用户确认）：`effectiveFrequencyRank > 阈值`（严格大于，等于不提示）；frq/bnc 均无效时 hint-ineligible 但仍 queryable；随后由 dogfood 密度数据校准分位点。缺有效频率排名的可查询词不参与候选判定，但仍保持可查询。实现须经后续 `/to-tickets` 阶段与用户“开始开发”授权。**（本条「候选输入＝仅频率 frq/bnc + 显式状态过滤、不含 Evidence/band」已被 2026-08-12 V0.1 Dogfood Realignment 取代：AssessmentEvidence 可参与 hint policy（频段近期画像 + 已测单词特例），见「V0.1 Dogfood Realignment」；query/hint eligibility 独立与「候选不落盘、不改写用户状态」保留）**
 - **[已确认·尚未实现]** known 只代表用户当前明确认为自己会：不显示学习提示，但仍可查询，仍可重新反馈“不会”；known ≠ 永远不可交互。当前实现中 known 词被还原为纯文本且无交互载体，属于实现差距（见新 Spec CURRENT_IMPLEMENTATION_GAP）。
 - **[已确认·尚未实现]** 查询资格不得依赖 light/strong 包装：是否能够查询和反馈，不得由是否显示灰线决定；无灰线词仍可悬停查询、点击反馈“不会”。
 - **[已确认·尚未实现]** 用户显式状态（known / learning / 未显式反馈）与主动提示候选（是否显示灰线）是两个独立维度：未显式反馈 ≠ “不会”，系统预测“可能不会”也不等于用户已明确标记 learning；候选判断不得无条件改写用户明确状态（见「查询、交互、主动提示与测评词包解耦」）。
@@ -68,16 +70,54 @@
 - **[已确认·尚未实现]** 查询词典与固定测评词包职责分离：查询词典负责网页查词、词形解析、释义、会/不会反馈和生词本；固定测评词包负责首测、每日校准、frequency band、AssessmentEvidence 和词汇量估计。查询词典内、测评包外的词：原则上允许持有用户状态、允许进入生词本；不进入 AssessmentEvidence；不参与词汇量估计。**OPEN_DECISIONS E/F 已决议并生效（2026-08-07，限定范围）**：查询词典方向为 ECDICT 全量本地——**E 已验证通过**（MIT 正面授权个人本地使用与打包，限定个人本地 dogfood、不公开发布；公开再分发权利链仍 UNKNOWN，若需公开则 E/F 返回用户重新决策，fail-closed）；**F 已随 E 生效**：包外词沿用与包内相同的字符串身份键、不区分来源、不升级 schema，隔离仅由约束层保证。
 - **[已确认·尚未实现]** 主动提示候选与用户状态分离：用户没有明确反馈 ≠ “不会”；系统预测“可能不会”也不等于用户已明确标记 learning；候选判断不得无条件改写用户明确状态；不得把系统预测静默写成用户明确状态。
 - **[已确认·尚未实现] frequency runtime 数据合同（查询词典的 hint 输入）**：新查询词典运行时须为 Hint selection 提供最小只读频率元数据 `effectiveFrequencyRank`（语义稳定；名称可调整，不得改变语义）。组合/回退规则沿用已确认口径：**`frq` 有效排名优先，`frq` 缺失时用 `bnc` 有效排名**（均无效时该词 hint-ineligible）。比较方向：**`effectiveFrequencyRank > 当前阈值` 才可能成为 light 候选**（rank 越大＝越生僻）。`effectiveFrequencyRank` **不是 AssessmentEvidence、不是 frequency band**，不进入估计、不改变 WordState；本条目只定义数据合同，不指定 JSON sidecar、字段布局、数据库或新 schema（见 Spec §5/§8/§9）。
-- **[已确认·尚未实现]** 核心交互路径：悬停可查询词 → 查看释义；点击可查询词 → 反馈会/不会。拖选加词保留为辅助入口，但不得成为无灰线词唯一的查询或纠错路径。
+- **[已确认·尚未实现]** 核心交互路径：悬停可查询词 → 查看释义；点击可查询词 → 反馈会/不会。拖选加词保留为辅助入口，但不得成为无灰线词唯一的查询或纠错路径。**（本条的「点击词弹菜单」交互路径已被 2026-08-12 V0.1 Dogfood Realignment 取代：正文 click 永远归网页/浏览器，feedback 走 extension-owned tooltip 交互会话；「无灰线词仍可查询/反馈」语义保留）**
 - **[已确认·尚未实现]** tooltip 尽量不遮挡目标词和正文：优先显示在目标词上方，上方空间不足时显示在下方；与目标词及正文保留安全间距；不超出左右视口；不侵入可识别的 sticky/header 安全区域；页面滚动后定位仍正确。
 - **[已确认·尚未实现]** 真实鼠标操作必须成为验收路径，不能再只使用合成 `Range + mouseup` 代替真人拖选。
-- **[已确认]** 保持 local-first：不上传用户网页正文；不上传浏览历史；不新增远程查词、云端画像或遥测；任何联网词典、服务端查询或数据上传都必须经过新的明确批准，不能在本轮文档中默认引入（见新 Spec PRIVACY_AND_DATA_BOUNDARY）。
+- **[已确认]** 保持 local-first：不上传用户网页正文；不上传浏览历史；不新增远程查词、云端画像或遥测；任何联网词典、服务端查询或数据上传都必须经过新的明确批准，不能在本轮文档中默认引入（见新 Spec PRIVACY_AND_DATA_BOUNDARY）。**（「不新增远程查词」一句已被 2026-08-12 V0.1 Dogfood Realignment 有界取代：允许用户主动、单词级、按需远程回退，provider 未确认前 fail-closed，见「V0.1 Dogfood Realignment」；「不上传正文/历史、不新增遥测」保留）**
+
+## V0.1 Dogfood Realignment（2026-08-12 用户确认，D1–D17）
+
+本节由 2026-08-11/12 Grill（Q1–Q8 + 澄清 Q9/Q10）逐题确认的 D1–D17 固化而来；决议记录见 `work/2026-08-11-v0.1-dogfood-realignment-grill-decisions.md`（已通过网页版 GPT DOCUMENT 复审 PASS）。**本节取代与本轮冲突的旧合同**（逐项见头部变更说明与各旧小节标注）；未取代的既有规则继续有效。本节为已确认产品规则，**尚未实现**；生产实现须经 Spec 批准 + `/to-tickets` + 用户「开始开发」授权。
+
+### 交互（INTERACTION）
+
+- **[已确认·尚未实现] PAGE_NATIVE_INTERACTION_FIRST（D4）**：插件默认不得抢占网页原生交互（click/pointer/selection/context menu/drag/form 等）。无 Ctrl 时：不出现查询 tooltip、不出现查询 action UI、不 preventDefault、不 stopPropagation 正文交互；链接正常打开、button 正常点击、input 正常 focus、form 正常 submit、文本选择与右键正常。
+- **[已确认·尚未实现] Ctrl+hover = LOOKUP_UI_GATE（D1/D2/D6，取代旧「悬停出 tooltip、点击词弹菜单」核心交互路径）**：按住 Ctrl + hover 可查询词 → 显示查询 UI（词形/音标/词性/释义 + 会/不会）；**禁止 Ctrl+click 查词**；keyup(Ctrl) → 查询 UI 关闭。**正文 click 永远归网页/浏览器**：即使按住 Ctrl，正文 click（含 Cmd/Ctrl/Shift-click、右键）保持浏览器原生语义，插件绝不拦截。链接文字等 interactive 元素内文本同样允许 Ctrl+hover 查询（查询与 click 完全解耦）。
+- **[已确认·尚未实现] Tooltip 交互会话（D7，D3 的有界例外）**：tooltip 是 extension-owned 交互 UI（释义 + 会/不会按钮）；鼠标移入 tooltip 后获得豁免——keyup(Ctrl) 不立即关闭，可松开 Ctrl 普通点击按钮完成反馈；移出 tooltip 后关闭。不得产生永久 sticky tooltip。feedback 只发生在 extension-owned UI，正文 click 永不用于 feedback。
+
+### 个性化提示（HINT PERSONALIZATION）
+
+- **[已确认·尚未实现] AssessmentEvidence 可影响 hint policy，但不得静默创建/改写 WordState（D8，取代旧 C 合同候选输入部分）**；「候选不落盘、不改写用户状态」保留；manual known/learning 状态过滤保留（排除于候选）。
+- **[已确认·尚未实现] 个性化提示 = 频段级近期 evidence profile（主）+ 已测单词级 Evidence 特例（辅）（D8）**：某频段近期证据显示稳定掌握 → 该频段及更简单频段减少/不主动提示；证据不足时回退 global bootstrap 阈值；已测词按自身 Evidence 判定（测过 known → 该词不提示；测过 learning → 该词提示）。
+- **[已确认·尚未实现] 近期窗口（D16，取代「累计+固定比例」类口径）**：每频段取**最近 K 个不同 wordKey 的当前最新 AssessmentEvidence**（按 assessedAt 降序）；同一词重测只覆盖该词 Evidence 并移到窗口最近位置；**不保存测试 attempt 历史、不升 schema**。窗口内全 known → 下压；出现 learning → 立即恢复提示（双向）。
+- **[已确认·尚未实现] K 参数（D9/D16）**：保守 bootstrap K=5（与首测每频段题数一致），参数化，dogfood 后允许用户调整；不冻结为不可变 SLA。**不恢复**概率画像、PAV/Beta、SRS、遗忘曲线、调度器、测试历史系统。
+
+### 未收录词（UNRESOLVED WORD）
+
+- **[已确认·尚未实现] 词典可解析性 ≠ 用户反馈资格（D10，取代旧 B 决议）**：本地查询词典 miss 的词允许反馈会/不会、允许进生词本。
+- **[已确认·尚未实现] 临时身份（D10）**：miss 词状态键 = 规范化 surface token（trim、去首尾标点、小写、去空白）；不升级 schema（字符串键，与 F 一致）；生词本中该类条目如实标注「未收录」（展示层 re-resolve）；不写 AssessmentEvidence（临时键无 band，天然不进估计）。
+- **[已确认·尚未实现] 未来解析合并（D17）**：词典更新后 surface key 解析到 canonical lemma 时，惰性自动迁移该 key 的 WordState 到 canonical key 并删除 surface key；canonical 已有状态时复用 schema 3 仲裁（updatedAt 较新者胜 → 相同 manual 优先 → 仍相同 learning 优先，避免漏提示）；仍未解析的历史键保守保留；迁移只迁 WordState、不创建 Evidence、不升 schema、幂等、跨标签同步。
+
+### 翻译回退（REMOTE FALLBACK）
+
+- **[已确认·尚未实现] 取代旧「不新增远程查词」（D11；local-first 的「不上传正文/历史」保留）**：local miss 后允许**用户主动、单词级、按需**的远程回退——只发送当前 word/token；默认禁止上传网页正文、URL、标题、句子、浏览历史。
+- **[已确认·尚未实现] Provider 未确认前 fail-closed（D11）**：不得预先加入生产网络实现或泛化 host_permissions；provider、域名权限、API/缓存许可、大陆网络可用性须经 research + 用户确认（implementation-before-STOP）。结果仅本地展示；离线/失败明确降级提示。
+
+### 测评与重测（ASSESSMENT / RETEST）
+
+- **[已确认·尚未实现] 重新完整测评 = 半重置（D12，取代无明确语义的 reset）**：清空 AssessmentEvidence、dailyTest、completedRoundIndex（估计从新证据重新积累，不足时 unavailable）；**保留全部 WordState**（生词本、manual learning/known 不丢）；重测作答仍按现行「后写覆盖」写入。
+- **[已确认·尚未实现] popup「我的词汇水平」总览（D13）**：首测状态 / 点估计 / 保守范围 / 今日校准进度 / 最近校准 / 开始校准 / 重新完整测评（带确认），并解释「手动标记的会/不会只影响阅读提示和生词本，不伪装成正式测试成绩」。
+
+### 查询面与提示质量（QUERYABILITY / HINT QUALITY）
+
+- **[已确认·尚未实现] 保留广覆盖查询词典（D14）**：所有 queryable 词默认可 Ctrl+hover 查询（invisible capability）；**不重新绑定 queryability 与 hint eligibility**。
+- **[已确认·尚未实现] hint 质量验收 = 结构化测量 + 人工 dogfood（D15）**：每百词灰线密度 + learning 强提示数 + 人工三数字（不必要提示/释义不可用/覆盖缺失）+ 页面类型差异；**不冻结未经验证的固定 SLA**。
 
 ## 阅读体验增强（2026-08-04 用户真实试用反馈新增；2026-08-05 按 DOCUMENT 审查补全语义）
 
 - **[已确认·当前实现事实]** 轻提示 tooltip 内容升级（当前 main 实现）：unknown 词悬停显示四行——第一行为页面实际词形（surfaceForm，保留原文大小写），其余元数据（音标、词性、简短中文释义）统一取自该词形解析出的 `wordKey` 对应的 **core 词条（固定 1,000 assessment 范围）**。屈折词形（如页面 `abilities`）第一行显示 `abilities`，音标/词性/释义取 `ability` 的条目；`wordKey` 与 `entryKey` 恒等（core 优先规则下二者相同）。下划线样式维持轻提示（浅灰虚线）；learning 强提示的行内中文行为不变。**新目标**（见「查询、交互、主动提示与测评词包解耦」）：tooltip 元数据来源为 **query dictionary canonical entry**（查询词典内、测评包外的词同样可展示），不再要求必须是固定 assessment core 词条。
-- **[已确认·当前实现事实]** 新增手动标记入口「选区加词」（当前 main 实现）：拖选文本后，选区文本经归一化（trim、去首尾标点、小写）后**作为一个整体**解析——**若命中 core 主词条或 forms 词形映射**，则唯一解析为该 `wordKey`，并在选区旁弹出「加入生词本」浮动按钮；点击写入该 `wordKey` 的 `WordState=learning`（source=manual，不写 `AssessmentEvidence`，不改估计）。选区含空白/多词、部分词形（整体未命中）、未收录词、纯空白或纯数字 → 无法唯一解析 → 静默不弹。同 `wordKey` 已 learning 或 known 时不重复弹出。选区文本仅瞬时本地用于解析，不持久化、不记录、不进快照。**新目标**：拖选辅助入口若选区能由 **query dictionary 唯一解析**，可写入该 query identity（含测评包外词）；lookup-unresolved 仍按 B 维持静默、不进生词本。
-- **[已确认·尚未实现]** 拖选加词保留为辅助入口，不得成为无灰线词唯一的查询或纠错路径；核心交互路径是「悬停可查询词 → 查看释义；点击可查询词 → 反馈会/不会」。
+- **[已确认·当前实现事实]** 新增手动标记入口「选区加词」（当前 main 实现）：拖选文本后，选区文本经归一化（trim、去首尾标点、小写）后**作为一个整体**解析——**若命中 core 主词条或 forms 词形映射**，则唯一解析为该 `wordKey`，并在选区旁弹出「加入生词本」浮动按钮；点击写入该 `wordKey` 的 `WordState=learning`（source=manual，不写 `AssessmentEvidence`，不改估计）。选区含空白/多词、部分词形（整体未命中）、未收录词、纯空白或纯数字 → 无法唯一解析 → 静默不弹。同 `wordKey` 已 learning 或 known 时不重复弹出。选区文本仅瞬时本地用于解析，不持久化、不记录、不进快照。**新目标**：拖选辅助入口若选区能由 **query dictionary 唯一解析**，可写入该 query identity（含测评包外词）；lookup-unresolved 仍按 B 维持静默、不进生词本。**（「拖选未收录维持静默」保留为辅助入口既有规则；未收录词进生词本的主入口为 2026-08-12 D10 的主交互反馈路径（tooltip 会/不会），拖选辅助入口不扩大，见「V0.1 Dogfood Realignment」）**
+- **[已确认·尚未实现]** 拖选加词保留为辅助入口，不得成为无灰线词唯一的查询或纠错路径；核心交互路径是「悬停可查询词 → 查看释义；点击可查询词 → 反馈会/不会」。**（本条「核心交互路径＝点击词弹菜单」已被 2026-08-12 V0.1 Dogfood Realignment 取代：正文 click 归网页、feedback 走 tooltip 交互会话；「拖选保留为辅助入口」保留）**
 - **[已确认·尚未实现]** tooltip 定位验收：tooltip 应尽量不遮挡目标词和正文——优先显示在目标词上方，上方空间不足时显示在下方；与目标词及正文保留安全间距；不超出左右视口；不侵入可识别的 sticky/header 安全区域；页面滚动后定位仍正确。当前实现以目标词左上角为锚点、`top=y-8` 且只处理 bottom/right 溢出，会覆盖目标词和相邻正文并可能侵入 sticky header（调查 §9），属于实现差距。
 - **[已确认·尚未实现]** 真实鼠标用户路径验收：真实 mouse down/move/up 拖选路径必须可验收；现有 E2E 只用合成 `Range + mouseup`，未覆盖真实拖拽后的 click 序列（调查 §10），属于测试 seam 差距。
 - **[已确认·当前实现事实]** popup 新增「生词本」页签（当前 main 实现）：数据源只读 `WordState`，筛选 `status=learning` 且 key 可解析为**当前词包内合法 `wordKey`（固定 1,000 assessment 范围）**的词条，按 `updatedAt` 降序显示（wordKey + 音标 + 词性 + 释义）；「已掌握」= 对该 `wordKey` 写入 `WordState=known`（source=manual，不写 `AssessmentEvidence`、不改估计）并移出列表；该页签不读 `AssessmentEvidence`；不改首测/每日/估计入口。schema 3 迁移中无法映射到 core/forms 的旧 key 在存储中保守保留，但**不进入生词本列表**（无元数据可展示，也不删除该存储键）。**新目标**：popup 生词本显示**所有 `status=learning` 且能由当前 query dictionary 解析完整元数据的 identity**（包括固定 assessment vocabulary 外的词，按 `updatedAt` 降序）；历史无法映射的 key 继续保守保存、不展示、不静默删除；**固定 1,000 assessment vocabulary 只约束 AssessmentEvidence/测试/估计，不再决定 notebook 可见资格**。
