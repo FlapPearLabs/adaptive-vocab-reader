@@ -1,6 +1,6 @@
 # 浏览器词汇学习插件：现行产品规则
 
-更新时间：2026-08-12
+更新时间：2026-08-14
 
 **2026-08-12 V0.1 Dogfood Realignment（D1–D17 已确认）**：依据首次真实 dogfood（Hacker News 等）暴露的 6 个产品问题，经 Grill（Q1–Q8 + 澄清 Q9/Q10）逐题确认 D1–D17（决议记录 `work/2026-08-11-v0.1-dogfood-realignment-grill-decisions.md`，已通过网页版 GPT DOCUMENT 复审 PASS）。**本节取代以下旧合同**（旧表述在各自小节保留为历史，不再作为 active contract）：① 旧「核心交互路径＝悬停出 tooltip、点击词弹会/不会菜单」→ 由「Ctrl+hover＝LOOKUP_UI_GATE、正文 click 永远归网页、tooltip 交互会话」取代；② 旧 OPEN_DECISIONS B（未收录仅提示不进生词本）→ 由「未收录词可反馈会/不会、可进生词本（临时 surface token 键，D10）」取代；③ 旧 OPEN_DECISIONS C 候选输入（仅频率 frq/bnc + 显式状态过滤，不含 Evidence/band）→ 由「AssessmentEvidence 可参与 hint policy（频段近期画像 D16 + 已测单词特例），但不得创建 WordState」取代；④ 旧「不新增远程查词」（local-first 中该句）→ 由「用户主动、单词级、按需远程回退（provider 未确认前 fail-closed，D11）」有界取代；⑤ 旧无明确语义的「重新测评」（保留 Evidence）→ 由「半重置（清 Evidence/daily/轮次、保留 WordState，D12）」取代。未取代的既有规则继续有效（测评包保持固定 1,000、Evidence≠WordState、manual 不进估计、schema 3、冻结项等）。本轮只修订 RULES 并新建唯一待审 Spec（`docs/specs/2026-08-11-V0.1-Dogfood-交互个性化回退与测评重对齐规格.md`，状态 DRAFT/待审），未授权任何开发/ticket/schema/词典变更。
 
