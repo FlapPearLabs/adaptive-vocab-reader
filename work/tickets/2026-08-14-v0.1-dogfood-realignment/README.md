@@ -48,7 +48,7 @@ T-NATIVE-1 (P0)         T-CALIB-3
 
 **为何该切分避免架构返工**：
 1. T-NATIVE-1 最先——P0 交互冲突是 dogfood 最痛问题，也是所有页面交互的载体；先立「原生优先 + Ctrl 门控」地基，后续票只做行为扩展不重排交互架构。
-2. T-CALIB-3 与 T-NATIVE-1 无相互依赖（popup 流程 vs content 交互）——可并行；它是 T-HINT-4 与 T-ASSESS-UX-5 的 boundary/入口来源。
+2. T-CALIB-3 与 T-NATIVE-1 无相互依赖（popup 流程 vs content 交互）——可并行；它是 T-HINT-4 与 T-ASSESS-UX-5 的 boundary/入口来源。**并行注意**：T-NATIVE-1 与 T-CALIB-3 均允许修改 `e2e-verify.cjs`，属 Git 文件冲突风险而非产品依赖；若实际并行 Codex/worktree 施工，由 WorkBuddy 按拓扑顺序串行落库或预先约定合并顺序，不把文件冲突误判为 requirement dependency。
 3. T-UNRESOLVED-2 依赖 T-NATIVE-1 的 tooltip 会话（miss 词反馈载体），是 T-HINT-4 状态过滤（临时键）的输入。
 4. T-HINT-4 消费 T-CALIB-3（boundary）+ T-UNRESOLVED-2（临时键状态）+ T-NATIVE-1（annotator 基础）——三层提示是「聚合层」，必须等数据源齐备。
 5. T-ASSESS-UX-5 只消费 T-CALIB-3（总览页整合校准入口）——重测/总览不依赖 hint 层。

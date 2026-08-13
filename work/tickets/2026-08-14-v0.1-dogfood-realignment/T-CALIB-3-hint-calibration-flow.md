@@ -35,7 +35,7 @@
 
 **真实 Chrome 用户路径验收**（Chrome for Testing + 隔离 profile）：
 1. popup 入口可见、可跳过；启动后显示三选项语义说明。
-2. 完成 Stage1（8 题）+ Stage2（≤12 题），总题量 ≤20；中途可退出，退出时已答样本仍可用于估计（不足则 fail-safe）。
+2. 完成 Stage1（8 题）+ Stage2（≤12 题），总题量 ≤20；中途可退出，退出时已答样本仍可进入 **personal transition/boundary estimator**（不足则 fail-safe 不生成 boundary）；**任何情况下 calibration 数据均不得进入 vocabulary estimate**（隔离负断言）。
 3. estimator canonical examples 单测全绿：`K K K L L`→TRANSITION、`K K K K L`→KNOWN_DOMINANT、`K K K U U`→TRANSITION、单 U 不 veto、单 rank inversion 不决定 boundary。
 4. 证据充足 → 生成 personal boundary（boundary = transition region 简单侧窗口内样本最小 rank）并持久化；证据不足/全部同侧 → 不生成（回退 T₀ 语义生效）。
 5. 重启浏览器 → 校准结果仍在；重做校准 → 新 baseline 替换旧值。
