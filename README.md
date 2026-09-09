@@ -42,7 +42,15 @@ npm run build
 npm run test:e2e
 ```
 
-此外还有 ECDICT 数据构建相关 Python 测试。具体恢复顺序与当前验证状态以 `docs/CURRENT_IMPLEMENTATION_BASELINE.md` 为准。
+此外还有 ECDICT 数据构建相关 Python 测试（`python3 -B -m unittest discover -s tests -p "test_*.py" -v`）。具体恢复顺序与当前验证状态以 `docs/CURRENT_IMPLEMENTATION_BASELINE.md` 为准。
+
+`npm run test:e2e` 需要本机已有 Chrome for Testing（先执行 `npm run setup:e2e`，或设置 `CHROME_FOR_TESTING`）。在已经处于沙箱/容器内的会话中，Chrome 自带的第二层 sandbox 会导致首帧附加事件不达 puppeteer（`Requesting main frame too early!`），此时使用脚本已支持的开关：
+
+```bash
+AVR_E2E_NO_SANDBOX=1 npm run test:e2e
+```
+
+该开关只改变测试运行环境（关闭 Chrome 自带 sandbox），不改变任何被测行为或断言。
 
 ## 权威文档
 
