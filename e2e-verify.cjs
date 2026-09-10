@@ -40,6 +40,8 @@ const FAILURE_TABLE = {
   '4': { no: '7~13/17', desc: '每日校准轮全场景（入口/五题/跳过/暂停/跨日/不阻塞阅读）', ticket: 'T4', rids: 'R-DLY-1~9' },
   '5': { no: '15', desc: '重启后五项持久化并查（WordState/Evidence/DailyTestState/completedRoundIndex/schemaVersion=3）', ticket: 'T2+T4', rids: 'R-MIG-7, R-EVD-2/4, R-DLY-2/7/8' },
   '6': { no: '补全', desc: '§21 持久化补全：两标签页同 wordKey 不同词形 manual/daily 更新后同步', ticket: 'T2+T4', rids: 'R-KEY-1/3, R-DLY-4' },
+  // T-VUX-2（2026-09-10 v0.1-ux-delta 批次）：Word Inspection Popover（D-2）与 Esc 关闭（D-3）。
+  'vux2': { no: 'UX-D2/D3', desc: 'Word Inspection Popover（D-2）+ Esc 关闭（D-3）：四要素浮层/几何 seam 12px 夹取/取消零写入/元数据兜底「释义暂不可用」/hover 与未收录保持/零布局位移', ticket: 'T-VUX-2', rids: '—' },
 };
 
 /**
@@ -359,6 +361,14 @@ async function main() {
       }
       if (request.url === '/ux-frame.html') {
         const f = path.join(tempDir, 'ux-frame.html');
+        if (fs.existsSync(f)) {
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          response.end(fs.readFileSync(f, 'utf8'));
+          return;
+        }
+      }
+      if (request.url === '/vux2-popover.html') {
+        const f = path.join(tempDir, 'vux2-popover.html');
         if (fs.existsSync(f)) {
           response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
           response.end(fs.readFileSync(f, 'utf8'));
@@ -804,6 +814,246 @@ async function main() {
   } finally {
     if (browserUx1) browserUx1.disconnect();
     await killChrome(chromeUx1);
+  }
+
+  // ============================================================
+  // T-VUX-2：Word Inspection Popover（D-2）与 Esc 关闭（D-3）
+  // ============================================================
+  // AC-1 四要素浮层；AC-2 点「不会」立即提交并关闭；AC-3 几何（上方优先/顶部不足下翻/
+  // 左右 12px 夹取/不遮挡/滚动 Dismiss 后重开正确）；AC-5 Esc 零写入；AC-6 外部点击零写入；
+  // AC-7 元数据缺失兜底「释义暂不可用」+ 零写入（fixture 手工 DOM 注造，真实词包无缺失条目，
+  // 不触碰 data/）；AC-8 hover 仍只轻 tooltip；AC-9 未收录不弹浮层；AC-10 开合零布局位移。
+  let browserVux2;
+  let chromeVux2;
+  try {
+    currentScenario = FAILURE_TABLE['vux2'];
+    ({ chrome: chromeVux2, browser: browserVux2 } = await launchChrome(path.join(tempDir, 'profile-vux2'), chromeForTesting));
+    await wait(1_000);
+    const vux2AbsentWord = 'zznotinvux2pack';
+    if (lookupPack(vux2AbsentWord, dictCore, forms) !== null) {
+      throw new Error(`T-VUX-2 前置失败：未收录词 ${vux2AbsentWord} 意外命中真实词包`);
+    }
+    if (!hintCommonWord || !hintLightWord) {
+      throw new Error('T-VUX-2 前置失败：hint fixture 词未就绪');
+    }
+    // 元数据缺失词条（AC-7）：手工 DOM 注造 span——pageScanner 对 .avr-word 内文本节点守卫跳过，
+    // 点击委托按 data-word 打开浮层；三个元数据属性全空 → 对应行固定兜底文案。不修改任何 data/ 资产。
+    fs.writeFileSync(path.join(tempDir, 'vux2-popover.html'), `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><header data-avr-safe-top style="position:sticky;top:0;height:48px;background:white">safe header</header><article><p><span id="vux2-target">abilities</span> <span id="vux2-feedback">${hintCommonWord}</span> <span id="vux2-light">${hintLightWord}</span> <span id="vux2-unrecorded">${vux2AbsentWord}</span></p><p><span id="vux2-metadata-missing" class="avr-word" data-word="zzmetamissing" data-phonetic="" data-pos="">missing</span></p></article></body></html>`);
+    const vuxPage = await browserVux2.newPage();
+    vuxPage.on('pageerror', (error) => pageLogs.push(`vux2 pageerror: ${error.message}`));
+    await gotoSafe(vuxPage, `https://localhost:${PORT}/vux2-popover.html`, { waitUntil: 'networkidle0' });
+    await vuxPage.waitForSelector('.avr-word[data-word="ability"]', { timeout: 10_000 });
+    const workerVux2 = await getWorker(browserVux2);
+    if (!workerVux2) throw new Error('T-VUX-2 前置失败：未找到 Service Worker');
+    const readVux2Snapshot = () => workerVux2.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    const openVux2PopoverOn = (selector) => vuxPage.evaluate((targetSelector) => {
+      document.querySelector(`${targetSelector} .avr-word, ${targetSelector}.avr-word`)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }, selector);
+    const [abilityPhonetic, abilityPos, abilityTranslation] = dictCore.ability;
+
+    // ---- AC-1：点击可查询词 → 浮层含词头（保留原文大小写）/音标/词性/释义 + 会/不会 ----
+    await openVux2PopoverOn('#vux2-target');
+    await vuxPage.waitForSelector('.avr-action-menu button[data-avr-status="learning"]', { visible: true, timeout: 5_000 });
+    const popoverContent = await vuxPage.evaluate(() => {
+      const menu = document.querySelector('.avr-action-menu');
+      return {
+        display: menu?.style.display,
+        word: menu?.querySelector('.avr-inspect-word')?.textContent || '',
+        phonetic: menu?.querySelector('.avr-inspect-phonetic')?.textContent || '',
+        pos: menu?.querySelector('.avr-inspect-pos')?.textContent || '',
+        translation: menu?.querySelector('.avr-inspect-translation')?.textContent || '',
+        known: menu?.querySelector('button[data-avr-status="known"]')?.textContent || '',
+        learning: menu?.querySelector('button[data-avr-status="learning"]')?.textContent || '',
+      };
+    });
+    if (
+      popoverContent.display !== 'flex'
+      || popoverContent.word !== 'abilities'
+      || popoverContent.phonetic !== abilityPhonetic
+      || popoverContent.pos !== abilityPos
+      || popoverContent.translation !== abilityTranslation
+      || popoverContent.known !== '会'
+      || popoverContent.learning !== '不会'
+    ) {
+      throw new Error(`AC-1 失败：浮层四要素或会/不会动作错误：${JSON.stringify(popoverContent)}，期望音标/词性/释义=${JSON.stringify(dictCore.ability)}`);
+    }
+
+    // ---- AC-6：外部点击关闭 + 零写入 ----
+    const snapshotBeforeDismiss = await readVux2Snapshot();
+    await vuxPage.evaluate(() => document.body.click());
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'none', { timeout: 5_000 });
+    if (!isDeepStrictEqual(await readVux2Snapshot(), snapshotBeforeDismiss)) {
+      throw new Error('AC-6 失败：外部点击关闭浮层时产生了存储写入');
+    }
+
+    // ---- AC-5：Esc 关闭 + 零写入 ----
+    await openVux2PopoverOn('#vux2-target');
+    await vuxPage.waitForSelector('.avr-action-menu button[data-avr-status="known"]', { visible: true, timeout: 5_000 });
+    await vuxPage.keyboard.press('Escape');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'none', { timeout: 5_000 });
+    if (!isDeepStrictEqual(await readVux2Snapshot(), snapshotBeforeDismiss)) {
+      throw new Error('AC-5 失败：Esc 关闭浮层时产生了存储写入');
+    }
+
+    // ---- AC-10：浮层开合零布局位移（Layout Instability API 真实累计，开合全程 zero）----
+    await vuxPage.evaluate(() => {
+      window.__avrPopoverShift = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const e = entry;
+          if (typeof e.value === 'number' && !e.hadRecentInput) window.__avrPopoverShift += e.value;
+        }
+      }).observe({ type: 'layout-shift' });
+    });
+    await openVux2PopoverOn('#vux2-target');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'flex', { timeout: 5_000 });
+    await vuxPage.keyboard.press('Escape');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'none', { timeout: 5_000 });
+    await openVux2PopoverOn('#vux2-target');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'flex', { timeout: 5_000 });
+    await vuxPage.evaluate(() => document.body.click());
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'none', { timeout: 5_000 });
+    const popoverShift = await vuxPage.evaluate(() => window.__avrPopoverShift);
+    if (popoverShift !== 0) {
+      throw new Error(`AC-10 失败：浮层开合产生了布局位移 ${popoverShift}`);
+    }
+
+    // ---- AC-3：浮层几何（placeTooltip 同模式；12px 视口边距；不遮挡目标词）----
+    const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const placePopover = async (targetTop, targetLeft, scrollY = 0) => {
+      await vuxPage.evaluate(({ targetTop, targetLeft, targetScrollY }) => {
+        document.body.style.minHeight = '1600px';
+        const host = document.getElementById('vux2-target');
+        if (!host) throw new Error('缺少浮层几何目标');
+        Object.assign(host.style, { position: 'absolute', top: `${targetTop}px`, left: `${targetLeft}px` });
+        window.scrollTo(0, targetScrollY);
+      }, { targetTop, targetLeft, targetScrollY: scrollY });
+      // 先让 scroll 事件落地（滚动同步=Dismiss 会关闭已打开的浮层），再重新点击打开
+      await wait(80);
+      await openVux2PopoverOn('#vux2-target');
+      await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'flex', { timeout: 5_000 });
+      return vuxPage.evaluate(() => {
+        const toRect = (rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+        const menu = document.querySelector('.avr-action-menu');
+        const target = document.querySelector('#vux2-target .avr-word');
+        const header = document.querySelector('[data-avr-safe-top]');
+        if (!menu || !target || !header) throw new Error('缺少浮层几何节点');
+        return {
+          menu: toRect(menu.getBoundingClientRect()),
+          target: toRect(target.getBoundingClientRect()),
+          headerBottom: header.getBoundingClientRect().bottom,
+          viewportWidth: window.innerWidth,
+        };
+      });
+    };
+    const normalPopover = await placePopover(260, 120);
+    if (normalPopover.menu.bottom > normalPopover.target.top || overlaps(normalPopover.menu, normalPopover.target)) {
+      throw new Error(`AC-3 失败：普通位置未优先显示在目标上方且留出间距：${JSON.stringify(normalPopover)}`);
+    }
+    if (normalPopover.menu.left < 12 || normalPopover.menu.right > normalPopover.viewportWidth - 12) {
+      throw new Error(`AC-3 失败：浮层左右视口 12px 安全边距不满足：${JSON.stringify(normalPopover)}`);
+    }
+    const topPopover = await placePopover(70, 120);
+    if (topPopover.menu.top < topPopover.target.bottom || topPopover.menu.top < topPopover.headerBottom) {
+      throw new Error(`AC-3 失败：顶部空间不足时未下方翻转或侵入 header：${JSON.stringify(topPopover)}`);
+    }
+    if (overlaps(topPopover.menu, topPopover.target)) {
+      throw new Error(`AC-3 失败：下翻后遮挡目标词：${JSON.stringify(topPopover)}`);
+    }
+    const rightPopover = await placePopover(260, await vuxPage.evaluate(() => window.innerWidth - 2));
+    if (rightPopover.menu.right > rightPopover.viewportWidth - 12) {
+      throw new Error(`AC-3 失败：右边界未夹取到视口内 12px：${JSON.stringify(rightPopover)}`);
+    }
+    if (rightPopover.menu.left < 12) {
+      throw new Error(`AC-3 失败：右缘夹取时左缘越界：${JSON.stringify(rightPopover)}`);
+    }
+    // 滚动同步（Dismiss 方案，冻结 UX §4.2.2 允许 Dismiss 或 adjust）：浮层打开时滚动 → 立即关闭 + 零写入
+    const snapshotBeforeScroll = await readVux2Snapshot();
+    await vuxPage.evaluate(() => window.scrollTo(0, 200));
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'none', { timeout: 5_000 });
+    if (!isDeepStrictEqual(await readVux2Snapshot(), snapshotBeforeScroll)) {
+      throw new Error('AC-3 失败：滚动关闭浮层时产生了存储写入');
+    }
+    // 滚动后重新点击 → 浮层以滚动后的几何正确出现（参照 scrolledTooltip 模式）
+    const scrolledPopover = await placePopover(940, 120, 400);
+    if (scrolledPopover.menu.top < scrolledPopover.headerBottom || overlaps(scrolledPopover.menu, scrolledPopover.target)) {
+      throw new Error(`AC-3 失败：滚动后重新打开的浮层几何错误：${JSON.stringify(scrolledPopover)}`);
+    }
+    await vuxPage.evaluate(() => window.scrollTo(0, 0));
+
+    // ---- AC-2：点「不会」→ 立即提交 manual learning 并自动关闭（P-2 保持）----
+    const snapshotBeforeLearning = await readVux2Snapshot();
+    await openVux2PopoverOn('#vux2-feedback');
+    await vuxPage.waitForSelector('.avr-action-menu button[data-avr-status="learning"]', { visible: true, timeout: 5_000 });
+    await vuxPage.click('.avr-action-menu button[data-avr-status="learning"]');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'none', { timeout: 5_000 });
+    // 先等页面本地更新完成（与既有 harness 相同模式），再读快照断言持久化写入，避免读时竞态
+    await vuxPage.waitForFunction(() => document.querySelector('#vux2-feedback .avr-word')?.classList.contains('avr-strong-first'), { timeout: 5_000 });
+    const afterLearning = await readVux2Snapshot();
+    if (afterLearning.words?.[hintCommonWord]?.status !== 'learning' || afterLearning.words?.[hintCommonWord]?.source !== 'manual') {
+      throw new Error(`AC-2 失败：点「不会」未立即写入 manual learning：${JSON.stringify(afterLearning.words?.[hintCommonWord])}`);
+    }
+    if (!isDeepStrictEqual(afterLearning.assessmentEvidence, snapshotBeforeLearning.assessmentEvidence)) {
+      throw new Error('AC-2 失败：点「不会」污染了 AssessmentEvidence');
+    }
+
+    // ---- AC-7：元数据缺失（fixture 手工注造）→ 对应行「释义暂不可用」+ 零写入 ----
+    const snapshotBeforeMetadata = await readVux2Snapshot();
+    await openVux2PopoverOn('#vux2-metadata-missing');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'flex', { timeout: 5_000 });
+    const metadataMissingRows = await vuxPage.evaluate(() => ({
+      word: document.querySelector('.avr-action-menu .avr-inspect-word')?.textContent || '',
+      phonetic: document.querySelector('.avr-action-menu .avr-inspect-phonetic')?.textContent || '',
+      pos: document.querySelector('.avr-action-menu .avr-inspect-pos')?.textContent || '',
+      translation: document.querySelector('.avr-action-menu .avr-inspect-translation')?.textContent || '',
+    }));
+    if (metadataMissingRows.translation !== '释义暂不可用' || metadataMissingRows.phonetic !== '释义暂不可用' || metadataMissingRows.pos !== '释义暂不可用') {
+      throw new Error(`AC-7 失败：元数据缺失时浮层未显示固定兜底文案「释义暂不可用」：${JSON.stringify(metadataMissingRows)}`);
+    }
+    if (metadataMissingRows.translation.includes('zzmetamissing') || metadataMissingRows.translation.includes('missing')) {
+      throw new Error(`AC-7 失败：合成了占位释义：${JSON.stringify(metadataMissingRows)}`);
+    }
+    if (!metadataMissingRows.word) {
+      throw new Error(`AC-7 失败：元数据缺失词条浮层缺词头：${JSON.stringify(metadataMissingRows)}`);
+    }
+    await vuxPage.keyboard.press('Escape');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-action-menu')?.style.display === 'none', { timeout: 5_000 });
+    if (!isDeepStrictEqual(await readVux2Snapshot(), snapshotBeforeMetadata)) {
+      throw new Error('AC-7 失败：元数据缺失词条的浮层交互产生了存储写入');
+    }
+
+    // ---- AC-8：hover 仍只出轻 tooltip、不弹检查浮层（P-4 保持）----
+    await vuxPage.evaluate(() => document.querySelector('#vux2-light .avr-word')?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.style.display === 'block', { timeout: 5_000 });
+    const vux2Hover = await vuxPage.evaluate(() => ({
+      tooltipLines: [...document.querySelectorAll('.avr-tooltip > div')].map((row) => row.textContent || ''),
+      menuDisplay: document.querySelector('.avr-action-menu')?.style.display,
+    }));
+    const [lightPhonetic, lightPos, lightTranslation] = queryDictionary[hintLightWord];
+    if (JSON.stringify(vux2Hover.tooltipLines) !== JSON.stringify([hintLightWord, lightPhonetic, lightPos, lightTranslation])) {
+      throw new Error(`AC-8 失败：悬停轻 tooltip 内容错误：${JSON.stringify(vux2Hover.tooltipLines)}`);
+    }
+    if (vux2Hover.menuDisplay !== 'none') {
+      throw new Error(`AC-8 失败：悬停弹出了检查浮层：${vux2Hover.menuDisplay}`);
+    }
+
+    // ---- AC-9：未收录词 hover/click 只给固定响应、不弹检查浮层、零持久化（P-6 保持）----
+    const snapshotBeforeUnresolved = await readVux2Snapshot();
+    await vuxPage.hover('#vux2-unrecorded .avr-word[data-unresolved="true"]');
+    await vuxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.textContent === '当前词典未收录', { timeout: 5_000 });
+    await vuxPage.click('#vux2-unrecorded .avr-word[data-unresolved="true"]');
+    await wait(100);
+    if (await vuxPage.$$eval('.avr-action-menu', (menus) => menus.some((menu) => getComputedStyle(menu).display !== 'none'))) {
+      throw new Error('AC-9 失败：未收录词 click 弹出了检查浮层');
+    }
+    if (!isDeepStrictEqual(await readVux2Snapshot(), snapshotBeforeUnresolved)) {
+      throw new Error('AC-9 失败：未收录词 hover/click 产生了持久化写入');
+    }
+
+    console.log('E2E T-VUX-2 PASS: AC-1 four_elements=true, AC-2 learning_commit_immediate_close=true, AC-3 geometry(above_first/flip/clamp_12px/no_occlusion/scroll_dismiss+reopen)=true, AC-4 geometry_seam_uniqueness=source_grepped, AC-5 esc_zero_write=true, AC-6 outside_click_zero_write=true, AC-7 metadata_fallback_zero_write=true, AC-8 hover_tooltip_only=true, AC-9 unresolved_no_popover_zero_write=true, AC-10 layout_shift_0=true');
+  } finally {
+    if (browserVux2) browserVux2.disconnect();
+    await killChrome(chromeVux2);
   }
 
   // ============================================================
