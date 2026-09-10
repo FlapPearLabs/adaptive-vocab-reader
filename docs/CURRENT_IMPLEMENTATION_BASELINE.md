@@ -29,6 +29,8 @@
 - Governance audit base: `333c3628c5adabd1d69f96b9043eb7a109825eb0`（2026-09-09 复核时仍为 live `origin/main`）
 - Last production-code parent: `247ef89f45df5c623c1de768d098230600de9498`
 - `333c362` 仅补充 local query asset 恢复文档与相关代理规则；生产代码基线仍以其 parent `247ef89f` 为准。
+- **2026-09-10 更新**：live `origin/main` 已前进至 **`58a86f77b0358a96c04e7e07baa9900f33186813`**（`e4f947b` 新增冻结 UX 规格 + `58a86f7` 修正其 Markdown 格式）。两个 commit 均为 **docs-only**，**生产代码基线仍为 `247ef89f`**，本文件 §2–§4 的实现与门禁结论不受影响。
+- 治理分支：`governance/restart-baseline-2026-09-04` @ `d5fa1440993f5564c45d5297100f853b74230c5e`（RESUME-01 产物）；UX 集成分支：`governance/ux-spec-integration-2026-09-10`（本阶段产物，起点 `d5fa144`）。
 
 任何恢复施工任务开始前必须先 `fetch` 并验证远端 `main` 是否仍等于本文件记录的基线；若已变化，先更新本文件，不得继续按旧 SHA 施工。
 
@@ -53,6 +55,15 @@
 - tooltip geometry / viewport 边界处理（上方优先、下方翻转、不侵入 sticky header、滚动后正确）；
 - CSS isolation；
 - 长文真实 Chrome E2E 与性能观测（totalScanMs 87–100.6，maxBatchMs 1.9–2.1，layoutShiftScore 0）。
+
+### 2.1 UX 相关实现事实（2026-09-10 源码/E2E 复核，供 UX 集成对账）
+
+| 面 | 已存在且已验证 | **不存在**（对账确认为缺口，非缺失即缺陷） |
+|---|---|---|
+| 契约 | `QuizQuestion{word,band,options[4],correctOptionIndex,unsureIndex=4}`；`DictEntry{phonetic,pos,translation,effectiveFrequencyRank?}`；无 `ipa`/`zh`/`detailZh`/`nuance` 字段 | — |
+| 阅读面 | 透明查询 span（known 亦保留交互载体）；悬停轻提示（surfaceForm/phonetic/pos/translation 四行，不改状态）；learning 首现行内释义、重复仅下划线；未收录词零样式零持久化 + `当前词典未收录`；拖选胶囊（多词/纯数字拒绝、`mousedown` 抢占、写入 learning） | Word Inspection Popover（点击仅出「会 / 不会」极简菜单）；Esc 关闭；`释义暂不可用` 兜底文案；`METADATA_RESOLUTION_FAILURE` 术语 |
+| 弹窗 | 两页签（测评 / 生词本，宽 `380px`）；首测渲染四选项 + 独立「不确定」+ `测评中 X / 50`；每日 `进行中 X / Y`；估计＝点值 + 保守范围 + 「不做外推」 | 「本页」页签；生词本搜索筛选；Settings 页签；任何设置持久化 |
+| 行内释义 | 首现契约由策略计算（`isLearning && occurrenceCount===1`），**不是用户设置** | `{posPrefix}{translation}` 格式（现为 `【translation】`）、`user-select:none`、0.35em 间距 |
 
 ## 3. 2026-08-07 query / hint wave 的实际状态
 
@@ -104,7 +115,8 @@
 | ignored query assets 是否在当前开发机存在 | **RESOLVED — 不依赖旧资产，可 fresh 重建** |
 | 旧 Issue #1–#5 与当前实现的逐条 acceptance closure 状态 | **PARTIALLY RESOLVED — 审计报告已给出逐条 closure recommendation**；仍 OPEN，**未越权关闭** |
 | 历史 `review/*` / `impl/*` / `fix/*` 分支是否全部可安全归档/删除 | **PARTIALLY RESOLVED — 已有 ancestry / unique-commit inventory**；6 个分支含独有提交，**未越权删除** |
-| README、旧 ticket index、旧 specs 中哪些状态叙述需要历史化 | **PARTIALLY RESOLVED — 已识别并列表**；RULES / 2026-08-06 Spec 的「尚未实现」标注仍需单独授权修订（见 §7.1） |
+| README、旧 ticket index、旧 specs 中哪些状态叙述需要历史化 | **RESOLVED（2026-09-10，PHASE-SPEC-INT）** — `RULES.md` 21 处 `[已确认·尚未实现]` 已重标为 `[已确认·已实现@2026-09-09]`（保留原句存史）；2026-08-06 Spec §1/§15/§16、2026-07-22 垂直切片规格、`CONTEXT.md`、`work/tickets/README.md` 均已加历史化/重标提示（见 §7.1） |
+| 外部 UX 文档 `UX_SPEC_V1.2.1` 是否已纳入仓库权威 | **RESOLVED（2026-09-10）** — 冻结原文位于 `docs/specs/2026-09-04-UX_SPEC_V1.2.1.md`（`origin/main@58a86f7`）；仓库权威版为 `docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md`，43 条对账矩阵已闭合（23 已实现 / 6 已实现但 UX 不同 / 8 新 delta / 2 冲突待裁决 / 1 已取代 / 2 越界 / 1 文档对齐 / 0 UNKNOWN） |
 | V0.1 是否已经达到真实 dogfood readiness | **STILL UNKNOWN — 人工 dogfood 门（Ticket 06）未执行，R-MIG-8 真实 profile 备份未执行** |
 | existing tracked data assets 的公开再分发 / license compliance 是否满足发布要求 | **STILL UNKNOWN — 发布前阻断项，需单独审计** |
 
@@ -131,7 +143,11 @@ Query dictionary 不能因为某个旧 worktree 有缓存就视为存在。
 
 ## 7. 当前治理问题
 
-### 7.1 RULES / 已批准 Spec 的「尚未实现」状态标注已过时（最高优先级）
+### 7.1 RULES / 已批准 Spec 的「尚未实现」状态标注已过时 —— **RESOLVED（2026-09-10）**
+
+> 原问题描述保留如下，仅供存史。**本项已于 PHASE-SPEC-INT 处置完毕**：`RULES.md` 21 处标注已重标为 `[已确认·已实现@2026-09-09]`（原句保留），2026-08-06 Spec §1/§15/§16、2026-07-22 垂直切片规格、`CONTEXT.md` 与 `work/tickets/README.md` 均已加历史化提示。审计报告：[`work/governance/2026-09-10-ux-spec-integration/REPORT.md`](../work/governance/2026-09-10-ux-spec-integration/REPORT.md) 的 `STALE_DOC_REMEDIATION`。
+
+**原描述（2026-09-09 记录）：**
 
 `RULES.md`「查询、交互、主动提示与测评词包解耦」一节的逐条 `[已确认·尚未实现]` 标注，以及 `docs/specs/2026-08-06-V0.1-查询交互提示与测评词包解耦规格.md` 的「当前 main 尚未实现完整目标」，**已与 main 代码现实脱节**。fresh E2E 反例：
 
@@ -190,11 +206,13 @@ Query dictionary 不能因为某个旧 worktree 有缓存就视为存在。
 
 ## 9. 下一阶段决策门
 
-RESUME-01 已完成，当前**只推荐一个**下一阶段入口：
+RESUME-01 已完成；`PHASE-SPEC-INT`（UX 规格集成 + 状态重标）**已于 2026-09-10 完成**（分支 `governance/ux-spec-integration-2026-09-10`）。当前**只推荐一个**下一阶段入口：
 
-**`PHASE-SPEC-INT` — 将 `UX_SPEC_V1.2.1` 纳入仓库权威的治理/规格集成步骤**（文档阶段，不写实现代码、不拆实现 ticket）。
+**`PHASE-DEC-1` — UX 集成未决项裁决 + 实施 ticket 分解**
 
-该阶段与 §7.1 的 RULES/Spec 状态重标天然同批，且不触碰生产代码。完成后才进入新一批 ticket 分解与审查。
+范围：裁决 `DEC-1`（下划线配色：琥珀 vs 现行红色强提示）、`DEC-2`（Settings 页签）、`DEC-3`（UI 文案语言）、`DEC-4`（「本页」页签是否纳入 V0.1）、`DEC-5`（先人工 dogfood 还是先按新 UX 实现）→ 回写集成规格 §7/§10 → 按 D-1～D-10 拆垂直切片并做 batch validation。
+
+**该阶段启动前，`IMPLEMENTATION_TICKET_READINESS = NOT_READY_FOR_TICKET_DECOMPOSITION`**，不得拆票。
 
 以下方向在本阶段不并行开启：
 
@@ -210,5 +228,5 @@ RESUME-01 已完成，当前**只推荐一个**下一阶段入口：
 
 - `main@333c362` 的可复现性已重新证明：raw 输入可从上游按固定 ref 重新下载并命中 SHA-256，派生资产确定性重建且与历史逐字节一致；
 - 六项质量门禁在 fresh worktree 全部真实通过，无一项用历史 PASS 冒充；
-- 主要风险已从「reproducibility unknown」转为 **authority drift（RULES/Spec 状态标注过时）+ dogfood/release readiness 未完成**；
-- 项目下一步是 `UX_SPEC_V1.2.1` 的仓库权威集成与规格状态重标，而不是继续堆功能。
+- 主要风险已从「reproducibility unknown」转为 **authority drift + dogfood/release readiness 未完成**；其中 authority drift 已于 2026-09-10 的 `PHASE-SPEC-INT` 消解（状态重标 + UX 规格入库，docs-only）；
+- 项目下一步是 **裁决 UX 集成的 5 项未决产品决策（DEC-1～DEC-5）**，而不是继续堆功能；裁决前不具备拆票资格。
