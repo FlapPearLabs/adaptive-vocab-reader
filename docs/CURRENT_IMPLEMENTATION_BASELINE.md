@@ -116,7 +116,7 @@
 | 旧 Issue #1–#5 与当前实现的逐条 acceptance closure 状态 | **PARTIALLY RESOLVED — 审计报告已给出逐条 closure recommendation**；仍 OPEN，**未越权关闭** |
 | 历史 `review/*` / `impl/*` / `fix/*` 分支是否全部可安全归档/删除 | **PARTIALLY RESOLVED — 已有 ancestry / unique-commit inventory**；6 个分支含独有提交，**未越权删除** |
 | README、旧 ticket index、旧 specs 中哪些状态叙述需要历史化 | **RESOLVED（2026-09-10，PHASE-SPEC-INT）** — `RULES.md` 21 处 `[已确认·尚未实现]` 已重标为 `[已确认·已实现@2026-09-09]`（保留原句存史）；2026-08-06 Spec §1/§15/§16、2026-07-22 垂直切片规格、`CONTEXT.md`、`work/tickets/README.md` 均已加历史化/重标提示（见 §7.1） |
-| 外部 UX 文档 `UX_SPEC_V1.2.1` 是否已纳入仓库权威 | **RESOLVED（2026-09-10）** — 冻结原文位于 `docs/specs/2026-09-04-UX_SPEC_V1.2.1.md`（`origin/main@58a86f7`）；仓库权威版为 `docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md`，43 条对账矩阵已闭合（23 已实现 / 6 已实现但 UX 不同 / 8 新 delta / 2 冲突待裁决 / 1 已取代 / 2 越界 / 1 文档对齐 / 0 UNKNOWN） |
+| 外部 UX 文档 `UX_SPEC_V1.2.1` 是否已纳入仓库权威 | **RESOLVED（2026-09-10）** — 冻结原文位于 `docs/specs/2026-09-04-UX_SPEC_V1.2.1.md`（`origin/main@58a86f7`，已由保留祖先的合并引入集成分支，SHA-256 `d6570918…bbcc4` 不变）；仓库权威版为 `docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md`；43 条对账矩阵已闭合（23 已实现 / 7 已实现但 UX 不同 / 7 新 delta / 0 冲突 / 1 已取代 / 4 越界 / 1 文档对齐 / 0 UNKNOWN ＝ 43），原 2 项 CONFLICT 已由 `DEC-1`（U-13 → 琥珀系，`ALREADY_IMPLEMENTED_BUT_UX_DIFFERS`）与 `DEC-2`（U-37 → `OUT_OF_SCOPE`）闭合，`DEC-4` 另把 U-34 由「新 delta」改判 `OUT_OF_SCOPE` |
 | V0.1 是否已经达到真实 dogfood readiness | **STILL UNKNOWN — 人工 dogfood 门（Ticket 06）未执行，R-MIG-8 真实 profile 备份未执行** |
 | existing tracked data assets 的公开再分发 / license compliance 是否满足发布要求 | **STILL UNKNOWN — 发布前阻断项，需单独审计** |
 
@@ -206,21 +206,30 @@ Query dictionary 不能因为某个旧 worktree 有缓存就视为存在。
 
 ## 9. 下一阶段决策门
 
-RESUME-01 已完成；`PHASE-SPEC-INT`（UX 规格集成 + 状态重标）**已于 2026-09-10 完成**（分支 `governance/ux-spec-integration-2026-09-10`）。当前**只推荐一个**下一阶段入口：
+RESUME-01 已完成；`PHASE-SPEC-INT`（UX 规格集成 + 状态重标）**已于 2026-09-10 完成**；`PHASE-DEC-TICKETS`（权威快照修复 + `DEC-1`~`DEC-5` 裁决 + 实施 ticket 分解）**亦已于 2026-09-10 完成**（同一分支 `governance/ux-spec-integration-2026-09-10`）。
 
-**`PHASE-DEC-1` — UX 集成未决项裁决 + 实施 ticket 分解**
+**决策状态：`DEC-1`~`DEC-5` 全部 CLOSED**（落点 `RULES.md`「V0.1 呈现层与流程裁决」）：
 
-范围：裁决 `DEC-1`（下划线配色：琥珀 vs 现行红色强提示）、`DEC-2`（Settings 页签）、`DEC-3`（UI 文案语言）、`DEC-4`（「本页」页签是否纳入 V0.1）、`DEC-5`（先人工 dogfood 还是先按新 UX 实现）→ 回写集成规格 §7/§10 → 按 D-1～D-10 拆垂直切片并做 batch validation。
+| ID | 最终裁定 |
+|---|---|
+| `DEC-1` | `AMBER_SYSTEM` —— 克制暖琥珀族；light＝淡琥珀点线、learning＝淡琥珀实线；**不得因 learning 使用红色警示色**；`#f59e0b`/`#d97706` 为非规范性参考 |
+| `DEC-2` | `DEFER_SETTINGS_FROM_V0_1` —— V0.1 不实现/不渲染 Settings 页签，不建空壳或占位 |
+| `DEC-3` | `CHINESE_FIRST` —— 用户可见文案用简洁中文，禁中英混排；内部领域标识符不变 |
+| `DEC-4` | `DEFER_THIS_PAGE_FROM_V0_1` —— 「本页 / This Page」延后为未来候选，不进本批 ticket；**不移除阅读面当前页瞬时处理** |
+| `DEC-5` | `IMPLEMENT_UX_DELTA_THEN_MANUAL_DOGFOOD` —— 已验证基线 → 实施 UX delta → fresh 自动化门禁 → 真人 dogfood → `R-MIG-8` → 最终验收 |
 
-**该阶段启动前，`IMPLEMENTATION_TICKET_READINESS = NOT_READY_FOR_TICKET_DECOMPOSITION`**，不得拆票。
+**`IMPLEMENTATION_TICKET_READINESS = READY_FOR_TICKET_DECOMPOSITION`**（集成规格 §12）。本批 ticket 为 `work/tickets/2026-09-10-v0.1-ux-delta/`：`T-VUX-1`（D-1/4/5/6）→ `T-VUX-2`（D-2/3，blocker = T-VUX-1）→ `T-VUX-3`（D-7）→ `T-VUX-4`（D-8/9/10）。批次校验 `PASS`；延后项（本页 / Settings）与最终验收门（`V0.1 FINAL DOGFOOD`）见该目录。
+
+**ticket 不自带开发授权**：实施须用户另行明确「开始开发」授权。
 
 以下方向在本阶段不并行开启：
 
-- A. 真实 1,000-word dogfood / user-visible acceptance（受 §5 未完成的 dogfood 门与 R-MIG-8 约束，需用户裁定顺序）；
+- A. 真实 1,000-word dogfood / user-visible acceptance —— **按 DEC-5 后置为实施后的验收门**，不阻塞实施开始（受 §5 未完成的 dogfood 门与 R-MIG-8 约束）；
 - B. 10k assessment/query expansion（RULES：dogfood 未明确接受前不得讨论）；
-- C. UX refinement（并入 `UX_SPEC_V1.2.1` 集成，不另起方向）；
-- D. release / license / privacy readiness（发布前阻断项，另行单独审计）；
-- E. CI / remote review automation（新治理决策，不在本轮扩 scope）。
+- C. UX refinement（并入 `UX_SPEC_V1.2.1` 集成规格，不另起方向）；
+- D. release / license / privacy readiness（发布前阻断项，另行单独审计；ECDICT 权利链与本地 dogfood readiness 不得混淆）；
+- E. CI / remote review automation（新治理决策，不在本轮扩 scope）；
+- F. `SPIKE-CHROME-DEVPROFILE`（工具链候选）可并行评估，但**须单独授权、单独分支**，且不得替换确定性 E2E。
 
 ## 10. 当前结论
 
@@ -229,4 +238,4 @@ RESUME-01 已完成；`PHASE-SPEC-INT`（UX 规格集成 + 状态重标）**已�
 - `main@333c362` 的可复现性已重新证明：raw 输入可从上游按固定 ref 重新下载并命中 SHA-256，派生资产确定性重建且与历史逐字节一致；
 - 六项质量门禁在 fresh worktree 全部真实通过，无一项用历史 PASS 冒充；
 - 主要风险已从「reproducibility unknown」转为 **authority drift + dogfood/release readiness 未完成**；其中 authority drift 已于 2026-09-10 的 `PHASE-SPEC-INT` 消解（状态重标 + UX 规格入库，docs-only）；
-- 项目下一步是 **裁决 UX 集成的 5 项未决产品决策（DEC-1～DEC-5）**，而不是继续堆功能；裁决前不具备拆票资格。
+- 项目下一步是 **按已裁决的 UX delta 实施（本批 `T-VUX-1`~`T-VUX-4`）**，而不是继续堆功能；`DEC-1`~`DEC-5` 已闭合，拆票资格已具备，但**实施仍须用户明确授权**。

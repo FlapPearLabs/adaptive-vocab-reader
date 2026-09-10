@@ -18,5 +18,19 @@
 
 1. 不得凭 `Status: ready-for-agent` 或未授权字样重复施工已实现能力；
 2. 不得凭本目录判断当前还缺什么——当前实现真相以 [`docs/CURRENT_IMPLEMENTATION_BASELINE.md`](../../docs/CURRENT_IMPLEMENTATION_BASELINE.md) 为准；
-3. 当前唯一的 backlog 来源是 [`docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md`](../../docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md) §7，且该 backlog 在 `PHASE-DEC-1` 裁决前不具备拆票资格；
+3. ~~该 backlog 在 `PHASE-DEC-1` 裁决前不具备拆票资格~~ —— **`DEC-1`~`DEC-5` 已于 2026-09-10 全部 CLOSED**（`PHASE-DEC-TICKETS`），集成规格 §7 的 backlog **已具备拆票资格**；
 4. 本目录文件保留原样存史，**不删除、不回改 Status**，以免抹掉当时的授权边界证据。
+
+## 当前活跃批次（2026-09-10，PHASE-DEC-TICKETS）
+
+| 批次 | Ticket | 状态 |
+|---|---|---|
+| [`2026-09-10-v0.1-ux-delta`](2026-09-10-v0.1-ux-delta/README.md) | `T-VUX-1` Reading Presentation Integrity（D-1/4/5/6） | `READY_FOR_AGENT_IMPLEMENTATION` — **待用户「开始开发」授权** |
+| | `T-VUX-2` Word Inspection Popover（D-2/3） | blocker：`T-VUX-1` |
+| | `T-VUX-3` Selection Recovery Pill（D-7） | 无 blocker |
+| | `T-VUX-4` Popup V0.1 Alignment（D-8/9/10） | 无 blocker |
+| | `SPIKE-CHROME-DEVPROFILE`（工具链候选，非产品） | `CANDIDATE` — 未授权 |
+| | 延后：本页 / This Page（DEC-4）、Settings（DEC-2） | **不在本批** |
+| | `V0.1 FINAL DOGFOOD`（实施后验收门） | 未启动 |
+
+**判断当前还缺什么，只能看上述活跃批次与 [`docs/CURRENT_IMPLEMENTATION_BASELINE.md`](../../docs/CURRENT_IMPLEMENTATION_BASELINE.md)；不得凭历史批次的 `Status` 字段推断。**
