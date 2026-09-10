@@ -24,8 +24,8 @@
 
 | 项 | SHA |
 |---|---|
-| 本阶段治理提交（`docs(governance): repair dependency semantics …`） | `58c54e11789fb727bca3a57b257b6e791fc29c2c` |
-| 结果分支 HEAD（`governance/ux-spec-integration-2026-09-10`，普通 push，**非 force**） | `58c54e11789fb727bca3a57b257b6e791fc29c2c` |
+| **DAG 修复实质提交**（`docs(governance): repair dependency semantics …`） | `58c54e11789fb727bca3a57b257b6e791fc29c2c` |
+| 结果分支 HEAD | 见交付回复中的 `git rev-parse` 实测值。该分支之上可能有**追加的 append-only 簿记提交**（例如本报告 SHA 字段的修正），故此处**不内嵌**最终 SHA，避免自引用循环 |
 | 变更范围 | 9 个文件，+688 / −56，**全部 docs/work**（`AGENTS.md` + 8 个治理/票据文档） |
 | 生产代码变更 | **无** |
 
