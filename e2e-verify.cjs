@@ -782,7 +782,10 @@ async function main() {
 
     // T-VUX-1/AC-3（learning 分支）+ AC-1：移除 translation 元数据模拟元数据失败终态——
     // 仍为琥珀实线，行内释义省略（::after 不得含释义文本）；hover 走兜底文案。
-    const hintLightTranslation = dictCore[hintLightWord][2];
+    // 取数来源：hintLightWord 选自查询词典（queryDictionary），不在 1,000 词测评核心包
+    // （dictCore）中；运行时该词释义同样来自查询词典 entry.translation。
+    // queryDictionary entry 格式为 [phonetic, pos, translation, rank]，index 2 即 translation。
+    const hintLightTranslation = queryDictionary[hintLightWord][2];
     const learningMetaFail = await uxPage.evaluate(() => {
       const el = document.querySelector('#hint-light-word .avr-word');
       if (!el) throw new Error('T-VUX-1 缺少 learning 目标');
