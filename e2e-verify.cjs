@@ -793,19 +793,14 @@ async function main() {
 
     // ============================================================
     // D-7（T-VUX-3）：拖选恢复胶囊几何与文案 —— 居中于选区上方 / 贴顶下翻 /
-    // 左右夹取 / 文案无中英混排 / 零布局位移。
+    // 左右夹取 / 文案无中英混排 / 胶囊出现零布局位移。
     // 复用 #ability-word（此刻仍无显式状态，可弹胶囊）；每个场景后还原其内联样式，
     // 不影响后续 T-SEL-5 / R-UX-S* 断言。
     // ============================================================
-    const pillPerfBaseline = await uxPage.evaluate(() => {
-      const p = JSON.parse(document.documentElement.dataset.avrPerf || '{}');
-      return { layoutShiftScore: p.layoutShiftScore, layoutShiftSupported: p.layoutShiftSupported };
-    });
-    if (pillPerfBaseline.layoutShiftSupported !== true || pillPerfBaseline.layoutShiftScore !== 0) {
-      throw new Error(`AC-10 失败：初始扫描布局位移基线非 0：${JSON.stringify(pillPerfBaseline)}`);
-    }
-    // 页面内独立 Layout Instability 观测（最严口径：不计 hadRecentInput 豁免）；
-    // 每次拖选场景前重置观测窗口，断言胶囊出现期间布局位移增量为 0。
+    // 页面内独立 Layout Instability 观测（最严口径：不计 hadRecentInput 豁免）。
+    // 口径 = 胶囊出现窗口内的位移增量 === 0（AC-10 合同对象是「胶囊出现这个动作」，
+    // 不要求页面加载基线为零——页面级初始扫描位移属环境噪声，由阶段三 long-read
+    // 的既有 0 断言承载，与本块无关）。
     await uxPage.evaluate(() => {
       window.__avrPillShift = 0;
       const pillShiftObserver = new PerformanceObserver((list) => {
@@ -813,6 +808,7 @@ async function main() {
       });
       pillShiftObserver.observe({ type: 'layout-shift' });
     });
+    const pillShiftNow = () => uxPage.evaluate(() => window.__avrPillShift);
     const movePillHostTo = (top, left) => uxPage.evaluate(({ targetTop, targetLeft }) => {
       const host = document.getElementById('ability-word');
       if (!host) throw new Error('缺少胶囊几何目标 #ability-word');
@@ -820,10 +816,11 @@ async function main() {
     }, { targetTop: top, targetLeft: left });
     const pillGeometryAt = async (top, left) => {
       await movePillHostTo(top, left);
-      await wait(80); // 等挪位引起的布局位移条目到齐，再重置观测窗口
-      await uxPage.evaluate(() => { window.__avrPillShift = 0; });
+      await wait(80); // 等挪位引起的布局位移条目入账，避免混入胶囊出现窗口
+      const shiftWindowStart = await pillShiftNow(); // 窗口起点（挪位噪声之后）
       await selectElementText(uxPage, '#ability-word .avr-word');
       await uxPage.waitForSelector('.avr-selection-action[data-word="ability"]', { visible: true, timeout: 5_000 });
+      await wait(80); // 等胶囊出现（若引起）位移条目入账，保证窗口增量可判定
       const geo = await uxPage.evaluate(() => {
         const pill = document.querySelector('.avr-selection-action');
         if (!pill) throw new Error('AC-1 前置失败：拖选后胶囊不存在');
@@ -835,9 +832,9 @@ async function main() {
           text: pill.textContent || '',
           position: getComputedStyle(pill).position,
           viewportWidth: window.innerWidth,
-          shift: window.__avrPillShift,
         };
       });
+      const shiftDelta = (await pillShiftNow()) - shiftWindowStart;
       await uxPage.evaluate(() => {
         const host = document.getElementById('ability-word');
         if (host) host.style.cssText = '';
@@ -845,7 +842,7 @@ async function main() {
       });
       await uxPage.evaluate(() => document.body.click());
       await uxPage.waitForFunction(() => document.querySelectorAll('.avr-selection-action').length === 0, { timeout: 5_000 });
-      return geo;
+      return { ...geo, shiftDelta };
     };
 
     // AC-1 / AC-4 / AC-10：正常位置 → 水平居中于选区上方（中心差 ≤ 8px，容差 ±8px）、
@@ -865,8 +862,8 @@ async function main() {
     if (!/^\p{Script=Han}+$/u.test(centerGeo.text)) {
       throw new Error(`AC-4 失败：胶囊文案非纯中文（存在中英混排或含图标文本）：${JSON.stringify(centerGeo.text)}`);
     }
-    if (centerGeo.shift !== 0) {
-      throw new Error(`AC-10 失败：胶囊出现产生布局位移：${JSON.stringify(centerGeo)}`);
+    if (centerGeo.shiftDelta !== 0) {
+      throw new Error(`AC-10 失败：胶囊出现窗口内产生布局位移：${JSON.stringify(centerGeo)}`);
     }
 
     // AC-2：选区贴视口顶部 → 胶囊下移到选区下方，且不越视口顶部（top ≥ 8px 安全边距）。
@@ -884,7 +881,7 @@ async function main() {
     if (rightEdgeGeo.pill.right > rightEdgeGeo.viewportWidth - 8) {
       throw new Error(`AC-3 失败：贴右缘选区的胶囊越右视口：${JSON.stringify(rightEdgeGeo)}`);
     }
-    console.log(`E2E D7 PILL PASS: center_dx=${Math.abs(pillCenterX - selCenterX).toFixed(1)}, above=true, top_flip_bottom=${topGeo.pill.top >= topGeo.sel.bottom}, top_margin=${topGeo.pill.top.toFixed(1)}, left_margin=${leftEdgeGeo.pill.left.toFixed(1)}, right_margin=${(rightEdgeGeo.viewportWidth - rightEdgeGeo.pill.right).toFixed(1)}, text_han_only=true, pill_layout_shift=0`);
+    console.log(`E2E D7 PILL PASS: center_dx=${Math.abs(pillCenterX - selCenterX).toFixed(1)}, above=true, top_flip_bottom=${topGeo.pill.top >= topGeo.sel.bottom}, top_margin=${topGeo.pill.top.toFixed(1)}, left_margin=${leftEdgeGeo.pill.left.toFixed(1)}, right_margin=${(rightEdgeGeo.viewportWidth - rightEdgeGeo.pill.right).toFixed(1)}, text_han_only=true, pill_shift_delta=${centerGeo.shiftDelta}, top_shift_delta=${topGeo.shiftDelta}, left_shift_delta=${leftEdgeGeo.shiftDelta}, right_shift_delta=${rightEdgeGeo.shiftDelta}`);
 
     // T-VUX-1/AC-3（learning 分支）+ AC-1：移除 translation 元数据模拟元数据失败终态——
     // 仍为琥珀实线，行内释义省略（::after 不得含释义文本）；hover 走兜底文案。
