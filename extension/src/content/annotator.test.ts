@@ -282,6 +282,182 @@ describe('annotateTextNode', () => {
   });
 });
 
+// ============================================================
+// Word Inspection Popover（D-2）与 Esc 关闭（D-3）
+// ============================================================
+// 合同：
+// - 点击可查询词 → 浮层含词头（保留原文大小写）/音标/词性/释义 + 会/不会两按钮
+// - 容器类 avr-action-menu 与 button[data-avr-status] 是既有 E2E DOM 合同，必须保留
+// - Esc / 外部点击 → 关闭且零状态写入（actionHandler 零调用）
+// - 元数据（phonetic/pos/translation）缺失 → 对应位置显示「释义暂不可用」，禁止合成占位
+describe('word inspection popover', () => {
+  let actions: Array<[string, 'known' | 'learning']> = [];
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetAnnotatorState();
+    initAnnotator();
+    actions = [];
+  });
+
+  /** 标注一个词并返回其 span；onAction 记录到 actions。endIndex 取文本首 token 的实际长度。 */
+  function annotateWord(text: string, overrides: Partial<DisplayResult> = {}, extra: Partial<WordAnnotation> = {}) {
+    const textNode = makeTextNode(text);
+    const tokenLength = /^[A-Za-z]+/.exec(text)?.[0]?.length ?? 0;
+    const ann = { ...makeAnnotation(0, tokenLength, overrides), ...extra };
+    const { spans } = annotateTextNode(textNode, [ann], (word, status) => actions.push([word, status]));
+    return spans[0]!;
+  }
+
+  function popover(): HTMLDivElement | null {
+    return document.querySelector<HTMLDivElement>('.avr-action-menu');
+  }
+
+  function rowText(className: string): string | null | undefined {
+    return popover()?.querySelector(`.${className}`)?.textContent;
+  }
+
+  it('点击可查询词弹出检查浮层：词头保留原文大小写 + 音标 + 词性 + 释义 + 会/不会两按钮', () => {
+    const span = annotateWord('Abilities here.', {
+      word: 'ability',
+      surfaceForm: 'abilities',
+      decision: 'light',
+      translation: '能力',
+    }, { phonetic: '/əˈbɪləti/', pos: 'n.' });
+
+    span.click();
+
+    const menu = popover();
+    expect(menu).not.toBeNull();
+    expect(menu?.style.display).toBe('flex');
+    // DOM 合同：容器类与按钮选择器不得破坏（既有 E2E 十余处断言依赖）
+    expect(menu?.classList.contains('avr-action-menu')).toBe(true);
+    expect(menu?.querySelector('button[data-avr-status="known"]')?.textContent).toBe('会');
+    expect(menu?.querySelector('button[data-avr-status="learning"]')?.textContent).toBe('不会');
+    // 四要素：词头为页面实际词形（保留大小写），元数据逐项来自 dataset
+    expect(rowText('avr-inspect-word')).toBe('Abilities');
+    expect(rowText('avr-inspect-phonetic')).toBe('/əˈbɪləti/');
+    expect(rowText('avr-inspect-pos')).toBe('n.');
+    expect(rowText('avr-inspect-translation')).toBe('能力');
+    // 展示动作期间零状态写入
+    expect(actions).toEqual([]);
+  });
+
+  it('浮层释义使用 data-tooltip-translation（不带【】的值），不误用 data-translation 展示值', () => {
+    const span = annotateWord('Went home.', { word: 'go', surfaceForm: 'went', translation: '去；走' });
+    span.click();
+    expect(rowText('avr-inspect-translation')).toBe('去；走');
+    expect(rowText('avr-inspect-translation')).not.toContain('【');
+    expect(rowText('avr-inspect-word')).toBe('Went');
+  });
+
+  it('点击「不会」立即触发 actionHandler 并自动关闭（P-2 保持）', () => {
+    const span = annotateWord('challenge', { word: 'challenge', translation: '挑战' });
+    span.click();
+    const learning = popover()?.querySelector<HTMLButtonElement>('button[data-avr-status="learning"]');
+    learning!.click();
+    expect(actions).toEqual([['challenge', 'learning']]);
+    expect(popover()?.style.display).toBe('none');
+  });
+
+  it('点击「会」立即触发 actionHandler 并自动关闭', () => {
+    const span = annotateWord('challenge', { word: 'challenge', translation: '挑战' });
+    span.click();
+    const known = popover()?.querySelector<HTMLButtonElement>('button[data-avr-status="known"]');
+    known!.click();
+    expect(actions).toEqual([['challenge', 'known']]);
+    expect(popover()?.style.display).toBe('none');
+  });
+
+  it('Esc keydown 关闭浮层且 actionHandler 零调用（D-3：取消不写状态）', () => {
+    const span = annotateWord('challenge', { word: 'challenge', translation: '挑战' });
+    span.click();
+    expect(popover()?.style.display).toBe('flex');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(popover()?.style.display).toBe('none');
+    expect(actions).toEqual([]);
+    // 关闭后可再次打开（关闭只是隐藏，不破坏交互载体）
+    span.click();
+    expect(popover()?.style.display).toBe('flex');
+  });
+
+  it('外部点击关闭浮层且 actionHandler 零调用（P-3 保持）', () => {
+    const span = annotateWord('challenge', { word: 'challenge', translation: '挑战' });
+    span.click();
+    expect(popover()?.style.display).toBe('flex');
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(popover()?.style.display).toBe('none');
+    expect(actions).toEqual([]);
+  });
+
+  it('点击浮层内部非按钮区域不关闭浮层（浮层 bounding box 内不是外部点击）', () => {
+    const span = annotateWord('challenge', { word: 'challenge', translation: '挑战' });
+    span.click();
+    const head = popover()?.querySelector('.avr-inspect-word') as HTMLElement;
+    head.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(popover()?.style.display).toBe('flex');
+    expect(actions).toEqual([]);
+  });
+
+  it('元数据缺失时对应行显示「释义暂不可用」，不合成占位释义且零状态写入', () => {
+    // 无任何元数据属性（dataset 全 undefined）
+    const bare = annotateWord('Bareword here.', { word: 'bareword', decision: 'none', translation: null });
+    bare.click();
+    expect(rowText('avr-inspect-translation')).toBe('释义暂不可用');
+    expect(rowText('avr-inspect-phonetic')).toBe('释义暂不可用');
+    expect(rowText('avr-inspect-pos')).toBe('释义暂不可用');
+    // 禁止合成占位释义：释义行不得回退成词头/wordKey 本身
+    expect(rowText('avr-inspect-translation')).not.toContain('bareword');
+    expect(popover()?.querySelector('button[data-avr-status="learning"]')).not.toBeNull();
+    expect(actions).toEqual([]);
+
+    // 属性存在但为空串（annotateTextNode 对缺失元数据的自然输出形态）
+    const blank = annotateWord('Blankword here.', { word: 'blankword', decision: 'none', translation: null }, { phonetic: '', pos: '' });
+    blank.click();
+    expect(rowText('avr-inspect-phonetic')).toBe('释义暂不可用');
+    expect(rowText('avr-inspect-pos')).toBe('释义暂不可用');
+    expect(rowText('avr-inspect-translation')).toBe('释义暂不可用');
+    expect(actions).toEqual([]);
+  });
+
+  it('部分元数据缺失时仅对应行兜底，其余行照常展示', () => {
+    const span = annotateWord('Partial here.', { word: 'partial', decision: 'none', translation: '部分释义' }, { phonetic: '' });
+    span.click();
+    expect(rowText('avr-inspect-translation')).toBe('部分释义');
+    expect(rowText('avr-inspect-phonetic')).toBe('释义暂不可用');
+    expect(rowText('avr-inspect-pos')).toBe('释义暂不可用');
+  });
+
+  it('浮层切换目标词时内容刷新为新词（复用同一浮层元素）', () => {
+    const first = annotateWord('challenge', { word: 'challenge', translation: '挑战' });
+    const second = annotateWord('hello', { word: 'hello', translation: '你好' });
+    first.click();
+    expect(rowText('avr-inspect-word')).toBe('challenge');
+    second.click();
+    expect(rowText('avr-inspect-word')).toBe('hello');
+    expect(rowText('avr-inspect-translation')).toBe('你好');
+    expect(document.querySelectorAll('.avr-action-menu')).toHaveLength(1);
+  });
+
+  it('未收录词点击仍只弹「当前词典未收录」轻提示、不弹检查浮层（P-6 保持）', () => {
+    const span = annotateWord('Unlisted token.', { word: 'unlisted', decision: 'none', translation: null }, { unresolved: true });
+    span.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    expect(document.querySelector('.avr-tooltip')?.textContent).toBe('当前词典未收录');
+    span.click();
+    expect(popover()?.style.display).not.toBe('flex');
+    expect(actions).toEqual([]);
+  });
+
+  it('悬停仍只出轻 tooltip 四行、不弹检查浮层（P-4 保持）', () => {
+    const span = annotateWord('Went home.', { word: 'go', decision: 'none', translation: '合成释义' }, { phonetic: 'phon', pos: 'v.' });
+    span.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    expect([...document.querySelectorAll('.avr-tooltip > div')].map((row) => row.textContent)).toEqual([
+      'Went', 'phon', 'v.', '合成释义',
+    ]);
+    expect(popover()?.style.display).not.toBe('flex');
+  });
+});
+
 describe('tooltip 几何', () => {
   it('优先放在目标上方，顶部不足时翻转到底部，并限制在视口内', () => {
     expect(calculateTooltipPosition(
@@ -303,6 +479,54 @@ describe('tooltip 几何', () => {
       200,
       64,
     )).toEqual({ left: 100, top: 98 });
+  });
+
+  // Word Inspection Popover（D-2）：浮层视口安全边距 12px，经同一 seam 的参数化 margin 实现；
+  // 缺省仍为 8（向后兼容 tooltip 既有合同），禁止为浮层另写第二套几何函数。
+  it('margin 参数化：浮层 12px 视口边距左右夹取，缺省仍为 8px', () => {
+    // 上方空间充足：优先上方，浮层底缘与目标词顶缘留 12px 间距（不遮挡目标词）
+    expect(calculateTooltipPosition(
+      { left: 100, top: 100, right: 140, bottom: 120 },
+      { width: 80, height: 30 },
+      300,
+      200,
+      8,
+      12,
+    )).toEqual({ left: 100, top: 58 });
+    // 右缘越界：夹取到 viewportWidth - tip.width - 12
+    expect(calculateTooltipPosition(
+      { left: 290, top: 100, right: 300, bottom: 120 },
+      { width: 80, height: 30 },
+      300,
+      200,
+      8,
+      12,
+    )).toEqual({ left: 208, top: 58 });
+    // 左缘越界：夹取到 12
+    expect(calculateTooltipPosition(
+      { left: 5, top: 100, right: 45, bottom: 120 },
+      { width: 80, height: 30 },
+      300,
+      200,
+      8,
+      12,
+    )).toEqual({ left: 12, top: 58 });
+    // 上方不足 → 下翻：浮层顶缘 = target.bottom + 12
+    expect(calculateTooltipPosition(
+      { left: 100, top: 20, right: 140, bottom: 40 },
+      { width: 80, height: 30 },
+      300,
+      200,
+      8,
+      12,
+    )).toEqual({ left: 100, top: 52 });
+    // 不传 margin：缺省 8，与既有 tooltip 合同一致
+    expect(calculateTooltipPosition(
+      { left: 290, top: 5, right: 300, bottom: 25 },
+      { width: 80, height: 30 },
+      300,
+      200,
+    )).toEqual({ left: 212, top: 33 });
   });
 });
 

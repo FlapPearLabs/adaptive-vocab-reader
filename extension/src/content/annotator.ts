@@ -10,6 +10,12 @@ import type { DisplayResult, DisplayDecision } from '../shared/types';
 
 const EXTENSION_CLASS = 'avr-word';
 
+/** 元数据（音标/词性/释义）解析失败时，检查浮层对应行的固定兜底文案（DEC-3 中文优先；不合成占位释义） */
+export const METADATA_FALLBACK_TEXT = '释义暂不可用';
+
+/** 检查浮层的视口安全边距（左右 12px 夹取；UX §4.2.2） */
+const POPOVER_VIEWPORT_MARGIN = 12;
+
 /** 单个词的标注信息：策略决策 + 在文本节点中的精确位置 */
 export interface WordAnnotation {
   /** 策略模块的展示决策 */
@@ -102,11 +108,38 @@ function injectStyles(root: Document | ShadowRoot = document): void {
     .avr-action-menu {
       position: fixed;
       z-index: 2147483647;
-      gap: 4px;
-      padding: 4px;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
       border-radius: 6px;
       background: #fff;
       box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      max-width: 260px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: #1e293b;
+    }
+    .avr-inspect-word {
+      font-weight: 600;
+      font-size: 14px;
+      color: #1c1917;
+    }
+    .avr-inspect-phonetic {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: #78716c;
+    }
+    .avr-inspect-pos {
+      font-style: italic;
+      font-size: 11px;
+      color: #a8a29e;
+    }
+    .avr-inspect-translation {
+      color: #292524;
+    }
+    .avr-inspect-actions {
+      display: flex;
+      gap: 4px;
     }
     .avr-action-menu button {
       border: 1px solid #cbd5e1;
@@ -115,6 +148,7 @@ function injectStyles(root: Document | ShadowRoot = document): void {
       color: #1e293b;
       cursor: pointer;
       padding: 2px 6px;
+      white-space: nowrap;
     }
     .avr-selection-action {
       position: fixed;
@@ -157,8 +191,8 @@ export function calculateTooltipPosition(
   viewportWidth: number,
   viewportHeight: number,
   safeTop = 8,
+  margin = 8,
 ): { left: number; top: number } {
-  const margin = 8;
   const left = Math.max(margin, Math.min(target.left, viewportWidth - tip.width - margin));
   const above = target.top - tip.height - margin;
   const top = above >= safeTop
@@ -207,7 +241,6 @@ function getActionMenu(): HTMLDivElement {
   if (!actionMenuEl) {
     const menu = document.createElement('div');
     menu.className = 'avr-action-menu';
-    menu.innerHTML = '<button type="button" data-avr-status="known">会</button><button type="button" data-avr-status="learning">不会</button>';
     menu.style.display = 'none';
     document.body.appendChild(menu);
     actionMenuEl = menu;
@@ -217,6 +250,61 @@ function getActionMenu(): HTMLDivElement {
 
 export function hideAnnotationActionMenu(): void {
   if (actionMenuEl) actionMenuEl.style.display = 'none';
+}
+
+/** 元数据缺失或为空时使用固定兜底文案；有值时按原值展示。 */
+function metadataOrFallback(value: string | undefined): string {
+  const trimmed = value?.trim() ?? '';
+  return trimmed.length > 0 ? trimmed : METADATA_FALLBACK_TEXT;
+}
+
+function popoverRow(className: string, text: string): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = className;
+  row.textContent = text;
+  return row;
+}
+
+/**
+ * 打开 Word Inspection Popover（D-2）：词头（页面实际词形，保留原文大小写）+
+ * phonetic/pos/translation（来自词 span 的 dataset；缺失时对应行显示「释义暂不可用」）+
+ * 「会/不会」显式动作。容器类 avr-action-menu 与 button[data-avr-status] 为既有 E2E DOM 合同。
+ * 几何：先渲染（display 后测量自身尺寸）再经唯一几何 seam calculateTooltipPosition 定位
+ * （上方优先 / 不足下翻 / 左右 12px 夹取 / 不遮挡目标词）。仅内存渲染，零状态写入。
+ */
+function showInspectionPopover(wordEl: HTMLElement, target: DOMRect): void {
+  const word = wordEl.dataset.word;
+  if (!word) return;
+  const menu = getActionMenu();
+
+  const knownButton = document.createElement('button');
+  knownButton.type = 'button';
+  knownButton.dataset.avrStatus = 'known';
+  knownButton.textContent = '会';
+  const learningButton = document.createElement('button');
+  learningButton.type = 'button';
+  learningButton.dataset.avrStatus = 'learning';
+  learningButton.textContent = '不会';
+  const actions = document.createElement('div');
+  actions.className = 'avr-inspect-actions';
+  actions.append(knownButton, learningButton);
+
+  menu.replaceChildren(
+    popoverRow('avr-inspect-word', wordEl.textContent || ''),
+    popoverRow('avr-inspect-phonetic', metadataOrFallback(wordEl.dataset.phonetic)),
+    popoverRow('avr-inspect-pos', metadataOrFallback(wordEl.dataset.pos)),
+    // 释义取 data-tooltip-translation（纯释义值）；data-translation 是带【】的行内展示值，不用于浮层。
+    popoverRow('avr-inspect-translation', metadataOrFallback(wordEl.dataset.tooltipTranslation)),
+    actions,
+  );
+  menu.dataset.word = word;
+
+  // 先渲染再测量浮层自身尺寸，经既有 seam 计算位置；浮层 12px 视口边距经 margin 参数实现（缺省仍 8）。
+  menu.style.display = 'flex';
+  const rect = menu.getBoundingClientRect();
+  const position = calculateTooltipPosition(target, rect, window.innerWidth, window.innerHeight, topSafeInset(), POPOVER_VIEWPORT_MARGIN);
+  menu.style.left = `${position.left}px`;
+  menu.style.top = `${position.top}px`;
 }
 
 function wordElementFromEvent(event: Event): HTMLElement | null {
@@ -246,6 +334,8 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
 
     const wordEl = wordElementFromEvent(event);
     if (!wordEl) {
+      // 浮层 bounding box 内的非按钮区域点击不构成外部点击：不关闭、不写状态（UX §4.2.4）。
+      if (actionMenuEl && event.target instanceof Node && actionMenuEl.contains(event.target)) return;
       hideAnnotationActionMenu();
       return;
     }
@@ -255,15 +345,20 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
       showUnresolvedTooltip(wordEl.getBoundingClientRect());
       return;
     }
-    const word = wordEl.dataset.word;
-    if (!word) return;
-    const menu = getActionMenu();
-    menu.dataset.word = word;
-    const rect = wordEl.getBoundingClientRect();
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
-    menu.style.display = 'flex';
+    showInspectionPopover(wordEl, wordEl.getBoundingClientRect());
   }, listenerOptions);
+
+  // D-3：Esc 关闭浮层——纯取消路径，零状态写入。
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    hideAnnotationActionMenu();
+  }, listenerOptions);
+
+  // 滚动同步（UX §4.2.2 允许 Dismiss 或 adjust；此处采用 Dismiss）：视口滚动即关闭浮层，
+  // 不重算位置、零状态写入；用户重新点击目标词即以滚动后的几何重新打开。
+  document.addEventListener('scroll', () => {
+    hideAnnotationActionMenu();
+  }, { capture: true, ...listenerOptions });
 
   document.addEventListener('pointerover', (event) => {
     const wordEl = wordElementFromEvent(event);
