@@ -1285,6 +1285,9 @@ async function main() {
       throw new Error(`AC-3 失败：滚动后重新打开的浮层几何错误：${JSON.stringify(scrolledPopover)}`);
     }
     await vuxPage.evaluate(() => window.scrollTo(0, 0));
+    // 与 placePopover 内 wait(80) 同模式：scroll 事件是异步派发的，必须先等它落地——
+    // 否则迟到的 scroll 事件会经浮层滚动 Dismiss 监听器把紧接着点开的浮层立即关闭（AC-2 时序竞态）。
+    await wait(80);
 
     // ---- AC-2：点「不会」→ 立即提交 manual learning 并自动关闭（P-2 保持）----
     const snapshotBeforeLearning = await readVux2Snapshot();
