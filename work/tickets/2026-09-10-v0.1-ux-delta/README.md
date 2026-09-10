@@ -5,13 +5,15 @@
 | 项 | 值 |
 |---|---|
 | 批次 ID | `2026-09-10-v0.1-ux-delta` |
-| 状态 | **`READY_FOR_AGENT_IMPLEMENTATION`（待用户明确「开始开发」授权；ticket 本身不授权开发）** |
+| 状态 | **`READY_FOR_ZCODE_PARALLEL_IMPLEMENTATION = PASS`（待用户明确「开始开发」授权；ticket 本身不授权开发）** |
 | 上游规格 | [`docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md`](../../docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md) |
 | 上游裁决 | `DEC-1`~`DEC-5` 全部 CLOSED（落点 `RULES.md`「V0.1 呈现层与流程裁决」） |
 | 文档基线 | `46d32b16fe797860d843f10a737da43b8738dcf0`（`governance/ux-spec-integration-2026-09-10`，已含冻结 UX 输入 + 已闭合决策 + 本批次 + `AGENTS.md` §4.2） |
 | 生产代码基线 | `247ef89f45df5c623c1de768d098230600de9498`（`origin/main` 上最后一次生产代码变更；`333c362`/`e4f947b`/`58a86f7` 均为 docs-only） |
 | 已验证实现基线 | RESUME-01（2026-09-09）：typecheck 0 / vitest 283 / Python data tests 12 / build OK / `E2E ALL PASS` |
-| **语义依赖 DAG** | **空图**（四票互不依赖）→ 并发度 **4** |
+| **语义依赖 DAG** | **空图**（四票互不依赖）→ `IMPLEMENTATION_CONCURRENCY = 4` |
+| **共享执行资源** | `E2E_PORT_18923_LOCK`（`e2e-verify.cjs` 固定端口 18923）→ `E2E_SAME_HOST_CONCURRENCY = 1` |
+| **批次校验** | **`TICKET_BATCH_VALIDATION = PASS`** |
 | 批次校验报告 | [`VALIDATION-REPORT.md`](VALIDATION-REPORT.md) |
 
 ## Ticket 清单
@@ -67,7 +69,32 @@
 
 **关键规则**：以上**任何一项都不产生 DAG 边**。HIGH 冲突风险**不等于**语义依赖——仅表示集成 lane 需要认真对账。
 
-## 3. PARALLEL EXECUTION PLAN（`AGENTS.md` §4.2.3）
+## 3. SHARED EXECUTION RESOURCES（**宿主机级资源槽**，非依赖、非冲突 —— `AGENTS.md` §4.2.4）
+
+外部实施前评审 freshly 核验出一项**运行期共享执行资源**。它**不是**语义依赖，也**不是**集成冲突，而是**调度器/资源**约束：只限制**同一宿主机上的并行执行**，不改变任何 ticket 的可实现性。
+
+| 资源 | 仓库证据（实测，本阶段核验） | 独占槽 | 判定 |
+|---|---|---|---|
+| `e2e-verify.cjs` 的 HTTPS fixture server | `e2e-verify.cjs:21` `const PORT = 18923;`（**编译期常量，无环境变量覆盖**）＋ `:153` `server.listen(PORT, '127.0.0.1', …)`（全文**唯一** `listen` 调用） | **`E2E_PORT_18923_LOCK`** | **`SHARED_EXECUTION_RESOURCE`** —— 同一宿主机并发跑完整 E2E 必然 `EADDRINUSE` |
+| `e2e-verify.cjs` 的 `tempDir` | `e2e-verify.cjs:251` `fs.mkdtempSync(path.join(os.tmpdir(), 'avr-e2e-'))` | **无**（不需加锁） | **不是**共享资源 —— 每进程唯一目录，fixture 与证书均写入该私有目录，多 lane 并发**安全** |
+
+### 3.1 资源槽规则
+
+1. 同一宿主机上，**完整 `npm run test:e2e`** 必须先取得 `E2E_PORT_18923_LOCK`，用毕释放 ⇒ **`E2E_SAME_HOST_CONCURRENCY = 1`**。
+2. 该槽**只约束 E2E 门禁**，**不约束 ticket 实施**：四票仍可**并发开发**，`IMPLEMENTATION_CONCURRENCY = 4` 不变。
+3. 等待该槽的 lane **仍为 `IMPLEMENTATION_ELIGIBLE`**；等待期间应继续推进**不需要该端口**的门禁（`typecheck` / 单元 / 数据测试 / `build`）。
+4. **`BLOCKED` 不因该槽排队而传播**（`AGENTS.md` §4.2.5）；也不得据此改写任何 ticket 的 blocker 字段。
+5. 该槽是**临时**调度状态：待 `e2e-verify.cjs` 被改造为**动态端口安全**（`PORT = 0` 或环境变量覆盖）后可废除。**本阶段不修改 `e2e-verify.cjs`** —— 属超出本批范围的基础设施改动，须单独授权。
+6. worktree 与 `tempDir` 的**路径隔离**已满足；本条约束**只针对端口**这一项。
+
+### 3.2 各阶段 E2E 与资源槽
+
+| 阶段 | E2E 范围 | 是否需 `E2E_PORT_18923_LOCK` |
+|---|---|---|
+| 单 lane（票级） | 本票新增断言 + 相关回归 | **需要**（每次完整 `npm run test:e2e` 都占用该端口） |
+| 集成 lane | **完整** E2E（四票新增 + 全部既有阶段） | **需要**（分支组合后必须运行，`AGENTS.md` §4.2.6） |
+
+## 4. PARALLEL EXECUTION PLAN（`AGENTS.md` §4.2.3）
 
 `SEMANTIC_DEPENDENCY_DAG = ∅` ⇒ **四票同时 `IMPLEMENTATION_ELIGIBLE`**，全部从**同一不可变起点**起飞。
 
@@ -82,19 +109,26 @@ AUTHORITATIVE_IMPLEMENTATION_BASE  (pre-implementation governance HEAD, 不可�
 
 每个 lane：隔离 worktree · 一票一 lane · TDD · 票内测试 · 全部门禁回归 · 产出精确 HEAD · **独立 fresh 评审**。
 
-**并发度 = 4（MAXIMUM SAFE PARALLEL）**。**没有任何一票需要等待兄弟票**。
+**两个并发度必须分开读**（`AGENTS.md` §4.2.7）：
 
-**波次对比**：
+| 维度 | 值 | 决定因素 |
+|---|---|---|
+| `IMPLEMENTATION_CONCURRENCY` | **4** | `SEMANTIC_DEPENDENCY_DAG = ∅` |
+| `E2E_SAME_HOST_CONCURRENCY` | **1** | `E2E_PORT_18923_LOCK`（固定端口 18923，§3） |
 
-| 方案 | 并发度 | 判定 |
+**没有任何一票需要等待兄弟票**；只有**完整 E2E 门禁**需要排队取得端口槽。**实现并发不受资源槽限制。**
+
+**波次对比**（比较的是**实施并发度**，与 §3 的 E2E 端口槽无关）：
+
+| 方案 | 实施并发度 | 判定 |
 |---|---|---|
 | SERIAL `1→2→3→4` | 1 | 不采用——把拓扑序当强制串行，属全局串行化瓶颈 |
 | CONSERVATIVE PARALLEL | 4 | 与下者等价（因 DAG 为空，无硬后继需要等待） |
 | **MAXIMUM SAFE PARALLEL** | **4** | **采用**——集成冲突可由显式集成 lane 安全对账 |
 
-**已推翻的旧说法**：本 README 上一版写着「项目约定 ticket 串行执行」。**该约定在仓库权威中不存在**——`AGENTS.md` 全文只有一处「串行」，指的是「一个**串行任务**只使用一个 `review/<主题>` 临时分支」（分支卫生），**不是** ticket 必须串行开发。本批次不再沿用该误述。
+**已推翻的旧说法**：本 README 上一版写着「项目约定 ticket 串行执行」。**该约定在仓库权威中不存在**——`AGENTS.md` 中「串行」全部用于**反向或无关**语境：禁止把拓扑序当作强制**串行**执行（§4.2.3）、禁止把拓扑模拟解释为强制**串行**调度器（§4.2.7）、以及「一个**串行任务**只使用一个 `review/<主题>` 临时分支」（分支卫生，§5）。**没有任何一条**要求 ticket 串行开发。本批次不再沿用该误述。
 
-## 4. INTEGRATION ORDER（偏好，**非阻塞**）
+## 5. INTEGRATION ORDER（偏好，**非阻塞**）
 
 四票并发完成后进入集成 lane（`integration/v0.1-ux-delta`）。**建议**合并顺序（仅为降低冲突解决难度，不构成依赖）：
 
@@ -107,7 +141,7 @@ T-VUX-2  →  T-VUX-3  →  T-VUX-1  →  T-VUX-4
 - `T-VUX-4` 与前三票文件不相交，位置最自由，排在最后以简化 `e2e-verify.cjs` 的 `FAILURE_TABLE` 对账。
 - 该顺序**可随意调整**：任一票先完成即可先集成，**不需要等待**其他 lane。
 
-## 5. 集成 lane 职责（`AGENTS.md` §4.2.5）
+## 6. 集成 lane 职责（`AGENTS.md` §4.2.6）
 
 | 归属 | 内容 |
 |---|---|
@@ -115,7 +149,7 @@ T-VUX-2  →  T-VUX-3  →  T-VUX-1  →  T-VUX-4
 | **集成 lane 禁止** | 发明新的产品行为；重定义测评契约；实现 Settings / 本页；改写 `WordState` 语义 |
 | **治理发现义务** | 若集成暴露**真实隐藏语义依赖**，须记录为 governance finding 供后续 DAG 修正。**仅凭出现合并冲突，不构成存在语义依赖的证据。** |
 
-## 6. IMPLEMENTATION BASE RULE（并行 lane）
+## 7. IMPLEMENTATION BASE RULE（并行 lane）
 
 ```text
 AUTHORITATIVE_IMPLEMENTATION_BASE
@@ -131,19 +165,21 @@ AUTHORITATIVE_IMPLEMENTATION_BASE
 
 > **旧规则已废止**：上一版写「`T-VUX-1` base = `origin/main`」。`origin/main`（`58a86f7`）**不含**上述任一构件，按此开工等于从缺规格缺票据的基线实施。上一版还写 `T-VUX-2/3/4 base = 上一票合并后 HEAD`——在 DAG 为空的前提下，该写法会把四票错误地串成链。
 
-## 7. BLOCK 传播规则（`AGENTS.md` §4.2.4）
+## 8. BLOCK 传播规则（`AGENTS.md` §4.2.5）
 
 **`BLOCKED` 只沿 `HARD_SEMANTIC_BLOCKER` 边传播。** 不沿共享文件 / 合并冲突风险 / 共用测试 harness / 偏好合并顺序 / 共同里程碑 / 同一实施波次 / 评审者可用性传播。
 
+**也不沿共享执行资源的临时调度争用传播**：lane 因等待 `E2E_PORT_18923_LOCK` 而暂时无法跑完整 E2E，**不构成** `BLOCKED` 事件，其 ticket 状态不得被改写为受阻，也不得外溢到兄弟 lane。
+
 本批次 DAG 为空 ⇒ **即使某一票因故 `BLOCKED`，其余三票仍为 `IMPLEMENTATION_ELIGIBLE`**，不得停工等待。
 
-## 8. 浏览器部署 seam（每票通用，`AGENTS.md` §4.1-12）
+## 9. 浏览器部署 seam（每票通用，`AGENTS.md` §4.1-12）
 
 阅读面行为的真实交付路径是 **`extension/manifest.json`**（MV3：`content_scripts.js = ["content.js"]`、`all_frames: true`、`run_at: document_idle`）→ **`build.mjs`**（`extension/src/content/index.ts` 打包为 `dist/content.js`）→ 真实 Chrome 加载 `dist/`。popup 行为的交付路径为 `extension/popup.html` + `popup.css` + `built popup.js`。
 
 **仅通过 TypeScript 单测或源码阅读不得宣称「已验证」**：几何、注入、渲染类验收必须在**真实构建产物 + 真实 Chrome** 下确认。
 
-## 9. 批次级硬约束（每票继承）
+## 10. 批次级硬约束（每票继承）
 
 1. **不改生产语义契约**：`WordState` / `wordKey` / `DictEntry` / `QuizQuestion` / `QuizAnswer` / `AssessmentEvidence` / 隐私边界一律不变。
 2. **不新增持久化 schema、不做存储迁移**（D-1~D-10 均不需要）。
@@ -159,8 +195,10 @@ AUTHORITATIVE_IMPLEMENTATION_BASE
 12. **不越界改兄弟票的区块**：同一注入样式模板内，各自只改**自己的 selector 区块**；不得顺手重排、格式化或重构他人区块（会放大集成冲突）。
 13. **`BLOCKED` 不跨票传播**：不得因兄弟票阻塞或未完成而停止本票；也不得为「等兄弟票」而延迟本票的 fresh 评审与验收。
 14. **lane 通过即有效**：一票通过自身 AC 与门禁即可被验收，**不需要**等待无关兄弟票完成。
+15. **E2E 端口槽独占**：同一宿主机上跑**完整 `npm run test:e2e`** 必须先取得 `E2E_PORT_18923_LOCK`（§3）。**不得**并发启动两次完整 E2E；**不得**为抢端口而跳过或降级 E2E；等待期间应继续跑 `typecheck` / 单元 / 数据测试 / `build`。
+16. **不修改 `e2e-verify.cjs` 的固定端口**：本批不授权改造 harness 的端口安全（须单独授权）。若 lane 遇到 `EADDRINUSE`，**只报告**并等待资源槽，**不得**顺手改端口或绕过。
 
-## 10. 门禁
+## 11. 门禁
 
 **每 lane（票级，独立复跑）与集成 lane 均须 fresh 复跑同一套门禁：**
 
@@ -169,10 +207,12 @@ npm run typecheck
 npm test
 python3 -B -m unittest discover -s tests -p "test_*.py"
 npm run build
-AVR_E2E_NO_SANDBOX=1 npm run test:e2e
+AVR_E2E_NO_SANDBOX=1 npm run test:e2e   # 需先取得 E2E_PORT_18923_LOCK
 ```
 
 基线：typecheck exit 0 · vitest 283 passed · Python 12 passed · build 成功 · `E2E ALL PASS`。**任何一项低于基线即 FAIL。**
 
+- 前四条**无共享运行期资源**，各 lane 在隔离 worktree 中**可并发**执行。
+- 第五条 `AVR_E2E_NO_SANDBOX=1 npm run test:e2e` 占用宿主机固定端口 18923 ⇒ **同一宿主机上并发度 1**（`E2E_SAME_HOST_CONCURRENCY = 1`）。
 - **lane 级**：只要求本票 AC 与其回归断言通过；lane 的 `e2e-verify.cjs` 断言可只包含本票新增项。
-- **集成级**：在 `integration/v0.1-ux-delta` 上跑**全量**断言（四票新增 + 既有 283 单元 + 全部 E2E 阶段）。
+- **集成级**：在 `integration/v0.1-ux-delta` 上跑**全量**断言（四票新增 + 既有 283 单元 + 全部 E2E 阶段），同样持有 `E2E_PORT_18923_LOCK`。

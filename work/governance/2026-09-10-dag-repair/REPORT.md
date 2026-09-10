@@ -50,7 +50,9 @@
 
 若 B 所需信息已存在于 **`RULES.md` / 现行 Spec / 冻结或集成后的 UX 文档**，则 A **并未「定义」**它——A 与 B 只是**各自消费同一权威契约**，二者之间**无边**。
 
-### 阻塞传播不变式（`AGENTS.md` §4.2.4）
+### 阻塞传播不变式（`AGENTS.md` §4.2.5）
+
+> **编号说明**：本报告写就时该小节编号为 **§4.2.4**。`PHASE-E2E-RESOURCE-LOCK`（2026-09-10）在 §4.2.3 之后插入新的 **§4.2.4 共享执行资源**，原 §4.2.4/§4.2.5/§4.2.6 相应顺延为 **§4.2.5/§4.2.6/§4.2.7**。下文的实质规则**未改变**，仅编号更新。
 
 **`BLOCKED` 只沿 `HARD_SEMANTIC_BLOCKER` 边传播。**
 
@@ -292,18 +294,23 @@ T-VUX-2  →  T-VUX-3  →  T-VUX-1  →  T-VUX-4
 
 ## AGENTS_GOVERNANCE_CHANGES
 
-在 `AGENTS.md` 新增 **§4.2「语义依赖 DAG、集成冲突与执行调度（三者必须分开建模）」**，紧接 §4.1 之后（原 §5 顺延，编号未变）：
+在 `AGENTS.md` 新增 **§4.2「语义依赖 DAG、集成冲突、共享执行资源与执行调度（四者必须分开建模）」**，紧接 §4.1 之后（原 §5 顺延，编号未变）：
+
+> **编号说明**：本报告写就时标题为「三者必须分开建模」、小节为 §4.2.1~§4.2.6。`PHASE-E2E-RESOURCE-LOCK`（2026-09-10）新增 **§4.2.4 共享执行资源** 后，标题改为「四者」，且原 §4.2.4/§4.2.5/§4.2.6 **顺延**为 §4.2.5/§4.2.6/§4.2.7。下表采用**当前编号**，并标注新增项。
 
 | 小节 | 内容 |
 |---|---|
 | §4.2.1 | **语义依赖 DAG**（`SEMANTIC_DEPENDENCY_DAG`）：只含硬验收依赖；给出 `HARD_SEMANTIC_BLOCKER` 定义与**反事实测试**；要求保留边时写明 A 的具体实现物；禁止为共享短字符串造边；确立「上位权威 ≠ 兄弟票定义」 |
 | §4.2.2 | **集成冲突图**（`INTEGRATION_CONFLICT_MAP`）：同文件 / 同符号 / 同 CSS 块 / manifest-build 重叠 / 共用 E2E harness；`NONE/LOW/MEDIUM/HIGH` 分级；**一律不自动产生 DAG 边** |
 | §4.2.3 | **执行调度器**（`EXECUTION_SCHEDULER`）：硬 blocker 满足即 `IMPLEMENTATION_ELIGIBLE`；可并发于隔离 worktree；**应最大化安全并行度**；**不得**把拓扑序当强制串行；共同起点为 `AUTHORITATIVE_IMPLEMENTATION_BASE`；目标是 throughput + failure isolation + correctness，不是零冲突 |
-| §4.2.4 | **阻塞传播不变式**（`BLOCK_PROPAGATION_RULE`）：`BLOCKED` 只沿 `HARD_SEMANTIC_BLOCKER` 传播；列出不传播的 7 类关系；给出 `T-A BLOCKED / T-B READY / T-C READY` 示例 |
-| §4.2.5 | **集成 lane**：职责、禁止项、治理发现义务；明确「合并冲突 ≠ 语义依赖」 |
-| §4.2.6 | **批次文档要求**：README 必须分别列出 `SEMANTIC DAG` / `INTEGRATION CONFLICT MAP` / `PARALLEL EXECUTION PLAN` / `INTEGRATION ORDER`；拓扑模拟**不得**被解释为强制串行调度器 |
+| §4.2.4 | **共享执行资源**（`SHARED_EXECUTION_RESOURCE`）〔`PHASE-E2E-RESOURCE-LOCK` 新增〕：固定端口 / 独占 profile / 设备 / fixture 等服务**不是** DAG 边也**不是**集成冲突；分配 `<资源>_LOCK` 独占资源槽；等待槽不改变 `IMPLEMENTATION_ELIGIBLE` |
+| §4.2.5 | **阻塞传播不变式**（`BLOCK_PROPAGATION_RULE`）：`BLOCKED` 只沿 `HARD_SEMANTIC_BLOCKER` 传播；列出不传播的关系〔「**共享执行资源的临时调度争用**」由 `PHASE-E2E-RESOURCE-LOCK` 追加〕；给出 `T-A BLOCKED / T-B READY / T-C READY` 示例 |
+| §4.2.6 | **集成 lane**：职责、禁止项、治理发现义务；分支组合后**必须**运行完整 E2E（持 `E2E_PORT_18923_LOCK`）；明确「合并冲突 ≠ 语义依赖」 |
+| §4.2.7 | **批次文档要求**：README 必须分别列出 `SEMANTIC DAG` / `INTEGRATION CONFLICT MAP` / `SHARED EXECUTION RESOURCES` / `PARALLEL EXECUTION PLAN` / `INTEGRATION ORDER`；并分别给出 `IMPLEMENTATION_CONCURRENCY` 与 `E2E_SAME_HOST_CONCURRENCY`；拓扑模拟**不得**被解释为强制串行调度器 |
 
-**已核验**：`AGENTS.md` 原有内容中**不存在**「ticket 必须串行开发」的授权规则。全文唯一一处「串行」位于 §5，原文为「一个**串行任务**只使用一个 `review/<主题>` 临时分支」——这是**分支卫生**约定，与 ticket 调度无关。批次 README 上一版的「项目约定 ticket 串行执行」是对该句的**误读外推**，已删除。
+**已核验**：`AGENTS.md` 原有内容中**不存在**「ticket 必须串行开发」的授权规则。`AGENTS.md` 中「串行」出现于**反向或无关**语境：§4.2.3「**不得**把拓扑序当作强制的一次一张串行执行」、§4.2.7「**不得**被解释为强制的串行调度器」、§4.2 开篇「无谓的全局串行化」，以及 §5「一个**串行任务**只使用一个 `review/<主题>` 临时分支」（**分支卫生**，与 ticket 调度无关）。批次 README 上一版的「项目约定 ticket 串行执行」是对 §5 该句的**误读外推**，已删除。
+
+> **更正说明**：本节原先写作「全文**唯一一处**『串行』位于 §5」——该佐证经 `PHASE-E2E-RESOURCE-LOCK` 复核**不准确**（实际 4 处，且多数为禁止串行化的反向语境）。核心结论不变：**仓库权威中无任何规则要求 ticket 串行开发**。详见 [`work/governance/2026-09-10-e2e-resource-lock/REPORT.md`](../2026-09-10-e2e-resource-lock/REPORT.md) §6.2。
 
 ---
 

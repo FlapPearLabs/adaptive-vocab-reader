@@ -149,7 +149,7 @@ AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 
 1. 从修正后的 **pre-implementation governance HEAD** 建立施工分支（不是 `origin/main`）；
 2. 核验/建立 DOM 测试 seam（§6.1）；
-3. 核验 `e2e-verify.cjs` 的 `tempDir` 夹具隔离性（见 `e2e-verify.cjs:534-535`）。若确认为工作树内共享路径，**只报告，不修改**——属超出本票范围的基础设施改动，须单独授权；
+3. `tempDir` 夹具隔离性**已核验通过**（`e2e-verify.cjs:251` `fs.mkdtempSync(path.join(os.tmpdir(), 'avr-e2e-'))` → 每进程唯一目录），**不是**共享资源，本项无需再查。真正的宿主机级约束是 **HTTPS fixture server 的固定端口 `18923`**（`e2e-verify.cjs:21` `const PORT = 18923`；`:153` `server.listen(PORT, '127.0.0.1', …)`，无 env 覆盖）：完整 `npm run test:e2e` 须先取得 **`E2E_PORT_18923_LOCK`**（批次 `README.md` §3）。遇 `EADDRINUSE` 时**只报告**、等待资源槽，**不修改** `e2e-verify.cjs`——端口安全改造属超出本票范围的基础设施改动，须单独授权；
 4. 确认新 worktree 具备 local-only 词包恢复能力（`data/README.md` 的确定性恢复流程），缺资产须 fail-closed。
 
 ## 9. 安全与隐私边界

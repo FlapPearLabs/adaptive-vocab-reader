@@ -99,9 +99,9 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 11. **数据依赖示例验证**：当验收中的具体词形、canonicalization 或其他 identity 示例依赖已批准且可用的数据源时，必须先验证其前提；具体 fixture 或示例不得覆盖或抵触上位通用合同。
 12. **浏览器部署 seam**：ticket 验收涉及 frame 注入、扩展入口或其他声明式浏览器部署行为时，必须从真实交付路径反推并列出拥有该行为的配置文件；不得把它误当成纯内容脚本内部逻辑。
 
-### 4.2 语义依赖 DAG、集成冲突与执行调度（三者必须分开建模）
+### 4.2 语义依赖 DAG、集成冲突、共享执行资源与执行调度（四者必须分开建模）
 
-批次治理的三个模型**不得混为一谈**。历史上曾把「同文件改动」「共同里程碑」「偏好的合并顺序」「共用 E2E 文件」误当成依赖边，导致无谓的全局串行化。以下为强制口径。
+批次治理的四个模型**不得混为一谈**。历史上曾把「同文件改动」「共同里程碑」「偏好的合并顺序」「共用 E2E 文件」误当成依赖边，也曾把「同一宿主机上不能同时占用固定端口」误当成 ticket 之间的依赖，两者都导致无谓的全局串行化。以下为强制口径。
 
 #### 4.2.1 语义依赖 DAG（`SEMANTIC_DEPENDENCY_DAG`）
 
@@ -137,12 +137,38 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 - 调度器**应当最大化安全有用的并行度**。**不得**把拓扑序当作强制的一次一张串行执行。
 - 并行 lane 的**共同起点**是 `AUTHORITATIVE_IMPLEMENTATION_BASE`（不可变权威实现基线）；**只有**真正的语义后继才从「已验收前驱 HEAD」起分支。
 - 追求目标为 `wall-clock throughput + failure isolation + correctness`，**不是**「零合并冲突」。
+- `typecheck` / 单元测试 / 数据测试 / build 等**无共享运行期资源**的门禁，只要各自 worktree 隔离，**允许并发**。
 
-#### 4.2.4 阻塞传播不变式（`BLOCK_PROPAGATION_RULE`）
+#### 4.2.4 共享执行资源（`SHARED_EXECUTION_RESOURCE`）
+
+**共享执行资源不是依赖，也不是集成冲突，而是调度器/资源约束。**
+
+它指任何在**同一宿主机上只能被一个进程独占**的运行期资源：固定端口、独占浏览器 profile、独占设备、共用 fixture 服务、单实例守护进程等。
+
+强制口径：
+
+1. 共享执行资源**不得**建模为 `SEMANTIC_DEPENDENCY_DAG` 的边，**不得**建模为 `INTEGRATION_CONFLICT_MAP` 的条目。它**既不**改变 ticket 的实现正确性，**也不**产生跨分支文本冲突。
+2. 调度器为每项此类资源分配一把**独占资源槽（resource slot）**，命名规则为 `<资源标识>_LOCK`。任何需要该资源的执行必须先取得该槽，用毕释放；同一资源槽在同一宿主机的并发度恒为 **1**。
+3. 等待资源槽的 lane **仍然是 `IMPLEMENTATION_ELIGIBLE`**，只是其**该条**待资源门禁暂时不可执行。等待期间 lane 应继续推进**不需要该资源**的工作与门禁（typecheck / 单元 / 数据测试 / build）。
+4. 被加锁的只能是**资源本身**，**不能**是 ticket。**禁止**因资源槽排队而把 ticket 判定为语义上不可开工。
+5. 资源槽是**临时调度状态**，不写入 ticket 的 blocker 字段、不进入 DAG、不进入集成顺序。
+
+**本仓库已知的共享执行资源台账**（该表是**运行期资源台账**，不产生任何 DAG 边）：
+
+| 资源 | 仓库证据 | 独占槽 | 约束 |
+| --- | --- | --- | --- |
+| `e2e-verify.cjs` 的 HTTPS fixture server 绑定 `127.0.0.1:18923` | `e2e-verify.cjs:21` `const PORT = 18923`；`:153` `server.listen(PORT, '127.0.0.1', …)`；**无**环境变量覆盖，端口为编译期常量 | `E2E_PORT_18923_LOCK` | **同一宿主机**上完整 `npm run test:e2e` 必须独占该槽，`E2E_SAME_HOST_CONCURRENCY = 1`；并发执行会 `EADDRINUSE`。**直到** harness 被改造为动态端口（`PORT = 0` / 环境变量覆盖）后该槽才可废除 |
+| `e2e-verify.cjs` 的 `tempDir` | `e2e-verify.cjs:251` `fs.mkdtempSync(path.join(os.tmpdir(), 'avr-e2e-'))` —— 每进程唯一目录 | **无**（不需要锁） | **不是**共享资源；fixture 写入与证书均落在该私有目录内，多 lane 并发不冲突 |
+
+**说明**：上表只列出已经**核验**的资源。新增共享资源时必须先给出仓库证据（文件与行号），再分配资源槽；不得凭猜测加锁。
+
+#### 4.2.5 阻塞传播不变式（`BLOCK_PROPAGATION_RULE`）
 
 **`BLOCKED` 状态只沿 `HARD_SEMANTIC_BLOCKER` 边传播。**
 
-它**不**沿以下任何一项传播：共享文件；合并冲突风险；共用测试 harness；偏好的合并顺序；共同里程碑；同一实施波次；评审者可用性。
+它**不**沿以下任何一项传播：共享文件；合并冲突风险；共用测试 harness；偏好的合并顺序；共同里程碑；同一实施波次；评审者可用性；**共享执行资源的临时调度争用**（例如排队等待 `E2E_PORT_18923_LOCK`）。
+
+等待资源槽**不构成** `BLOCKED` 事件：等待中的 lane 仍为 `IMPLEMENTATION_ELIGIBLE`，其 ticket 状态不得被改写为受阻，也**不得**据此外溢到兄弟 lane。**`BLOCKED` 不因临时资源争用传播。**
 
 ```text
 T-A BLOCKED
@@ -152,17 +178,25 @@ T-C READY
 
 若 B / C 并不语义依赖 A，则 **B 与 C 仍为 `IMPLEMENTATION_ELIGIBLE`**，不得因 A 阻塞而停工。
 
-#### 4.2.5 集成 lane
+#### 4.2.6 集成 lane
 
 已验收的 ticket 分支在**独立的集成阶段**合并（例如 `integration/<批次>`），由集成 lane 负责：分支组合、文本冲突解决、共享文件对账、重复 helper/常量整合、**不改变产品范围**的兼容性修复，以及完整门禁复跑（typecheck / 单元 / 数据测试 / build / 真实 E2E）与集成后的 fresh 评审。
 
+- 集成 lane **必须**在分支组合后运行**完整** E2E；该次执行同时持有 `E2E_PORT_18923_LOCK`（§4.2.4）。
 - 集成 lane **不得**发明新的产品行为。
 - 若集成暴露出**真实的隐藏语义依赖**，须记录为治理发现（governance finding）以供后续 DAG 修正。
 - **仅凭出现合并冲突，不构成存在语义依赖的证据。**
 
-#### 4.2.6 批次文档要求
+#### 4.2.7 批次文档要求
 
-批次 README **必须分别**列出：`SEMANTIC DAG`、`INTEGRATION CONFLICT MAP`、`PARALLEL EXECUTION PLAN`、`INTEGRATION ORDER`。拓扑模拟仍用于**校验依赖**，但**不得**被解释为强制的串行调度器。
+批次 README **必须分别**列出：`SEMANTIC DAG`、`INTEGRATION CONFLICT MAP`、`SHARED EXECUTION RESOURCES`、`PARALLEL EXECUTION PLAN`、`INTEGRATION ORDER`。拓扑模拟仍用于**校验依赖**，但**不得**被解释为强制的串行调度器。
+
+`PARALLEL EXECUTION PLAN` 必须**分别**给出两个不同的并发度，且不得混写：
+
+- `IMPLEMENTATION_CONCURRENCY`：可同时实施的 ticket lane 数（由 `SEMANTIC_DEPENDENCY_DAG` 决定）；
+- `E2E_SAME_HOST_CONCURRENCY`：同一宿主机上可同时运行完整 E2E 的次数（由 `SHARED_EXECUTION_RESOURCES` 的资源槽数决定）。
+
+**实施并发度不受资源槽数量限制**：资源槽只约束**使用该资源的门禁**，不约束 ticket 的实施。
 
 ## 5. 实现与文件安全
 

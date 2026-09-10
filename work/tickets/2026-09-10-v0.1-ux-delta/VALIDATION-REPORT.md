@@ -133,7 +133,7 @@
 
 1. **失败路径夹具来源**：D-1 / `T-VUX-2` AC-7 的「元数据缺失」在真实词包中**不存在自然词条**，夹具只能由 E2E fixture 页面自造或纯 DOM 单测提供；**禁止**依赖伪造的真实词包数据。已写入 `T-VUX-1` §6.0 与 `T-VUX-2` §6.0。
 2. **`T-VUX-4` 既有 selector 稳定性**：`e2e-verify.cjs:1269/1300/1340` 依赖 `.popup-tab:not(.notebook-tab)`；调整页签结构须同步。
-3. **`e2e-verify.cjs` `tempDir` 隔离性**为 P2 待核验项（串行执行下不发生），已写入 `T-VUX-1` §8.1 实施前检查。
+3. **`e2e-verify.cjs` `tempDir` 隔离性**：`PHASE-E2E-RESOURCE-LOCK` 已核验**通过**（`e2e-verify.cjs:251` `fs.mkdtempSync` → 每进程唯一）——**不是**共享资源。真正的宿主机级约束是固定端口 `18923`，已升级为 `E2E_PORT_18923_LOCK` 资源槽（见下方追加三）。
 
 ## R-4 复审判定
 
@@ -206,8 +206,70 @@
 
 | # | 缺陷 | 修复 |
 |---|---|---|
-| S-5-1 | 批次 README 声称「项目约定 ticket 串行执行」 | **该约定在仓库权威中不存在**（`AGENTS.md` 唯一「串行」指「一个串行**任务**用一条 `review/` 分支」，属分支卫生）→ 已删除该说法，改为四个独立模型 |
+| S-5-1 | 批次 README 声称「项目约定 ticket 串行执行」 | **该约定在仓库权威中不存在**（`AGENTS.md` 中「串行」均属反向或分支卫生语境）→ 已删除该说法，改为四个独立模型。**注**：当时给出的佐证「全文只有一处『串行』」经复核**不准确**，已于追加三更正为准确表述（见 T-4） |
 | S-5-2 | `T-VUX-2` / `T-VUX-3` 被错误声明 blocker | 删除两条边，票内注明反事实结果与权威来源 |
 | S-5-3 | `T-VUX-3` 负向断言 7 可被读作「依赖 T-VUX-1 几何基线」 | 改写为「禁止通用框架化」，并显式否定「依赖 T-VUX-1 / 须等待几何基线」的解读 |
 | S-5-4 | `T-VUX-2/3/4` base 写成「前驱票 HEAD」 | 统一改为同一 `AUTHORITATIVE_IMPLEMENTATION_BASE` |
-| S-5-5 | `AGENTS.md` 无「语义依赖 vs 集成冲突 vs 调度」的区分规则 | 新增 §4.2（含 4.2.1~4.2.6） |
+| S-5-5 | `AGENTS.md` 无「语义依赖 vs 集成冲突 vs 调度」的区分规则 | 新增 §4.2（当时含 4.2.1~4.2.6；**追加三后为 4.2.1~4.2.7**，编号已顺延） |
+
+---
+
+# 复审追加三 — `PHASE-E2E-RESOURCE-LOCK`（2026-09-10，实施前最终治理纠正）
+
+> 外部实施前评审裁定：**语义 DAG = PASS**、`SEMANTIC_DEPENDENCY_DAG = ∅` **保持正确**、四票**仍独立可实施**、**不得恢复任何依赖边**。
+> 但同一评审 freshly 核验出一项**宿主机级共享执行资源**。本轮按 `AGENTS.md` §4.2.4 将其归类为 `SHARED_EXECUTION_RESOURCE` 并分配独占资源槽——**这是调度约束，不是依赖**。
+> 完整报告见 [`work/governance/2026-09-10-e2e-resource-lock/REPORT.md`](../../governance/2026-09-10-e2e-resource-lock/REPORT.md)。
+
+## T-1 本轮核验事实（fresh，实测仓库）
+
+| 事实 | 仓库证据 | 结论 |
+|---|---|---|
+| `tempDir` 每进程唯一 | `e2e-verify.cjs:251` `fs.mkdtempSync(path.join(os.tmpdir(), 'avr-e2e-'))` | **隔离安全** —— **不是**共享资源，不需加锁 |
+| HTTPS fixture server 固定端口 | `e2e-verify.cjs:21` `const PORT = 18923;`；`:153` `server.listen(PORT, '127.0.0.1', …)`（全文唯一 `listen`）；**无**环境变量覆盖 | **共享执行资源** —— 同主机并发完整 E2E 必然 `EADDRINUSE` |
+
+## T-2 分类与资源槽
+
+| 项 | 值 |
+|---|---|
+| 分类 | **`SHARED_EXECUTION_RESOURCE`** |
+| 独占槽 | **`E2E_PORT_18923_LOCK`** |
+| 是否是 DAG 边 | **否** —— 未新增、未恢复任何语义边 |
+| 是否是集成冲突 | **否** —— 不产生跨分支文本冲突 |
+| 约束范围 | 仅**同一宿主机**上的**完整** `npm run test:e2e` |
+
+## T-3 逐条落实（外部评审 8 点要求）
+
+| # | 要求 | 落实位置 | 结果 |
+|---|---|---|---|
+| 1 | DAG 边只代表 `HARD_SEMANTIC_BLOCKER` | `AGENTS.md` §4.2.1 / §4.2.4-1 | **PASS** |
+| 2 | 固定端口等运行期资源属调度约束，**不是** DAG 边 | `AGENTS.md` §4.2.4 | **PASS** |
+| 3 | 四条 Zcode lane 可**并发开发** | 批次 `README.md` §4 | **PASS** |
+| 4 | typecheck / 单元 / 数据测试 / build 在隔离 worktree 中**可并发** | `AGENTS.md` §4.2.3；批次 `README.md` §11 | **PASS** |
+| 5 | 同主机完整 E2E 须取得 `E2E_PORT_18923_LOCK` | `AGENTS.md` §4.2.4；批次 `README.md` §3.1 / §10-15 | **PASS** |
+| 6 | 等待槽的 lane 仍有效，**不得**阻塞兄弟 lane | `AGENTS.md` §4.2.4-3；批次 `README.md` §3.1-3 | **PASS** |
+| 7 | `BLOCKED` **不因**临时资源争用传播 | `AGENTS.md` §4.2.5；批次 `README.md` §8 | **PASS** |
+| 8 | 集成 lane 分支组合后跑**完整** E2E | `AGENTS.md` §4.2.6；批次 `README.md` §6 / §11 | **PASS** |
+
+## T-4 本轮修改的文件（最小集）
+
+| 文件 | 变更 |
+|---|---|
+| `AGENTS.md` | **新增 §4.2.4 共享执行资源**（含资源台账）；§4.2.3 补「无共享资源门禁可并发」；原 4.2.4/4.2.5/4.2.6 **顺延**为 4.2.5/4.2.6/4.2.7 并补规则；§4.2 标题改为四模型 |
+| `work/tickets/2026-09-10-v0.1-ux-delta/README.md` | **新增 §3 SHARED EXECUTION RESOURCES**；§4 拆分为两个并发度；§8 补资源争用；§10 新增硬约束 15/16；§11 门禁标注端口槽；小节顺延编号；状态表更新 |
+| `work/tickets/2026-09-10-v0.1-ux-delta/VALIDATION-REPORT.md` | 本追加节；R-3 第 3 项由「P2 待核验」更正为**已核验** |
+| `work/tickets/2026-09-10-v0.1-ux-delta/01-reading-presentation-integrity.md` | §8.1 第 3 项：tempDir 已核验 + 固定端口资源槽 |
+| `work/governance/2026-09-10-e2e-resource-lock/REPORT.md` | 本阶段新增治理报告 |
+
+**未修改**：`e2e-verify.cjs`（按指令保持不动）、任何 ticket 的 blocker 字段、`SEMANTIC_DEPENDENCY_DAG`（保持为空）。
+
+## T-5 最终状态
+
+| 字段 | 值 |
+|---|---|
+| `SEMANTIC_DEPENDENCY_DAG` | **`∅`** |
+| `IMPLEMENTATION_CONCURRENCY` | **4** |
+| `E2E_SAME_HOST_CONCURRENCY` | **1** |
+| `TICKET_BATCH_VALIDATION` | **PASS** |
+| `READY_FOR_ZCODE_PARALLEL_IMPLEMENTATION` | **PASS** |
+
+**仍不授权开始开发**：`T-VUX-1~4` 的实施须用户另行明确授权（见 `RULES.md` 与 `AGENTS.md`）。
