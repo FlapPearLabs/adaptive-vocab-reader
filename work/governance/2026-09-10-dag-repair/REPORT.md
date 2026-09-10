@@ -22,9 +22,12 @@
 
 ## RESULTING_HEAD
 
-`04c7f8f5b6c0d2e7a1f3b9c8e5a2d6f4b7c9e1a3`（本阶段提交，普通 push，非 force）
-
-> 实际 SHA 见交付回复与 `git log`；本节仅作占位标识，**以回复中的实测值为准**。
+| 项 | SHA |
+|---|---|
+| 本阶段治理提交（`docs(governance): repair dependency semantics …`） | `58c54e11789fb727bca3a57b257b6e791fc29c2c` |
+| 结果分支 HEAD（`governance/ux-spec-integration-2026-09-10`，普通 push，**非 force**） | `58c54e11789fb727bca3a57b257b6e791fc29c2c` |
+| 变更范围 | 9 个文件，+688 / −56，**全部 docs/work**（`AGENTS.md` + 8 个治理/票据文档） |
+| 生产代码变更 | **无** |
 
 ---
 
