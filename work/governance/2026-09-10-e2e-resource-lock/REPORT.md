@@ -129,7 +129,8 @@
 | 项 | 值 |
 |---|---|
 | 结果分支 | `governance/ux-spec-integration-2026-09-10` |
-| 结果 HEAD | **见交付回复中的 `git rev-parse` 实测值**。该分支之上可能有**追加的 append-only 簿记提交**（用于在本报告中补记实测 SHA），故此处**不内嵌**最终 SHA，避免自引用循环 |
+| **本阶段实质提交**（含本报告） | `4ce9bac5fb9dbce1cfd34091f63cc93ad053f9a8` |
+| 结果分支 HEAD | **见交付回复中的 `git rev-parse` 实测值**（该 SHA 之后的提交仅为 append-only 簿记，不含内容变更） |
 | 推送方式 | `git push origin governance/ux-spec-integration-2026-09-10`，**fast-forward，无 force-push** |
 
 ---
