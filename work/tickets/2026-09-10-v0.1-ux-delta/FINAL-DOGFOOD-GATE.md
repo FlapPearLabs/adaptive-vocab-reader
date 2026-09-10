@@ -4,7 +4,7 @@
 |---|---|
 | 门 ID | `V0.1 FINAL DOGFOOD` |
 | 位置 | 位于**全部已批准 UX 实施切片通过 fresh 自动化门禁之后**（`DEC-5 = IMPLEMENT_UX_DELTA_THEN_MANUAL_DOGFOOD`） |
-| 当前状态 | **未启动**（`T-VUX-1~4` 尚未实施） |
+| 当前状态 | **READY_TO_START**（已通过集成 snapshot `5cea02e286a852c8407fc2cafefbc389236bf016` 满足自动化前置条件） |
 | 是否阻塞实施开始 | **否**（DEC-5 明确：不得要求先对已知将被取代的 UI 做人工 dogfood） |
 | 是否阻塞 V0.1 最终验收 | **是** |
 

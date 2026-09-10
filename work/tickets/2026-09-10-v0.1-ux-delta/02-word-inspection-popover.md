@@ -11,7 +11,7 @@
 | 上游 | 集成规格 §6 / §7；**冻结 UX §2.1 / §7.1（`释义暂不可用` 与元数据失败正交性的权威来源）**；`DEC-3 = CHINESE_FIRST` |
 | 主要文件 | `extension/src/content/annotator.ts`（操作菜单 ~L200-260、几何 seam `calculateTooltipPosition` L154 / `positionTooltip` L184） |
 | 部署 seam | `extension/manifest.json`（`content_scripts.js = ["content.js"]`）→ `build.mjs`（`content/index.ts` → `dist/content.js`）→ 真实 Chrome 加载 `dist/` |
-| 状态 | 待用户明确「开始开发」授权 |
+| 状态 | IMPLEMENTATION_STATUS = ACCEPTED_AND_INTEGRATED<br>ACCEPTED_TIP = f461f2e2faf6e1e896babf88532ba852bc901ea4<br>INTEGRATED_IN = 5cea02e286a852c8407fc2cafefbc389236bf016 |
 
 ---
 

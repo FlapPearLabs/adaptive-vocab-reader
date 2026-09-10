@@ -5,7 +5,14 @@
 | 项 | 值 |
 |---|---|
 | 批次 ID | `2026-09-10-v0.1-ux-delta` |
-| 状态 | **`READY_FOR_ZCODE_PARALLEL_IMPLEMENTATION = PASS`（待用户明确「开始开发」授权；ticket 本身不授权开发）** |
+| 状态 | **`IMPLEMENTATION_BATCH = COMPLETE`** |
+| `T-VUX-1` | ACCEPTED |
+| `T-VUX-2` | ACCEPTED |
+| `T-VUX-3` | ACCEPTED |
+| `T-VUX-4` | ACCEPTED |
+| 集成 HEAD | `5cea02e286a852c8407fc2cafefbc389236bf016` |
+| 集成评审 | `INTEGRATED_FRESH_REVIEW = PASS` |
+| 最终验收准备 | `READY_FOR_FINAL_DOGFOOD = PASS` |
 | 上游规格 | [`docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md`](../../docs/specs/2026-09-10-V0.1-UX-V1.2.1-集成规格.md) |
 | 上游裁决 | `DEC-1`~`DEC-5` 全部 CLOSED（落点 `RULES.md`「V0.1 呈现层与流程裁决」） |
 | 文档基线 | `46d32b16fe797860d843f10a737da43b8738dcf0`（`governance/ux-spec-integration-2026-09-10`，已含冻结 UX 输入 + 已闭合决策 + 本批次 + `AGENTS.md` §4.2） |

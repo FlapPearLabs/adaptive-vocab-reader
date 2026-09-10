@@ -11,7 +11,7 @@
 | 上游 | 集成规格 §6 / §7；`DEC-1 = AMBER_SYSTEM`；`DEC-3 = CHINESE_FIRST` |
 | 主要文件 | `extension/src/content/annotator.ts`（注入样式块 ~L55-130、`showTooltip` ~L268-286、行内释义 ~L360-385）、`extension/src/content/annotator.test.ts` |
 | 部署 seam | `extension/manifest.json`（`content_scripts.js = ["content.js"]`、`all_frames:true`、`document_idle`）→ `build.mjs`（`content/index.ts` → `dist/content.js`）→ 真实 Chrome 加载 `dist/` |
-| 状态 | 待用户明确「开始开发」授权 |
+| 状态 | IMPLEMENTATION_STATUS = ACCEPTED_AND_INTEGRATED<br>ACCEPTED_TIP = 9f0b83deff7dcb95547963671fe71cb7208fa7f5<br>INTEGRATED_IN = 5cea02e286a852c8407fc2cafefbc389236bf016 |
 
 ---
 

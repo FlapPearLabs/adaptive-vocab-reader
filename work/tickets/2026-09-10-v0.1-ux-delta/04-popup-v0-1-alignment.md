@@ -11,7 +11,7 @@
 | 上游 | 集成规格 §5.7 / §7；`DEC-2 = DEFER_SETTINGS_FROM_V0_1`；`DEC-3 = CHINESE_FIRST`；`DEC-4 = DEFER_THIS_PAGE_FROM_V0_1` |
 | 主要文件 | `extension/src/popup.ts`（`renderTabs` ~L118-155、生词本 ~L156-200、首测 ~L201-320、估计 ~L360-362）、`extension/src/popupNotebook.ts`、`extension/popup.css:26`、`extension/popup.html` |
 | 部署 seam | `extension/manifest.json`（`action.default_popup = "popup.html"`）→ `build.mjs`（`popup.ts` → `dist/popup.js`；`popup.html` / `popup.css` 直接拷贝） |
-| 状态 | 待用户明确「开始开发」授权 |
+| 状态 | IMPLEMENTATION_STATUS = ACCEPTED_AND_INTEGRATED<br>ACCEPTED_TIP = af5cd30217c01a94d334915342c80019bbc56f96<br>INTEGRATED_IN = 5cea02e286a852c8407fc2cafefbc389236bf016 |
 
 ---
 

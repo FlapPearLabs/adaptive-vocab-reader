@@ -11,7 +11,7 @@
 | 上游 | 集成规格 §6 / §7（U-14 / U-27）；`DEC-3 = CHINESE_FIRST` |
 | 主要文件 | `extension/src/content/pageScanner.ts`（`showSelectionAction` ~L150-171、`mouseup` ~L173-189、`click` ~L191-199、`selectionchange` ~L201-203）、`extension/src/content/annotator.ts`（`.avr-selection-action` 样式块） |
 | 部署 seam | `extension/manifest.json`（`content_scripts.js = ["content.js"]`）→ `build.mjs`（`content/index.ts` → `dist/content.js`）→ 真实 Chrome 加载 `dist/` |
-| 状态 | 待用户明确「开始开发」授权 |
+| 状态 | IMPLEMENTATION_STATUS = ACCEPTED_AND_INTEGRATED<br>ACCEPTED_TIP = db461e422084ea144fc31cec4d80e8740b5dc182<br>INTEGRATED_IN = 5cea02e286a852c8407fc2cafefbc389236bf016 |
 
 > **2026-09-10 DAG 复审：`T-VUX-1 → T-VUX-3` 边已删除。**
 > 原 rationale 是「共用 `annotator.ts` 注入样式块」+「几何体系负向断言的可判定性」——**二者都不是语义依赖**：
