@@ -6,8 +6,10 @@
 | 批次 | `2026-09-10-v0.1-ux-delta` |
 | 覆盖 Delta | **D-2** / **D-3** |
 | Blockers | **`T-VUX-1`**（浮层需渲染 T-VUX-1 定义的 `释义暂不可用` 兜底文案与 `METADATA_RESOLUTION_FAILURE` 术语；本票**只消费、不重新定义**） |
+| Base | 已验收的 `T-VUX-1` HEAD |
 | 上游 | 集成规格 §6 / §7；`DEC-3 = CHINESE_FIRST` |
 | 主要文件 | `extension/src/content/annotator.ts`（操作菜单 ~L200-260、几何 seam `calculateTooltipPosition` L154 / `positionTooltip` L184） |
+| 部署 seam | `extension/manifest.json`（`content_scripts.js = ["content.js"]`）→ `build.mjs`（`content/index.ts` → `dist/content.js`）→ 真实 Chrome 加载 `dist/` |
 | 状态 | 待用户明确「开始开发」授权 |
 
 ---
@@ -64,7 +66,7 @@
 | AC-4 | **定位逻辑复用 `calculateTooltipPosition`**：代码检索中浮层定位调用点唯一指向该 seam（或经本票扩展的同一 seam），无第二套几何实现 |
 | AC-5 | `Esc` 关闭浮层；关闭后 `WordState` 未变化 |
 | AC-6 | 外部点击关闭；关闭后 `WordState` 未变化 |
-| AC-7 | 元数据缺失时浮层显示 `释义暂不可用`，**零 `WordState` 写入** |
+| AC-7 | 元数据缺失时浮层显示 `释义暂不可用`，**零 `WordState` 写入**（夹具来源见 §6.0） |
 | AC-8 | 悬停仍只出轻提示、不弹浮层、不改状态（P-4 保持） |
 | AC-9 | 未收录词点击仍不弹浮层、零持久化（P-6 不回归） |
 | AC-10 | 浮层打开/关闭不产生布局位移（`layoutShiftScore` 仍 0） |
@@ -82,18 +84,31 @@
 
 ## 6. 测试要求
 
+### 6.0 元数据失败路径夹具来源（**必须遵守**）
+
+E2E 词包是**真实的** ECDICT 派生资产，**不存在**「`translation` 缺失」的自然词条。AC-7 的失败路径**只能**经以下之一构造：
+
+- **A. E2E fixture 页面自造**：在 E2E 生成的测试页中注入人工构造的、元数据缺失的词条场景；
+- **B. 纯 DOM 单元测试**：以手工 `DictEntry`（缺 `translation`）验证浮层文案。
+
+**禁止**依赖真实词包中伪造或改写的数据；**禁止**为使夹具成立而修改 `data/` 或数据构建脚本。
+
+### 6.1 测试项
+
 - **单元测试**：
   - 复用既有 `calculateTooltipPosition` 断言（上方/下翻/夹取）并补充浮层尺寸入参后的断言；
   - Esc 关闭：`keydown` → 浮层隐藏且无状态写入；
   - 元数据缺失 fixture → 浮层文案含 `释义暂不可用`。
 - **回归**：vitest 283 条全绿；Python data tests 12 条全绿。
-- **E2E**：AC-1~AC-10 各至少一条断言；既有 AC-10（未收录）与 T-VUX-1 新增断言不得放宽。
+- **E2E**：AC-1~AC-10 各至少一条断言；既有未收录词断言与 T-VUX-1 新增断言不得放宽。
 
 ## 7. Chrome 运行时验证
 
 ```bash
 npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 ```
+
+**须经 `dist/` 真实产物在 Chrome 中验证**（几何类验收不得只验 TS 单测）。
 
 真实 Chrome 加载构建产物后人工确认：
 
@@ -108,6 +123,7 @@ npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 - `extension/src/content/annotator.ts`（浮层 DOM/样式/事件、`calculateTooltipPosition` 可能的**签名扩展**）
 - `extension/src/content/annotator.test.ts`
 - `e2e-verify.cjs`
+- `extension/manifest.json` / `build.mjs`（**仅当**确实需要新增注入资源或打包入口时；属交付 seam，`AGENTS.md` §4.1-12）
 
 **禁止触碰**：`types.ts`（字段契约不变）、`storage.ts`、`worker/`、`strategy/`、`pageScanner.ts`（选区逻辑属 T-VUX-3）、`popup*`、`docs/`、`RULES.md`。
 
@@ -117,4 +133,4 @@ npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 
 ## 10. 完成判据
 
-`typecheck` exit 0 · `npm test` ≥283 passed · Python 12 passed · build 成功 · `E2E ALL PASS` · AC-1~AC-10 全绿 · §5 负向断言全绿 · **几何 seam 唯一性经检索确认**。
+`typecheck` exit 0 · `npm test` ≥283 passed · Python 12 passed · build 成功 · `E2E ALL PASS` · AC-1~AC-10 全绿 · §5 负向断言全绿 · **几何 seam 唯一性经检索确认** · **几何类 AC 经 `dist/` 真实产物在 Chrome 中确认**。

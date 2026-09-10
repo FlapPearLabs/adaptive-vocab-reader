@@ -5,9 +5,11 @@
 | Ticket ID | `T-VUX-4` |
 | 批次 | `2026-09-10-v0.1-ux-delta` |
 | 覆盖 Delta | **D-8** / **D-9** / **D-10** |
-| Blockers | — |
+| Blockers | —（popup 面与 content 面零交集，无验收依赖） |
+| Base | 已验收的 `T-VUX-3` HEAD（串行顺序；无验收依赖） |
 | 上游 | 集成规格 §5.7 / §7；`DEC-2 = DEFER_SETTINGS_FROM_V0_1`；`DEC-3 = CHINESE_FIRST`；`DEC-4 = DEFER_THIS_PAGE_FROM_V0_1` |
 | 主要文件 | `extension/src/popup.ts`（`renderTabs` ~L118-155、生词本 ~L156-200、首测 ~L201-320、估计 ~L360-362）、`extension/src/popupNotebook.ts`、`extension/popup.css:26`、`extension/popup.html` |
+| 部署 seam | `extension/manifest.json`（`action.default_popup = "popup.html"`）→ `build.mjs`（`popup.ts` → `dist/popup.js`；`popup.html` / `popup.css` 直接拷贝） |
 | 状态 | 待用户明确「开始开发」授权 |
 
 ---
@@ -20,7 +22,7 @@
 
 | # | 已验证事实 | 证据位置 |
 |---|---|---|
-| P-1 | Popup 两个页签：测评（`main`）/ 生词本（`notebook`） | `popup.ts:137-155` |
+| P-1 | Popup 两个页签：测评（`main`）/ 生词本（`notebook`） | `popup.ts:137-155`。**当前已无 Settings、已无本页**，故 D-8 主要是宽度 + 标签命名，而非移除页签 |
 | P-2 | 首测 UI 绑定仓库 `QuizQuestion`：目标词 + 四个中文候选项 + **独立**「不确定」按钮 + `测评中 X / 50` 进度 | `popup.ts:234`、`popup.ts:255-264` |
 | P-3 | 首测完成态：明确完成确认 + 答对/答错/不确定统计 | `popup.ts:294` |
 | P-4 | 每日轮：`进行中 X / Y`（首测与每日校准为**两个独立领域流程**） | `popup.ts:400`、`RULES.md` |
@@ -57,7 +59,7 @@
 
 | AC | 断言 |
 |---|---|
-| AC-1 | popup 宽度计算值为 `320px` |
+| AC-1 | popup 宽度计算值为 `320px`（**须经 `dist/popup.css` 真实产物确认**，不得只断言源码字符串） |
 | AC-2 | 页签**恰好两个**：`生词本`、`水平测评`；**无** Settings、**无** 本页/This Page |
 | AC-3 | 代码中无 settings 持久化键、无空壳/占位 Settings 页签痕迹 |
 | AC-4 | 首测 UI 仍渲染 `QuizQuestion` 四要素（目标词 / 候选项 / 独立不确定 / `current/total`）（P-2 不回归） |
@@ -86,12 +88,15 @@
 - **单元测试**：`selectNotebookEntries` 的过滤语义不回归（新增搜索筛选**只影响展示**，数据源函数语义不变则复用既有断言）；空状态渲染分支。
 - **回归**：vitest 283 条全绿；Python 12 条全绿。
 - **E2E**：AC-1~AC-11 各至少一条断言；首测/每日/估计既有断言不得放宽。
+- **既有 E2E 依赖的 selector 稳定性**：`e2e-verify.cjs:1269/1300/1340` 使用 `.popup-tab:not(.notebook-tab)` 定位测评页签。本票若调整页签 DOM 结构或类名，**必须同步该 selector**，否则既有断言会静默失效。
 
 ## 7. Chrome 运行时验证
 
 ```bash
 npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 ```
+
+**须经 `dist/` 真实产物在 Chrome 中验证。**
 
 真实 Chrome 加载构建产物后人工确认：
 
@@ -107,7 +112,7 @@ npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 - `extension/src/popup.ts`、`extension/src/popupNotebook.ts`
 - `extension/popup.html`、`extension/popup.css`
 - 对应 popup 测试文件
-- `e2e-verify.cjs`
+- `e2e-verify.cjs`（新增断言；若页签 selector 变化须同步更新）
 
 **禁止触碰**：`types.ts`（测评契约不变）、`strategy/`、`worker/`、`storage.ts`（不新增 settings 键）、`content/`、`docs/`、`RULES.md`。
 

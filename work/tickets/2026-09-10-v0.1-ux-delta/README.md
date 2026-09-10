@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | `T-VUX-1` | Reading Presentation Integrity | [`01-reading-presentation-integrity.md`](01-reading-presentation-integrity.md) | D-1 / D-4 / D-5 / D-6 | — |
 | `T-VUX-2` | Word Inspection Popover | [`02-word-inspection-popover.md`](02-word-inspection-popover.md) | D-2 / D-3 | `T-VUX-1` |
-| `T-VUX-3` | Selection Recovery Pill | [`03-selection-recovery-pill.md`](03-selection-recovery-pill.md) | D-7 | — |
+| `T-VUX-3` | Selection Recovery Pill | [`03-selection-recovery-pill.md`](03-selection-recovery-pill.md) | D-7 | `T-VUX-1` |
 | `T-VUX-4` | Popup V0.1 Alignment | [`04-popup-v0-1-alignment.md`](04-popup-v0-1-alignment.md) | D-8 / D-9 / D-10 | — |
 
 非产品工具候选（独立，不属本批执行序列）：[`SPIKE-CHROME-DEVPROFILE.md`](SPIKE-CHROME-DEVPROFILE.md)
@@ -34,23 +34,26 @@
                  │   T-VUX-1    │  Reading Presentation Integrity
                  │ D-1/4/5/6    │  (content 注入样式 + tooltip 兜底 + 领域术语)
                  └──────┬───────┘
-                        │ blocker（T-VUX-2 的浮层必须渲染 T-VUX-1 定义的
-                        │          「释义暂不可用」兜底文案）
-                        ▼
-                 ┌──────────────┐
-                 │   T-VUX-2    │  Word Inspection Popover
-                 │   D-2 / D-3  │  (复用 calculateTooltipPosition)
-                 └──────────────┘
+                        │
+          blocker（两条语义边，理由见下）
+                        │
+        ┌───────────────┴───────────────┐
+        ▼                               ▼
+ ┌──────────────┐               ┌──────────────┐
+ │   T-VUX-2    │               │   T-VUX-3    │
+ │   D-2 / D-3  │               │     D-7      │
+ │ (复用几何seam)│               │ (胶囊几何/文案)│
+ └──────────────┘               └──────────────┘
 
-        ┌──────────────┐                    ┌──────────────┐
-        │   T-VUX-3    │                    │   T-VUX-4    │
-        │     D-7      │                    │ D-8/9/10     │
-        │ (pageScanner)│                    │   (popup)    │
-        └──────────────┘                    └──────────────┘
-             无 blocker                          无 blocker
+        ┌──────────────┐
+        │   T-VUX-4    │   D-8/9/10   （popup，独立，无出边）
+        └──────────────┘
 ```
 
-**依赖只有一条真实边**：`T-VUX-2 ← T-VUX-1`。理由：T-VUX-2 的浮层验收包含「元数据缺失时显示 `释义暂不可用`」，该文案与 `METADATA_RESOLUTION_FAILURE` 术语由 T-VUX-1 定义。**T-VUX-2 只消费、不重新定义。**
+**两条语义依赖（真实验收依赖）**：
+
+1. **`T-VUX-2 ← T-VUX-1`**：`T-VUX-2` AC-7 断言浮层显示 `释义暂不可用`，该文案与 `METADATA_RESOLUTION_FAILURE` 术语由 `T-VUX-1` 定义。**T-VUX-2 只消费、不重新定义。**
+2. **`T-VUX-3 ← T-VUX-1`**（2026-09-10 实施前复审补正）：`T-VUX-3` 的 AC-1~AC-3 断言胶囊**几何**，而胶囊样式的宿主注入样式块与 `T-VUX-1` 的 D-4/D-6 位于 `annotator.ts` **同一注入 style 块**；且 `T-VUX-3` 负向断言 7「不得引入第二个与 `calculateTooltipPosition` 冲突的通用浮层几何体系」的可判定性，依赖 `T-VUX-1` 已落地的几何基线。故原「仅执行顺序」描述**不准确**，已升级为声明 blocker。
 
 ## 执行顺序（串行，显式 base commit）
 
@@ -60,9 +63,31 @@
 T-VUX-1  →  T-VUX-2  →  T-VUX-3  →  T-VUX-4
 ```
 
-- **T-VUX-1** base commit = 施工前 `git fetch` 确认的 `origin/main`（预期 `58a86f77b0358a96c04e7e07baa9900f33186813`）。
-- **T-VUX-2/3/4** base commit = 上一票合并后的 HEAD（逐票前进）。
-- T-VUX-3 / T-VUX-4 虽然**无 blocker**，仍排在 T-VUX-1/2 之后：T-VUX-3 与 T-VUX-1 共用 `content` 注入样式块，串行顺序用于避免同文件冲突，**不是验收依赖**。
+### base commit 规则（2026-09-10 实施前复审**修正**）
+
+> **先前错误规则**：`T-VUX-1` base = `origin/main`。
+> **为什么错**：`origin/main`（`58a86f77b0358a96c04e7e07baa9900f33186813`）**不含** `DEC-1`~`DEC-5`、仓库权威集成 UX 规格、冻结 UX 输入、本 ticket 批次与其校验报告。按原规则实施会从一个**缺少规格与票据**的基线开工。
+
+```text
+T-VUX-1 base = IMPLEMENTATION_BASE
+             = 最终验收的 pre-implementation governance HEAD
+             （即 governance/ux-spec-integration-2026-09-10 的验收 HEAD）
+T-VUX-2 base = 已验收的 T-VUX-1 HEAD
+T-VUX-3 base = 已验收的 T-VUX-1 HEAD（blocker 为 T-VUX-1）
+T-VUX-4 base = 已验收的 T-VUX-3 HEAD（串行顺序；无验收依赖）
+```
+
+**不使用「本分支 HEAD」这一表述**：本分支在外部审查期间仍会被追加提交；若审查通过，该追加提交本身即为 pre-implementation governance HEAD。
+
+该 base 必须自包含：最新上游 main + 冻结 UX 源 + 集成 UX 规格 + 最新前端设计权威 + 已闭合产品决策 + 当前 DAG 治理规则 + 完整 ticket 批次 + 当前校验报告。
+
+- **`T-VUX-3` / `T-VUX-4`** 排在 `T-VUX-1/2` 之后：`T-VUX-3` 与 `T-VUX-1` 共用 `annotator.ts` 注入样式块（互补区域，但同文件），`T-VUX-2/3/4` 共用 `e2e-verify.cjs`。**串行是合并卫生，不是验收依赖**（`T-VUX-3` 对 `T-VUX-1` 的验收依赖另见上）。
+
+### 浏览器部署 seam（每票通用，`AGENTS.md` §4.1-12）
+
+阅读面行为的真实交付路径是 **`extension/manifest.json`**（MV3：`content_scripts.js = ["content.js"]`、`all_frames: true`、`run_at: document_idle`）→ **`build.mjs`**（`extension/src/content/index.ts` 打包为 `dist/content.js`）→ 真实 Chrome 加载 `dist/`。popup 行为的交付路径为 `extension/popup.html` + `popup.css` + `built popup.js`。
+
+**仅通过 TypeScript 单测或源码阅读不得宣称「已验证」**：几何、注入、渲染类验收必须在**真实构建产物 + 真实 Chrome** 下确认。
 
 ## 批次级硬约束（每票继承）
 

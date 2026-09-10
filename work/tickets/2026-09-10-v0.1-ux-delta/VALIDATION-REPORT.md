@@ -101,3 +101,48 @@
 - 每张票都区分了「已验证行为需保留」与「新增 delta」。
 
 **本批次仍不授权开始开发**：`T-VUX-1~4` 的实施须用户另行明确授权（见 `RULES.md` 与 `AGENTS.md`）。
+
+---
+
+# 复审追加 — `PHASE-PREIMPL-REVIEW`（2026-09-10 实施前）
+
+> 上一轮 `PASS` **不足以**支撑开工：本阶段以**当前仓库权威**（含 `AGENTS.md` §4.1 批次校验规则）重新复审，发现并修复 5 处缺陷、补正 1 条真实依赖边、并复核拓扑。
+> 完整证据见 [`work/governance/2026-09-10-preimpl-review/REPORT.md`](../../governance/2026-09-10-preimpl-review/REPORT.md)。
+
+## R-1 修复的缺陷
+
+| # | 缺陷 | 触发证据 | 修复 |
+|---|---|---|---|
+| P-1 | 起始票 base 写为 `origin/main` | `origin/main@58a86f7` 不含 DEC-1~5 / 集成规格 / 冻结 UX / 本批次 | 改为 base = **pre-implementation governance HEAD**（README / `T-VUX-1` §8 / `T-VUX-2` §8）；明确**拒绝**「本分支 HEAD」表述 |
+| P-2 | 浏览器部署 seam 缺失 | `manifest.json` 声明 `content_scripts.js=["content.js"]`；`build.mjs` 打包 `content/index.ts → dist/content.js` | `T-VUX-1` / `T-VUX-2` / `T-VUX-3` / `T-VUX-4` 补列部署 seam；完成判据加「须经 `dist/` 真实产物在 Chrome 中确认」（`AGENTS.md` §4.1-12） |
+| P-3 | `T-VUX-3` AC-4 断言了 UX **未标 Normative** 的文案与图标 | 冻结 UX §4.3 胶囊视觉描述未被标记 Normative | AC-4 收窄为「简洁中文且无中英混排」；文案与图标交由实现者判断 |
+| P-4 | `T-VUX-1` AC-1 断言「悬停」覆盖不全 | tooltip 有两条显示路径（`pointerover`→`showTooltip`；`click`→`showUnresolvedTooltip`） | AC-1 改为按**行为**断言「所有 tooltip 显示路径」 |
+| P-5 | `T-VUX-3` 单测要求无可行 seam | `showSelectionAction` 为模块级局部函数；jsdom 环境未核验 | 补 §6.1 DOM seam 要求 + 行为级 Chrome 兜底；不得静默降级为「不测」 |
+
+## R-2 依赖与拓扑复算
+
+| 项 | 结果 |
+|---|---|
+| 语义依赖边 | `T-VUX-2 ← T-VUX-1`；**`T-VUX-3 ← T-VUX-1`（本轮新补正，原仅写作「执行顺序」）**；`T-VUX-4` 无入边 |
+| 顺序约束（非依赖） | `T-VUX-1`/`T-VUX-3` 共改 `annotator.ts` 注入 style 块；四票共改 `e2e-verify.cjs` |
+| 环 | 无 |
+| forward dependency | 无 |
+| 执行顺序 | `T-VUX-1 → T-VUX-2 → T-VUX-3 → T-VUX-4`（串行不变） |
+
+## R-3 新增记录
+
+1. **失败路径夹具来源**：D-1 / `T-VUX-2` AC-7 的「元数据缺失」在真实词包中**不存在自然词条**，夹具只能由 E2E fixture 页面自造或纯 DOM 单测提供；**禁止**依赖伪造的真实词包数据。已写入 `T-VUX-1` §6.0 与 `T-VUX-2` §6.0。
+2. **`T-VUX-4` 既有 selector 稳定性**：`e2e-verify.cjs:1269/1300/1340` 依赖 `.popup-tab:not(.notebook-tab)`；调整页签结构须同步。
+3. **`e2e-verify.cjs` `tempDir` 隔离性**为 P2 待核验项（串行执行下不发生），已写入 `T-VUX-1` §8.1 实施前检查。
+
+## R-4 复审判定
+
+| 门 | 结果 |
+|---|---|
+| 依赖正确性（含新增语义边） | **PASS** |
+| 独立可验收（4/4 拓扑模拟） | **PASS** |
+| 所有权唯一 | **PASS** |
+| source coverage 双向闭环 | **PASS**（10/10 D-*；0 ticket-only） |
+| 浏览器部署 seam | **PASS**（本轮补齐） |
+| 共享文件 / 集成风险 | **PASS**（已识别，串行消解，无伪依赖） |
+| **`TICKET_BATCH_VALIDATION`** | **PASS** |
