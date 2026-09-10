@@ -99,6 +99,71 @@ Skill 必须按任务需要显式调用，绝不能为了“已安装”而机�
 11. **数据依赖示例验证**：当验收中的具体词形、canonicalization 或其他 identity 示例依赖已批准且可用的数据源时，必须先验证其前提；具体 fixture 或示例不得覆盖或抵触上位通用合同。
 12. **浏览器部署 seam**：ticket 验收涉及 frame 注入、扩展入口或其他声明式浏览器部署行为时，必须从真实交付路径反推并列出拥有该行为的配置文件；不得把它误当成纯内容脚本内部逻辑。
 
+### 4.2 语义依赖 DAG、集成冲突与执行调度（三者必须分开建模）
+
+批次治理的三个模型**不得混为一谈**。历史上曾把「同文件改动」「共同里程碑」「偏好的合并顺序」「共用 E2E 文件」误当成依赖边，导致无谓的全局串行化。以下为强制口径。
+
+#### 4.2.1 语义依赖 DAG（`SEMANTIC_DEPENDENCY_DAG`）
+
+只包含**硬验收依赖**。边 `A → B` 成立的**唯一**条件：**没有 A 产出的已验收输出，B 就无法正确实现，或无法独立满足其至少一条 Acceptance Criteria**。
+
+判定必须走**反事实测试（counterfactual dependency test）**：
+
+> 假设 A **永远不实施**。
+> B 仍持有权威 base、`RULES.md`、现行 Spec、UX 设计与自己的 ticket。
+> B 能否实现并独立通过其**全部** Acceptance Criteria？
+
+- 答 **是** → `A → B` **不是**硬语义依赖，**必须删除该边**。
+- 答 **否** → 保留边，并必须在 ticket 中写明：**A 具体产出的哪个实现物**（API / 导出常量 / 类型 / 组件 / 运行时服务 / 必需 DOM 契约 / 编译期接口）是 B 所必需的。
+
+**不得**仅为「避免重复一个很短的展示字符串」而制造依赖；共享常量属集成事项，除非存在真实架构 seam 与显式集成契约，否则不构成 DAG 边。
+
+若 B 所需的信息已存在于**上位权威**（`RULES.md` / 现行 Spec / 冻结或集成后的 UX 文档），则 A 并未「定义」它——**A 与 B 各自消费同一权威契约**，二者之间无边。
+
+#### 4.2.2 集成冲突图（`INTEGRATION_CONFLICT_MAP`）
+
+记录以下**非语义**关系，供集成阶段使用：
+
+- 同文件重叠；同符号重叠；同一 CSS 块 / 注入样式模板；`extension/manifest.json` 与 `build.mjs` 的构建入口重叠；共用 E2E harness（含阶段注册表、失败定位表等集中式字面量）；其他可能的文本合并冲突。
+
+冲突风险按 `NONE / LOW / MEDIUM / HIGH` 分级，并列出**具体文件与符号**。
+
+**这些关系一律不自动产生 DAG 边。** 集成冲突是**集成问题**，不是依赖问题。
+
+#### 4.2.3 执行调度器（`EXECUTION_SCHEDULER`）
+
+- 任一 ticket，只要其**硬语义 blockers 全部满足**，即为 `IMPLEMENTATION_ELIGIBLE`。
+- 多个 eligible ticket **可以**在**相互隔离的 worktree** 中**并发**实施。
+- 调度器**应当最大化安全有用的并行度**。**不得**把拓扑序当作强制的一次一张串行执行。
+- 并行 lane 的**共同起点**是 `AUTHORITATIVE_IMPLEMENTATION_BASE`（不可变权威实现基线）；**只有**真正的语义后继才从「已验收前驱 HEAD」起分支。
+- 追求目标为 `wall-clock throughput + failure isolation + correctness`，**不是**「零合并冲突」。
+
+#### 4.2.4 阻塞传播不变式（`BLOCK_PROPAGATION_RULE`）
+
+**`BLOCKED` 状态只沿 `HARD_SEMANTIC_BLOCKER` 边传播。**
+
+它**不**沿以下任何一项传播：共享文件；合并冲突风险；共用测试 harness；偏好的合并顺序；共同里程碑；同一实施波次；评审者可用性。
+
+```text
+T-A BLOCKED
+T-B READY
+T-C READY
+```
+
+若 B / C 并不语义依赖 A，则 **B 与 C 仍为 `IMPLEMENTATION_ELIGIBLE`**，不得因 A 阻塞而停工。
+
+#### 4.2.5 集成 lane
+
+已验收的 ticket 分支在**独立的集成阶段**合并（例如 `integration/<批次>`），由集成 lane 负责：分支组合、文本冲突解决、共享文件对账、重复 helper/常量整合、**不改变产品范围**的兼容性修复，以及完整门禁复跑（typecheck / 单元 / 数据测试 / build / 真实 E2E）与集成后的 fresh 评审。
+
+- 集成 lane **不得**发明新的产品行为。
+- 若集成暴露出**真实的隐藏语义依赖**，须记录为治理发现（governance finding）以供后续 DAG 修正。
+- **仅凭出现合并冲突，不构成存在语义依赖的证据。**
+
+#### 4.2.6 批次文档要求
+
+批次 README **必须分别**列出：`SEMANTIC DAG`、`INTEGRATION CONFLICT MAP`、`PARALLEL EXECUTION PLAN`、`INTEGRATION ORDER`。拓扑模拟仍用于**校验依赖**，但**不得**被解释为强制的串行调度器。
+
 ## 5. 实现与文件安全
 
 - 核心架构、词典数据模型、个性化算法、权限与隐私、持久化迁移由主代理负责最终判断与验收。

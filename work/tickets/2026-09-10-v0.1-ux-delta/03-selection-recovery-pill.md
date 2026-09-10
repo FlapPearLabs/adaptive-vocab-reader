@@ -5,12 +5,21 @@
 | Ticket ID | `T-VUX-3` |
 | 批次 | `2026-09-10-v0.1-ux-delta` |
 | 覆盖 Delta | **D-7** |
-| Blockers | **`T-VUX-1`**（2026-09-10 实施前复审补正：胶囊样式的宿主注入样式块与 T-VUX-1 的 D-4/D-6 位于 `annotator.ts` **同一注入 style 块**；且下文负向断言 7 的可判定性依赖 T-VUX-1 已落地的几何基线。**原「无 blocker」表述不准确**） |
-| Base | 已验收的 `T-VUX-1` HEAD |
+| Blockers | **—（无硬语义 blocker；`T-VUX-1 → T-VUX-3` 边已于 2026-09-10 DAG 复审删除，理由见下）** |
+| Base | **`AUTHORITATIVE_IMPLEMENTATION_BASE`** ＝ pre-implementation governance HEAD（**与 `T-VUX-1/2/4` 同一不可变起点**） |
+| 并行 lane | `lane/T-VUX-3`，与其余三票同时起飞 |
 | 上游 | 集成规格 §6 / §7（U-14 / U-27）；`DEC-3 = CHINESE_FIRST` |
 | 主要文件 | `extension/src/content/pageScanner.ts`（`showSelectionAction` ~L150-171、`mouseup` ~L173-189、`click` ~L191-199、`selectionchange` ~L201-203）、`extension/src/content/annotator.ts`（`.avr-selection-action` 样式块） |
 | 部署 seam | `extension/manifest.json`（`content_scripts.js = ["content.js"]`）→ `build.mjs`（`content/index.ts` → `dist/content.js`）→ 真实 Chrome 加载 `dist/` |
 | 状态 | 待用户明确「开始开发」授权 |
+
+> **2026-09-10 DAG 复审：`T-VUX-1 → T-VUX-3` 边已删除。**
+> 原 rationale 是「共用 `annotator.ts` 注入样式块」+「几何体系负向断言的可判定性」——**二者都不是语义依赖**：
+> 1. 本票不消费 `T-VUX-1` 产出的任何实现物（无 API / 常量 / 类型 / 组件 / 服务 / DOM 契约 / 编译期接口需求）；
+> 2. 本票的胶囊定位**是 ticket-local 的**，既有样式与函数都在 base 中已存在，可独立实现；
+> 3. 共用样式模板属 `SOFT_INTEGRATION_CONFLICT`，由集成 lane 对账。
+>
+> **反事实测试**：假设 `T-VUX-1` 永不实施，本票仍持有权威 base 与 `RULES.md` / 集成规格 / 冻结 UX，能否实现并通过 AC-1~AC-10？→ **能**。故无边。
 
 ---
 
@@ -62,7 +71,9 @@
 4. 不得中英混排。
 5. 不得新增持久化 schema 或设置项。
 6. 不得改变写入语义（`source=manual`，不写 `AssessmentEvidence`）。
-7. 不得引入第二个与 `calculateTooltipPosition` 冲突的通用浮层几何体系（若复用则必须调用既有 seam）。
+7. **不得新建通用浮层几何框架**：本票只允许在 `showSelectionAction` 内实现**胶囊局部**的定位计算（居中于选区上方 / 上方不足下移 / 左右夹取）。禁止把该逻辑抽象为供 tooltip / 浮层 / 胶囊**共用**的通用几何工具，禁止复制 `calculateTooltipPosition` 的函数体去另立**第二套通用几何体系**。
+   - **允许但非必需**：实现时就地调用既有 `calculateTooltipPosition`（若这样做更简单）。
+   - **明确否定**：本条**不得**被解释为「胶囊定位依赖 `T-VUX-1` 完成」或「须等待几何基线就绪」。既有 `calculateTooltipPosition` 与 `.avr-selection-action` 样式**在 base 中已存在**，本票可独立实现。约束的对象是**通用框架化**，不是**局部定位**。
 
 ## 6. 测试要求
 
@@ -100,6 +111,13 @@ npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 - `extension/manifest.json` / `build.mjs`（**仅当**确实需要新增注入资源或打包入口时；属交付 seam，`AGENTS.md` §4.1-12）
 
 **禁止触碰**：`normalizedSelectedWord()`、选区事件绑定、`types.ts`、`storage.ts`、`worker/`、`popup*`、`docs/`、`RULES.md`。
+
+### 8.1 集成冲突提示（**非依赖**）
+
+- `annotator.ts`：本票只落在 `.avr-selection-action`（`annotator.ts:119-130`），与 `T-VUX-1`（`.avr-word` L56 起）及 `T-VUX-2`（`.avr-action-menu` L102-118）位于**同一注入样式模板字面量**（`annotator.ts:54-133`）的**不同 selector 区块**。属 `SOFT_INTEGRATION_CONFLICT`（同块相邻区域），**非依赖**。
+- `e2e-verify.cjs`：四票共享，含集中式 `FAILURE_TABLE` 注册表（`e2e-verify.cjs:28-43`）。
+
+处理方式：各自只改**自己的 selector 区块**；合并冲突由集成 lane 对账。**不得**为规避冲突而等待兄弟票。
 
 ## 9. 安全与隐私边界
 

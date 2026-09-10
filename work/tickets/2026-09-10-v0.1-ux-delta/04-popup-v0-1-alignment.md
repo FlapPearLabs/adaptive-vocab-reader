@@ -5,8 +5,9 @@
 | Ticket ID | `T-VUX-4` |
 | 批次 | `2026-09-10-v0.1-ux-delta` |
 | 覆盖 Delta | **D-8** / **D-9** / **D-10** |
-| Blockers | —（popup 面与 content 面零交集，无验收依赖） |
-| Base | 已验收的 `T-VUX-3` HEAD（串行顺序；无验收依赖） |
+| Blockers | **—（无硬语义 blocker；保持）** |
+| Base | **`AUTHORITATIVE_IMPLEMENTATION_BASE`** ＝ pre-implementation governance HEAD（**与 `T-VUX-1/2/3` 同一不可变起点**；**不**从兄弟票 HEAD 起分支） |
+| 并行 lane | `lane/T-VUX-4`，与其余三票同时起飞 |
 | 上游 | 集成规格 §5.7 / §7；`DEC-2 = DEFER_SETTINGS_FROM_V0_1`；`DEC-3 = CHINESE_FIRST`；`DEC-4 = DEFER_THIS_PAGE_FROM_V0_1` |
 | 主要文件 | `extension/src/popup.ts`（`renderTabs` ~L118-155、生词本 ~L156-200、首测 ~L201-320、估计 ~L360-362）、`extension/src/popupNotebook.ts`、`extension/popup.css:26`、`extension/popup.html` |
 | 部署 seam | `extension/manifest.json`（`action.default_popup = "popup.html"`）→ `build.mjs`（`popup.ts` → `dist/popup.js`；`popup.html` / `popup.css` 直接拷贝） |
@@ -115,6 +116,12 @@ npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 - `e2e-verify.cjs`（新增断言；若页签 selector 变化须同步更新）
 
 **禁止触碰**：`types.ts`（测评契约不变）、`strategy/`、`worker/`、`storage.ts`（不新增 settings 键）、`content/`、`docs/`、`RULES.md`。
+
+### 8.1 集成冲突提示（**非依赖**）
+
+- 与 `T-VUX-1/2/3` **文件不相交**（本票只动 popup 三件套 + 其测试）；`e2e-verify.cjs` 为四票共享面。
+- **只读的 base 依赖**：`popup.ts:29` 与 `popupNotebook.ts:1` 从 `extension/src/content/dictionary.ts` 导入字典加载器与 `Dictionary` 类型。该模块**不由任何 T-VUX 票修改**（对三票均为 forbidden），因此**不产生冲突**，仅登记为共享 base 面。
+- E2E 既有 selector 依赖：`e2e-verify.cjs:1269/1300/1340` 使用 `.popup-tab:not(.notebook-tab)`；本票若调整页签结构须同步，否则既有断言会静默失效。
 
 ## 9. 安全与隐私边界
 

@@ -146,3 +146,68 @@
 | 浏览器部署 seam | **PASS**（本轮补齐） |
 | 共享文件 / 集成风险 | **PASS**（已识别，串行消解，无伪依赖） |
 | **`TICKET_BATCH_VALIDATION`** | **PASS** |
+
+---
+
+# 复审追加二 — `PHASE-DAG-REPAIR`（2026-09-10，依赖语义纠正）
+
+> 外部实施前评审指出：上一轮仍**混淆了语义依赖 / 集成冲突 / 执行调度**，把「共用注入样式块」「共用 E2E 文件」「偏好的合并顺序」当成了依赖边。
+> 本轮按 `AGENTS.md` §4.2 的严格定义重做，正式**删除两条被误判的边**，并把三个模型拆开建模。
+> 完整报告见 [`work/governance/2026-09-10-dag-repair/REPORT.md`](../../governance/2026-09-10-dag-repair/REPORT.md)。
+
+## S-1 依赖语义的定义（`HARD_SEMANTIC_BLOCKER`）
+
+边 `A → B` 成立的**唯一**条件：没有 A 的**已验收输出**，B 无法正确实现或无法独立满足其**至少一条** AC。判定走**反事实测试**。
+
+**`BLOCKED` 只沿该边传播**，不沿共享文件 / 合并冲突 / 共用测试 harness / 偏好合并顺序 / 共同里程碑 / 同一波次 / 评审者可用性传播。
+
+## S-2 逐边审计
+
+| 边 | 上一版判定 | 反事实结果 | 本轮判定 |
+|---|---|---|---|
+| `T-VUX-1 → T-VUX-2` | 语义依赖（理由：浮层需 T-VUX-1「定义」`释义暂不可用`） | **能独立通过** —— 该文案与元数据失败正交性来自**上位权威**（冻结 UX §2.1 行 87 / §7.1 行 233；集成规格 U-18/U-42/D-1；`RULES.md` DEC-3），T-VUX-1 并未「定义」它；T-VUX-2 不需要 T-VUX-1 的任何实现物（无 API/常量/类型/组件/服务/DOM 契约/接口需求） | **删除** |
+| `T-VUX-1 → T-VUX-3` | 语义依赖（理由：共用注入样式块 + 几何断言可判定性） | **能独立通过** —— 胶囊局部定位可在 base 既有 `.avr-selection-action` 样式与函数上独立实现；负向断言 7 已改写为「禁止通用框架化」，不再隐含对 T-VUX-1 的等待 | **删除** |
+| `T-VUX-2 → T-VUX-3` | — | 能（互不引用） | 无边 |
+| `T-VUX-* → T-VUX-4` | — | 能（popup 只只读消费 base 的 `content/dictionary.ts`，四票均禁改） | 无边 |
+
+**`SEMANTIC_DEPENDENCY_DAG = ∅`** → 四票同时 `IMPLEMENTATION_ELIGIBLE`，并发度 **4**。
+
+## S-3 集成冲突图（**非依赖**）
+
+| 共享面 | 具体位置 | 票 | 风险 |
+|---|---|---|---|
+| `annotator.ts` 注入样式模板字面量 | `annotator.ts:54-133`（T1: L56/62/68/74/82/89；T2: L102/111；T3: L119） | 1/2/3 | **HIGH** |
+| `annotator.ts` 行为代码 | `installDelegatedHandlers` L228+、`pointerover` L271+、`showTooltip` L271-281、行内释义 L360-385 | 1/2 | **MEDIUM** |
+| `annotator.ts` `calculateTooltipPosition` | L154（调用点 L184） | 2/3（**均无义务修改**） | **LOW** |
+| `pageScanner.ts` | `showSelectionAction` L150-171 | 3（独占） | **NONE** |
+| popup 三件套 | 全部 | 4（独占） | **NONE** |
+| `e2e-verify.cjs`（2262 行） | 全文；集中式 `FAILURE_TABLE` L28-43 | 1/2/3/4 | **HIGH** |
+| `manifest.json` / `build.mjs` | 条件性 | 1/2/3 | **LOW** |
+| `content/dictionary.ts` | `popup.ts:29`、`popupNotebook.ts:1` 只读导入 | 4（消费） | **NONE** |
+
+**HIGH 冲突风险 ≠ 语义依赖**；不产生任何 DAG 边。
+
+## S-4 拓扑与调度复核
+
+| 项 | 结果 |
+|---|---|
+| 依赖环 | 无（DAG 为空） |
+| forward dependency | 无 |
+| 隐藏 sibling 依赖 | 无（已逐票反事实验证） |
+| forward acceptance 依赖 | 无 |
+| 同权行为 | 无（各自 selector 区块 / 各自文件） |
+| **`TICKET_BATCH_VALIDATION`** | **PASS** |
+
+**调度器**：SERIAL（并发 1）不采用；CONSERVATIVE PARALLEL 与 MAXIMUM SAFE PARALLEL 在本例等价（DAG 为空，无硬后继需等待）→ 采用 **MAXIMUM SAFE PARALLEL，并发 4**。
+
+**拓扑模拟仍有效**，但**不再被解释为强制串行调度器**。
+
+## S-5 本轮修复的治理缺陷
+
+| # | 缺陷 | 修复 |
+|---|---|---|
+| S-5-1 | 批次 README 声称「项目约定 ticket 串行执行」 | **该约定在仓库权威中不存在**（`AGENTS.md` 唯一「串行」指「一个串行**任务**用一条 `review/` 分支」，属分支卫生）→ 已删除该说法，改为四个独立模型 |
+| S-5-2 | `T-VUX-2` / `T-VUX-3` 被错误声明 blocker | 删除两条边，票内注明反事实结果与权威来源 |
+| S-5-3 | `T-VUX-3` 负向断言 7 可被读作「依赖 T-VUX-1 几何基线」 | 改写为「禁止通用框架化」，并显式否定「依赖 T-VUX-1 / 须等待几何基线」的解读 |
+| S-5-4 | `T-VUX-2/3/4` base 写成「前驱票 HEAD」 | 统一改为同一 `AUTHORITATIVE_IMPLEMENTATION_BASE` |
+| S-5-5 | `AGENTS.md` 无「语义依赖 vs 集成冲突 vs 调度」的区分规则 | 新增 §4.2（含 4.2.1~4.2.6） |

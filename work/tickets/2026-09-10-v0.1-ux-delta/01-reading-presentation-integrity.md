@@ -5,8 +5,9 @@
 | Ticket ID | `T-VUX-1` |
 | 批次 | `2026-09-10-v0.1-ux-delta` |
 | 覆盖 Delta | **D-1** / **D-4** / **D-5** / **D-6** |
-| Blockers | —（批次第一票） |
-| Base | **pre-implementation governance HEAD**（详见批次 README「base commit 规则」；**不是** `origin/main`） |
+| Blockers | **—（无硬语义 blocker）** |
+| Base | **`AUTHORITATIVE_IMPLEMENTATION_BASE`** ＝ pre-implementation governance HEAD（详见批次 README；**不是** `origin/main`，**也不是**任何 sibling ticket 的 HEAD） |
+| 并行 lane | `lane/T-VUX-1`，与 `T-VUX-2` / `T-VUX-3` / `T-VUX-4` **同时起飞**（语义 DAG 为空，四票互不依赖） |
 | 上游 | 集成规格 §6 / §7；`DEC-1 = AMBER_SYSTEM`；`DEC-3 = CHINESE_FIRST` |
 | 主要文件 | `extension/src/content/annotator.ts`（注入样式块 ~L55-130、`showTooltip` ~L268-286、行内释义 ~L360-385）、`extension/src/content/annotator.test.ts` |
 | 部署 seam | `extension/manifest.json`（`content_scripts.js = ["content.js"]`、`all_frames:true`、`document_idle`）→ `build.mjs`（`content/index.ts` → `dist/content.js`）→ 真实 Chrome 加载 `dist/` |

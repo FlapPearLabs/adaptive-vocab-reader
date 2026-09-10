@@ -5,9 +5,10 @@
 | Ticket ID | `T-VUX-2` |
 | 批次 | `2026-09-10-v0.1-ux-delta` |
 | 覆盖 Delta | **D-2** / **D-3** |
-| Blockers | **`T-VUX-1`**（浮层需渲染 T-VUX-1 定义的 `释义暂不可用` 兜底文案与 `METADATA_RESOLUTION_FAILURE` 术语；本票**只消费、不重新定义**） |
-| Base | 已验收的 `T-VUX-1` HEAD |
-| 上游 | 集成规格 §6 / §7；`DEC-3 = CHINESE_FIRST` |
+| Blockers | **—（无硬语义 blocker；`T-VUX-1 → T-VUX-2` 边已于 2026-09-10 DAG 复审删除，理由见下）** |
+| Base | **`AUTHORITATIVE_IMPLEMENTATION_BASE`** ＝ pre-implementation governance HEAD（**与 `T-VUX-1/3/4` 同一不可变起点**；不再是「T-VUX-1 的 HEAD」） |
+| 并行 lane | `lane/T-VUX-2`，与其余三票同时起飞 |
+| 上游 | 集成规格 §6 / §7；**冻结 UX §2.1 / §7.1（`释义暂不可用` 与元数据失败正交性的权威来源）**；`DEC-3 = CHINESE_FIRST` |
 | 主要文件 | `extension/src/content/annotator.ts`（操作菜单 ~L200-260、几何 seam `calculateTooltipPosition` L154 / `positionTooltip` L184） |
 | 部署 seam | `extension/manifest.json`（`content_scripts.js = ["content.js"]`）→ `build.mjs`（`content/index.ts` → `dist/content.js`）→ 真实 Chrome 加载 `dist/` |
 | 状态 | 待用户明确「开始开发」授权 |
@@ -49,7 +50,11 @@
 - 若现有 seam 参数不足以支撑浮层（例如需要浮层自身尺寸），**扩展既有 seam 的签名并在 `annotator.test.ts` 补断言**，而不是新建第二个几何函数。
 - 行为要求：上方优先、不足下翻、左右视口 12px 夹取、不遮挡目标词、滚动同步。
 
-**元数据失败**：`translation` 缺失时显示 T-VUX-1 定义的 `释义暂不可用`，**不得合成占位释义**。
+**元数据失败**：`translation` 缺失时显示 `释义暂不可用`，**不得合成占位释义**。
+
+> **权威来源（本票直接消费上位权威，不依赖任何 sibling ticket）**：`释义暂不可用` 与「元数据解析失败与词汇学习状态正交」由**上位权威**确定——冻结 `UX_SPEC_V1.2.1` §2.1（行 87）与 §7.1（行 233）、集成规格 U-18 / U-42 / D-1、`RULES.md` `DEC-3`。因此本票**无需等待** `T-VUX-1`：即便 `T-VUX-1` 永不实施，本票仍能实现并独立通过 AC-7。两者各自消费同一权威契约。
+
+**归属提醒**：本票负责**浮层**路径的兜底文案渲染；`T-VUX-1` 负责**轻提示 / tooltip** 路径。二者是**同一权威契约在两个展示面上的分别实现**，不是上下游依赖。
 
 ### D-3 · Esc 关闭
 
@@ -126,6 +131,12 @@ npm run build && AVR_E2E_NO_SANDBOX=1 npm run test:e2e
 - `extension/manifest.json` / `build.mjs`（**仅当**确实需要新增注入资源或打包入口时；属交付 seam，`AGENTS.md` §4.1-12）
 
 **禁止触碰**：`types.ts`（字段契约不变）、`storage.ts`、`worker/`、`strategy/`、`pageScanner.ts`（选区逻辑属 T-VUX-3）、`popup*`、`docs/`、`RULES.md`。
+
+### 8.1 集成冲突提示（**非依赖**）
+
+本票与 `T-VUX-1` / `T-VUX-3` 都修改 `annotator.ts` 的**同一个注入样式模板字面量**（`annotator.ts:54-133`）；本票主要落在 `.avr-action-menu`（L102-118）区间。四票均会修改 `e2e-verify.cjs`（含其集中式 `FAILURE_TABLE` 注册表，`e2e-verify.cjs:28-43`）。
+
+这些属 `SOFT_INTEGRATION_CONFLICT`，由集成 lane 对账，**不构成 blocker，也不需要等待兄弟票**。本票**只实现浮层自身**，不得顺手改动兄弟票拥有的 selector 区块。
 
 ## 9. 安全与隐私边界
 

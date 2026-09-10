@@ -1,5 +1,17 @@
 # PRE-IMPLEMENTATION REVIEW PACKET
 
+> **⚠️ 部分结论已被取代（2026-09-10 `PHASE-DAG-REPAIR`）**
+>
+> 本报告 §4.3 与 §7.2 曾把 `T-VUX-2 ← T-VUX-1` 与 **`T-VUX-3 ← T-VUX-1`** 判定为「语义依赖」。
+> 后续外部实施前评审指出该判定**混淆了语义依赖与集成冲突**，经反事实测试后：
+>
+> - **`T-VUX-1 → T-VUX-2`：已删除**
+> - **`T-VUX-1 → T-VUX-3`：已删除**（共用注入样式块属 `SOFT_INTEGRATION_CONFLICT`，非依赖）
+>
+> 现行权威结论：`SEMANTIC_DEPENDENCY_DAG = ∅`，四票并发（`AGENTS.md` §4.2）。
+> 见 [`work/governance/2026-09-10-dag-repair/REPORT.md`](../2026-09-10-dag-repair/REPORT.md)。
+> 本报告其余部分（远端真相、权威集合、前端对账、P-1~P-5 修复、夹具来源）**仍然有效**。
+
 **阶段**：`PHASE-PREIMPL-REVIEW` — 实施前治理复审
 **仓库**：`FlapPearLabs/adaptive-vocab-reader`
 **日期**：2026-09-10
