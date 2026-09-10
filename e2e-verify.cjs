@@ -42,6 +42,8 @@ const FAILURE_TABLE = {
   '6': { no: '补全', desc: '§21 持久化补全：两标签页同 wordKey 不同词形 manual/daily 更新后同步', ticket: 'T2+T4', rids: 'R-KEY-1/3, R-DLY-4' },
   // T-VUX-2（2026-09-10 v0.1-ux-delta 批次）：Word Inspection Popover（D-2）与 Esc 关闭（D-3）。
   'vux2': { no: 'UX-D2/D3', desc: 'Word Inspection Popover（D-2）+ Esc 关闭（D-3）：四要素浮层/几何 seam 12px 夹取/取消零写入/元数据兜底「释义暂不可用」/hover 与未收录保持/零布局位移', ticket: 'T-VUX-2', rids: '—' },
+  // T-VUX-1（2026-09-10 v0.1-ux-delta 批次）：呈现完整性。
+  'UX1': { no: 'UX1+', desc: 'T-VUX-1 呈现完整性：元数据缺失兜底（释义暂不可用）/宿主排版隔离/行内释义 {posPrefix}{translation}/琥珀下划线（DEC-1）', ticket: 'T-VUX-1', rids: 'DEC-1, DEC-3, UX_SPEC §2.1/§3.1-§3.3' },
 };
 
 /**
@@ -624,10 +626,79 @@ async function main() {
     if (!workerUx1) throw new Error('R-UX-S2 失败：未找到 Service Worker');
     const evidenceBeforeManual = (await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot)).assessmentEvidence;
 
+    // ============================================================
+    // T-VUX-1 · D-1 / AC-1 / AC-2 / AC-3：METADATA_RESOLUTION_FAILURE 兜底。
+    // 真实词包全元数据（ticket §6.0），缺失场景只能经页面 DOM 注入：移除既有
+    // resolved span 的展示元数据属性，等价于「元数据解析失败」的运行时输入。
+    // ============================================================
+    currentScenario = FAILURE_TABLE['UX1'];
+    // DEC-1 琥珀判定 helper：色相 20°~50°（琥珀族），显式排除红/灰系色相。
+    const assertAmberColor = (color, where) => {
+      const raw = String(color);
+      let r; let g; let b;
+      const rgba = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(raw);
+      const hex = /^#[0-9a-f]{6}$/i.exec(raw.trim());
+      if (rgba) { r = rgba[1] / 255; g = rgba[2] / 255; b = rgba[3] / 255; } else if (hex) {
+        const v = parseInt(raw.trim().slice(1), 16);
+        r = ((v >> 16) & 255) / 255; g = ((v >> 8) & 255) / 255; b = (v & 255) / 255;
+      } else {
+        throw new Error(`${where} 非可解析颜色（应为 rgb/rgba/hex）：${raw}`);
+      }
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      let hue = 0;
+      if (max !== min) {
+        const d = max - min;
+        hue = (max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60;
+      }
+      if (hue < 20 || hue > 50) {
+        throw new Error(`${where} 色相 ${hue.toFixed(1)}° 不属琥珀族（20°~50°），疑似红色/灰系残留：${raw}`);
+      }
+    };
+    const boundaryMetaBefore = await uxPage.$eval('#hint-boundary-word .avr-word', (el) => ({
+      phonetic: el.getAttribute('data-phonetic'),
+      pos: el.getAttribute('data-pos'),
+      tooltipTranslation: el.getAttribute('data-tooltip-translation'),
+    }));
+    if (!boundaryMetaBefore.phonetic || !boundaryMetaBefore.pos || !boundaryMetaBefore.tooltipTranslation) {
+      throw new Error(`T-VUX-1 前置失败：boundary 词应具全元数据（真实词包合同）：${JSON.stringify(boundaryMetaBefore)}`);
+    }
+    const metaFailSnapshotBefore = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    await uxPage.$eval('#hint-boundary-word .avr-word', (el) => {
+      el.removeAttribute('data-phonetic');
+      el.removeAttribute('data-pos');
+      el.removeAttribute('data-tooltip-translation');
+      el.removeAttribute('data-translation');
+      el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    });
+    await uxPage.waitForFunction(() => (document.querySelector('.avr-tooltip')?.textContent || '').includes('释义暂不可用'), { timeout: 5_000 });
+    const metaFailTooltip = await uxPage.evaluate(() => {
+      const tip = document.querySelector('.avr-tooltip');
+      return { lines: [...tip.children].map((row) => row.textContent || ''), text: tip.textContent || '' };
+    });
+    if (JSON.stringify(metaFailTooltip.lines) !== JSON.stringify([hintBoundaryWord, '释义暂不可用'])) {
+      throw new Error(`T-VUX-1/AC-1 失败：元数据缺失 tooltip 应为词头行+释义暂不可用（不得静默、不得合成占位释义）：${JSON.stringify(metaFailTooltip)}`);
+    }
+    if (metaFailTooltip.text.includes('当前词典未收录')) {
+      throw new Error('T-VUX-1/AC-1 失败：元数据失败路径不得显示未收录文案（两路径混淆）');
+    }
+    const metaFailSnapshotAfter = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
+    if (!isDeepStrictEqual(metaFailSnapshotAfter, metaFailSnapshotBefore)) {
+      throw new Error('T-VUX-1/AC-2 失败：元数据缺失 hover 产生了持久化写入');
+    }
+    const boundaryClassAfterMetaFail = await uxPage.$eval('#hint-boundary-word .avr-word', (el) => el.className);
+    if (boundaryClassAfterMetaFail !== 'avr-word') {
+      throw new Error(`T-VUX-1/AC-3 失败：元数据缺失改变展示决策（known/none 分支）：${boundaryClassAfterMetaFail}`);
+    }
+
     // T-UNR-3 / AC-10：未收录词只给明确响应，不显示菜单、不写入状态或证据。
     const unresolvedBefore = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     await uxPage.hover('#negative-unrecorded .avr-word[data-unresolved="true"]');
     await uxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.textContent === '当前词典未收录', { timeout: 5_000 });
+    // T-VUX-1/AC-10 负向补强：未收录路径文案不得混入元数据兜底文案（两路径不混淆）。
+    if ((await uxPage.$eval('.avr-tooltip', (tip) => tip.textContent || '')).includes('释义暂不可用')) {
+      throw new Error('T-VUX-1/AC-10 失败：未收录 tooltip 混入元数据兜底文案（释义暂不可用）');
+    }
     await uxPage.click('#negative-unrecorded .avr-word[data-unresolved="true"]');
     await wait(100);
     if (await uxPage.$$eval('.avr-action-menu', (menus) => menus.some((menu) => getComputedStyle(menu).display !== 'none'))) {
@@ -679,6 +750,15 @@ async function main() {
     if (hintDisplay.perf.hintThreshold !== hintThreshold || hintDisplay.perf.lightHintsPer100Words <= 0) {
       throw new Error(`AC-7 失败：T₀ 或灰线密度观测错误：${JSON.stringify(hintDisplay.perf)}`);
     }
+    // T-VUX-1/AC-8（light 分支）：淡琥珀点线（DEC-1）；断言中不含红色。
+    const lightDecoration = await uxPage.$eval('#hint-light-word .avr-word', (el) => {
+      const s = getComputedStyle(el);
+      return { color: s.textDecorationColor, style: s.textDecorationStyle };
+    });
+    if (lightDecoration.style !== 'dotted') {
+      throw new Error(`T-VUX-1/AC-8 失败：light 应为点线：${JSON.stringify(lightDecoration)}`);
+    }
+    assertAmberColor(lightDecoration.color, 'T-VUX-1/AC-8 light text-decoration-color');
     const hintSnapshotAfter = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     if (!isDeepStrictEqual(hintSnapshotAfter, hintSnapshotBefore)) {
       throw new Error('R-HINT-4/R-STATE-5 失败：候选判定写入了 storage');
@@ -694,6 +774,13 @@ async function main() {
     const calibrationSnapshot = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     if (!isDeepStrictEqual(calibrationSnapshot, hintSnapshotBefore)) {
       throw new Error('R-HINT-4/R-STATE-5 失败：校准 seam 写入了 storage');
+    }
+    // T-VUX-1/AC-9（P-5 保持）：text-decoration 下划线机制零布局位移。
+    // 断言页选 ux-calibration.html：纯初始标注（无 learning 行内释义），layoutShiftScore
+    // 的 0 必须是「真实观测零」（layoutShiftSupported=true），而非未观测的 0。
+    const calibrationPerf = JSON.parse(await calibrationPage.evaluate(() => document.documentElement.dataset.avrPerf || '{}'));
+    if (calibrationPerf.layoutShiftSupported !== true || calibrationPerf.layoutShiftScore !== 0) {
+      throw new Error(`T-VUX-1/AC-9 失败：P-5 零布局位移被破坏：${JSON.stringify({ layoutShiftScore: calibrationPerf.layoutShiftScore, layoutShiftSupported: calibrationPerf.layoutShiftSupported })}`);
     }
     await calibrationPage.close();
     console.log(`E2E HINT PASS: T0=${hintThreshold}, n=${effectiveRanks.length}, index=${Math.floor(effectiveRanks.length / 2)}(0-based upper-middle), light_per_100=${hintDisplay.perf.lightHintsPer100Words}, calibration_threshold=${Number.MAX_SAFE_INTEGER}, calibration_light=false`);
@@ -799,6 +886,39 @@ async function main() {
     }
     console.log(`E2E D7 PILL PASS: center_dx=${Math.abs(pillCenterX - selCenterX).toFixed(1)}, above=true, top_flip_bottom=${topGeo.pill.top >= topGeo.sel.bottom}, top_margin=${topGeo.pill.top.toFixed(1)}, left_margin=${leftEdgeGeo.pill.left.toFixed(1)}, right_margin=${(rightEdgeGeo.viewportWidth - rightEdgeGeo.pill.right).toFixed(1)}, text_han_only=true, pill_layout_shift=0`);
 
+    // T-VUX-1/AC-3（learning 分支）+ AC-1：移除 translation 元数据模拟元数据失败终态——
+    // 仍为琥珀实线，行内释义省略（::after 不得含释义文本）；hover 走兜底文案。
+    // 取数来源：hintLightWord 选自查询词典（queryDictionary），不在 1,000 词测评核心包
+    // （dictCore）中；运行时该词释义同样来自查询词典 entry.translation。
+    // queryDictionary entry 格式为 [phonetic, pos, translation, rank]，index 2 即 translation。
+    const hintLightTranslation = queryDictionary[hintLightWord][2];
+    const learningMetaFail = await uxPage.evaluate(() => {
+      const el = document.querySelector('#hint-light-word .avr-word');
+      if (!el) throw new Error('T-VUX-1 缺少 learning 目标');
+      el.removeAttribute('data-translation');
+      el.removeAttribute('data-tooltip-translation');
+      const s = getComputedStyle(el);
+      const after = getComputedStyle(el, '::after');
+      return {
+        cls: el.className,
+        decoStyle: s.textDecorationStyle,
+        decoColor: s.textDecorationColor,
+        afterContent: after.content,
+      };
+    });
+    if (!learningMetaFail.cls.includes('avr-strong-first') || learningMetaFail.decoStyle !== 'solid') {
+      throw new Error(`T-VUX-1/AC-3 失败：learning+元数据失败未保持实线强提示：${JSON.stringify(learningMetaFail)}`);
+    }
+    assertAmberColor(learningMetaFail.decoColor, 'T-VUX-1/AC-3 learning text-decoration-color');
+    if (String(learningMetaFail.afterContent).includes(hintLightTranslation)) {
+      throw new Error(`T-VUX-1/AC-3 失败：learning+元数据失败仍渲染行内释义 ::after：${JSON.stringify(learningMetaFail.afterContent)}`);
+    }
+    await uxPage.$eval('#hint-light-word .avr-word', (el) => el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    await uxPage.waitForFunction(() => (document.querySelector('.avr-tooltip')?.textContent || '').includes('释义暂不可用'), { timeout: 5_000 });
+    const learningFailTooltip = await uxPage.$eval('.avr-tooltip', (tip) => tip.textContent || '');
+    if (!learningFailTooltip.includes(hintLightWord) || !learningFailTooltip.includes('释义暂不可用')) {
+      throw new Error(`T-VUX-1/AC-1 失败：learning+元数据失败 hover 未显示词头行+兜底文案：${JSON.stringify(learningFailTooltip)}`);
+    }
     // T-SEL-5 / AC-9：真实拖选后的浏览器 click 不得抢先关闭浮条；包外 query identity 可写 learning。
     const realSelectionBefore = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     const evidenceBeforeRealSelection = realSelectionBefore.assessmentEvidence;
@@ -864,6 +984,61 @@ async function main() {
       throw new Error(`R-UX-T3 失败：learning 后续下划线悬停释义不可用：${JSON.stringify(strongTooltipText)}`);
     }
 
+    // ============================================================
+    // T-VUX-1 · D-5 / D-6 / AC-5 / AC-7 / AC-8（strong 分支）
+    // learning 首现行内释义 = {posPrefix}{translation}；重复仅下划线；实线琥珀。
+    // ============================================================
+    currentScenario = FAILURE_TABLE['UX1'];
+    const challengePos = dictCore.challenge[1];
+    const expectedChallengeGloss = `${challengePos} ${challengeTranslation}`;
+    const strongFirstProbe = await uxPage.evaluate(() => {
+      const el = document.querySelector('.avr-strong-first[data-word="challenge"]');
+      if (!el) throw new Error('T-VUX-1 缺少 strong-first 目标');
+      const s = getComputedStyle(el);
+      const after = getComputedStyle(el, '::after');
+      return {
+        dataTranslation: el.getAttribute('data-translation'),
+        content: after.content,
+        fontStyle: after.fontStyle,
+        userSelect: after.userSelect,
+        fontSize: after.fontSize,
+        lineHeight: after.lineHeight,
+        marginLeft: after.marginLeft,
+        decoStyle: s.textDecorationStyle,
+        decoColor: s.textDecorationColor,
+      };
+    });
+    // AC-5：{posPrefix}{translation}（pos 前缀来自真实 DictEntry.pos）
+    if (strongFirstProbe.dataTranslation !== expectedChallengeGloss) {
+      throw new Error(`T-VUX-1/AC-5 失败：行内释义 data-translation 应为 {posPrefix}{translation}：${JSON.stringify(strongFirstProbe.dataTranslation)} 期望 ${expectedChallengeGloss}`);
+    }
+    const strongFirstContent = String(strongFirstProbe.content).replace(/^"/, '').replace(/"$/, '');
+    if (strongFirstContent !== expectedChallengeGloss) {
+      throw new Error(`T-VUX-1/AC-5 失败：::after content 未渲染 {posPrefix}{translation}：${JSON.stringify(strongFirstProbe.content)} 期望 ${expectedChallengeGloss}`);
+    }
+    if (strongFirstProbe.fontStyle !== 'italic') throw new Error(`T-VUX-1/D-5 失败：行内释义应为斜体：${JSON.stringify(strongFirstProbe.fontStyle)}`);
+    if (strongFirstProbe.userSelect !== 'none') throw new Error(`T-VUX-1/D-5 失败：行内释义应 user-select:none：${JSON.stringify(strongFirstProbe.userSelect)}`);
+    const glossPx = Number.parseFloat(strongFirstProbe.fontSize);
+    if (!Number.isFinite(glossPx) || glossPx < 11 || glossPx > 12) {
+      throw new Error(`T-VUX-1/D-5 失败：行内释义字号应 11~12px：${JSON.stringify(strongFirstProbe.fontSize)}`);
+    }
+    // AC-7/P-4：重复出现仅下划线（.avr-strong 无 ::after 行内释义）
+    const strongRepeatProbe = await uxPage.evaluate(() => {
+      const el = [...document.querySelectorAll('.avr-strong[data-word="challenge"]')][0];
+      if (!el) throw new Error('T-VUX-1 缺少 strong 重复目标');
+      const s = getComputedStyle(el);
+      return { content: getComputedStyle(el, '::after').content, decoStyle: s.textDecorationStyle, decoColor: s.textDecorationColor };
+    });
+    if (strongRepeatProbe.content !== 'none') {
+      throw new Error(`T-VUX-1/AC-7 失败：learning 重复出现不得渲染行内释义 ::after：${JSON.stringify(strongRepeatProbe.content)}`);
+    }
+    // AC-8（strong 分支）：淡琥珀实线；amber 判定隐含非红
+    if (strongFirstProbe.decoStyle !== 'solid' || strongRepeatProbe.decoStyle !== 'solid') {
+      throw new Error(`T-VUX-1/AC-8 失败：learning 应为实线：first=${strongFirstProbe.decoStyle} repeat=${strongRepeatProbe.decoStyle}`);
+    }
+    assertAmberColor(strongFirstProbe.decoColor, 'T-VUX-1/AC-8 strong-first text-decoration-color');
+    assertAmberColor(strongRepeatProbe.decoColor, 'T-VUX-1/AC-8 strong text-decoration-color');
+
     // 首尾 Unicode 标点与混合大小写应整体命中；数字不是标点，不得被归一化删除。
     await selectElementText(uxPage, '#selection-punctuation');
     await uxPage.waitForSelector('.avr-selection-action[data-word="ability"]', { visible: true, timeout: 5_000 });
@@ -905,7 +1080,45 @@ async function main() {
     if (JSON.stringify(snapshotKeys) !== JSON.stringify(expectedSnapshotKeys)) {
       throw new Error(`R-UX-T4/S5 失败：快照出现新增字段：${JSON.stringify(snapshotKeys)}`);
     }
-    console.log('E2E UX1 PASS: R-UX-T1~T4=true, R-UX-S1~S5=true, abilities→ability=true, selection_text_persisted=false');
+
+    // ============================================================
+    // T-VUX-1 · AC-4（known 词行为不变 + 宿主排版隔离）
+    // known 全元数据词 hover 仍为四行 tooltip（D-1 不影响全元数据词）；
+    // 宿主注入 span{} 通用选择器（含 !important 最坏情形）不得污染注入词排版。
+    // ============================================================
+    currentScenario = FAILURE_TABLE['UX1'];
+    const [abilityPhoneticUx, abilityPosUx, abilityTranslationUx] = dictCore.ability;
+    await uxPage.$eval('#ability-word .avr-word', (el) => el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    await uxPage.waitForFunction(() => document.querySelector('.avr-tooltip')?.style.display === 'block', { timeout: 5_000 });
+    const knownWordTooltipLines = await uxPage.$$eval('.avr-tooltip > div', (rows) => rows.map((row) => row.textContent || ''));
+    if (JSON.stringify(knownWordTooltipLines) !== JSON.stringify(['abilities', abilityPhoneticUx, abilityPosUx, abilityTranslationUx])) {
+      throw new Error(`T-VUX-1/AC-4 失败：known 全元数据词 hover 四行 tooltip 被破坏：${JSON.stringify(knownWordTooltipLines)}`);
+    }
+    await uxPage.evaluate(() => {
+      const style = document.createElement('style');
+      style.id = 'avr-host-css-test';
+      style.textContent = 'span { font-family: "Comic Sans MS", cursive !important; font-size: 30px !important; color: rgb(255, 0, 255) !important; line-height: 3 !important; letter-spacing: 5px !important; }';
+      document.head.appendChild(style);
+    });
+    const hostCssProbe = await uxPage.evaluate(() => {
+      // 目标词必须直接位于 <p> 下（fixture 第二段 "challenge appears twice." 的
+      // challenge 无宿主 wrapper span）——否则宿主 span{} 会先污染中间层 wrapper，
+      // inherit 语义下注入词继承 wrapper 属正确行为，不构成「与正文不一致」。
+      const word = [...document.querySelectorAll('.avr-word[data-word="challenge"]')]
+        .find((el) => el.className === 'avr-word' && el.parentElement?.tagName === 'P');
+      if (!word) throw new Error('T-VUX-1/AC-4 缺少直接位于 p 下的 known 目标词');
+      const s = getComputedStyle(word);
+      const p = getComputedStyle(word.closest('p'));
+      const props = ['font-family', 'font-size', 'font-weight', 'color', 'line-height', 'letter-spacing'];
+      return Object.fromEntries(props.map((k) => [k, { word: s[k], prose: p[k] }]));
+    });
+    for (const [prop, value] of Object.entries(hostCssProbe)) {
+      if (value.word !== value.prose) {
+        throw new Error(`T-VUX-1/AC-4 失败：宿主 span 样式污染注入词排版（${prop}）：word=${value.word} prose=${value.prose}`);
+      }
+    }
+    await uxPage.evaluate(() => document.getElementById('avr-host-css-test')?.remove());
+    console.log('E2E UX1 PASS: R-UX-T1~T4=true, R-UX-S1~S5=true, abilities→ability=true, selection_text_persisted=false, T-VUX-1 AC-1~AC-10=true');
   } finally {
     if (browserUx1) browserUx1.disconnect();
     await killChrome(chromeUx1);
