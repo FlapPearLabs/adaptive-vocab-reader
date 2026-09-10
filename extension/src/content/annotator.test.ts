@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { annotateTextNode, calculateTooltipPosition, initAnnotator, resetAnnotatorState, updateWordDisplay, type WordAnnotation } from './annotator';
+import { ANNOTATOR_STYLES, annotateTextNode, calculateTooltipPosition, initAnnotator, METADATA_RESOLUTION_FAILURE_TEXT, resetAnnotatorState, updateWordDisplay, type WordAnnotation } from './annotator';
 import type { DisplayResult } from '../shared/types';
 
 function makeResult(overrides: Partial<DisplayResult> = {}): DisplayResult {
@@ -170,6 +170,8 @@ describe('annotateTextNode', () => {
 
     spans[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
     expect(document.querySelector('.avr-tooltip')?.textContent).toBe('当前词典未收录');
+    // D-1 负向：未收录路径（当前词典未收录）与元数据失败路径（释义暂不可用）不得混淆。
+    expect(document.querySelector('.avr-tooltip')?.textContent).not.toContain(METADATA_RESOLUTION_FAILURE_TEXT);
     spans[0]!.click();
     expect((document.querySelector('.avr-action-menu') as HTMLElement | null)?.style.display).not.toBe('flex');
     expect(actions).toEqual([]);
@@ -192,7 +194,8 @@ describe('annotateTextNode', () => {
     const { spans } = annotateTextNode(textNode, [ann], () => {});
 
     expect(spans[0]!.classList.contains('avr-strong-first')).toBe(true);
-    expect(spans[0]!.dataset.translation).toBe('【挑战】');
+    // D-5 契约：annotation 未提供 pos（data-pos 为空）→ 行内释义省略前缀，仅释义本体。
+    expect(spans[0]!.dataset.translation).toBe('挑战');
   });
 
   it('强提示重复出现不带行内中文（仅 avr-strong）', () => {
@@ -366,7 +369,8 @@ describe('updateWordDisplay', () => {
     span = document.querySelector<HTMLSpanElement>('.avr-word[data-word="hello"]');
     expect(span?.classList.contains('avr-light')).toBe(false);
     expect(span?.classList.contains('avr-strong-first')).toBe(true);
-    expect(span?.dataset.translation).toBe('【你好】');
+    // D-5 契约：该 span 标注时无 pos（data-pos 为空）→ 行内释义省略前缀，仅释义本体。
+    expect(span?.dataset.translation).toBe('你好');
   });
 
   it('只更新指定词的 span，不影响其他词', () => {
@@ -456,5 +460,229 @@ describe('updateWordDisplay', () => {
       expect(span.classList.contains('avr-strong-first')).toBe(false);
       expect(span.classList.contains('avr-strong')).toBe(true);
     }
+  });
+});
+
+// ============================================================
+// D-1 · METADATA_RESOLUTION_FAILURE 兜底（轻提示路径）
+// 领域术语：元数据解析失败不是词汇状态，与 known/learning/unknown 正交。
+// tooltip 在元数据缺失时显示固定兜底文案，不合成占位释义。
+// ============================================================
+describe('METADATA_RESOLUTION_FAILURE 兜底（D-1）', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetAnnotatorState();
+    initAnnotator();
+  });
+
+  it('兜底文案常量为「释义暂不可用」（DEC-3 中文优先）', () => {
+    expect(METADATA_RESOLUTION_FAILURE_TEXT).toBe('释义暂不可用');
+  });
+
+  it('元数据全缺失 → tooltip 显示词头行 + 释义暂不可用，不触发状态动作', () => {
+    const textNode = makeTextNode('Went home.');
+    const actions: Array<[string, 'known' | 'learning']> = [];
+    // 手工构造元数据缺失：phonetic / pos undefined，entry 缺 translation（null）
+    const ann = makeAnnotation(0, 4, { decision: 'none', translation: null });
+    const { spans } = annotateTextNode(textNode, [ann], (word, status) => actions.push([word, status]));
+
+    spans[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    const tip = document.querySelector('.avr-tooltip');
+    expect(tip).not.toBeNull();
+    expect(tip!.classList.contains('avr-tooltip')).toBe(true);
+    const lines = [...tip!.children].map((row) => row.textContent);
+    // 词头行仍显示 surfaceForm；兜底行固定文案；不合成音标/词性/占位释义
+    expect(lines).toEqual(['Went', '释义暂不可用']);
+    expect(tip!.textContent).toContain('释义暂不可用');
+    // 与未收录路径不得混淆
+    expect(tip!.textContent).not.toContain('当前词典未收录');
+    // 元数据失败不是词汇状态动作的入口
+    expect(actions).toEqual([]);
+    expect((document.querySelector('.avr-action-menu') as HTMLElement | null)?.style.display).not.toBe('flex');
+  });
+
+  it('部分元数据缺失 → 整体兜底（fail-closed），不显示残缺元数据', () => {
+    const textNode = makeTextNode('Hello there.');
+    const ann = {
+      ...makeAnnotation(0, 5, { decision: 'light', translation: '你好' as string | null }),
+      phonetic: 'partial-phonetic',
+      // pos 缺失 → 属于元数据失败
+    };
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
+
+    spans[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    const tip = document.querySelector('.avr-tooltip');
+    const lines = [...tip!.children].map((row) => row.textContent);
+    expect(lines).toEqual(['Hello', '释义暂不可用']);
+    // 不得只显示残缺的部分元数据（translation 有而 pos 缺时仍整体兜底）
+    expect(tip!.textContent).not.toContain('你好');
+    expect(tip!.textContent).not.toContain('partial-phonetic');
+  });
+
+  it('unresolved（未收录）路径优先于元数据兜底：仍显示 当前词典未收录', () => {
+    const textNode = makeTextNode('Unlisted token.');
+    const ann = { ...makeAnnotation(0, 8, { word: 'unlisted', decision: 'none', translation: null }), unresolved: true };
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
+
+    spans[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    expect(document.querySelector('.avr-tooltip')?.textContent).toBe('当前词典未收录');
+  });
+
+  it('translation 缺失时无行内释义属性（fail-closed，不得合成占位释义）', () => {
+    const textNode = makeTextNode('challenge');
+    const ann = { ...makeAnnotation(0, 9, { decision: 'strong', showInlineTranslation: true, translation: null }), pos: 'n.' };
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
+
+    expect(spans[0]!.classList.contains('avr-strong-first')).toBe(true);
+    expect(spans[0]!.hasAttribute('data-translation')).toBe(false);
+    expect(spans[0]!.hasAttribute('data-tooltip-translation')).toBe(false);
+  });
+});
+
+// ============================================================
+// D-5 · learning 行内释义格式：{posPrefix}{translation}
+// ============================================================
+describe('行内释义格式（D-5）', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetAnnotatorState();
+    initAnnotator();
+  });
+
+  it('annotateTextNode：pos 存在 → data-translation 为 "{pos} {translation}"（v. 去走 型）', () => {
+    const textNode = makeTextNode('Went home.');
+    const ann = { ...makeAnnotation(0, 4, { decision: 'strong', showInlineTranslation: true, translation: '去走' }), phonetic: "'went", pos: 'v.' };
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
+
+    expect(spans[0]!.dataset.pos).toBe('v.');
+    expect(spans[0]!.dataset.translation).toBe('v. 去走');
+  });
+
+  it('annotateTextNode：pos 缺失 → data-translation 仅释义，无前缀无前导空格', () => {
+    const textNode = makeTextNode('Went home.');
+    const ann = { ...makeAnnotation(0, 4, { decision: 'strong', showInlineTranslation: true, translation: '去走' }) };
+    const { spans } = annotateTextNode(textNode, [ann], () => {});
+
+    expect(spans[0]!.dataset.pos).toBe('');
+    expect(spans[0]!.dataset.translation).toBe('去走');
+  });
+
+  it('updateWordDisplay：span 已有 data-pos → 拼接 pos 前缀', () => {
+    const textNode = makeTextNode('challenge is here');
+    const ann = { ...makeAnnotation(0, 9, { word: 'challenge', surfaceForm: 'challenge', decision: 'light', translation: '挑战' }), pos: 'n.' };
+    annotateTextNode(textNode, [ann], () => {});
+
+    updateWordDisplay('challenge', 'strong', '挑战', true);
+    const span = document.querySelector<HTMLSpanElement>('.avr-word[data-word="challenge"]');
+    expect(span?.dataset.pos).toBe('n.');
+    expect(span?.dataset.translation).toBe('n. 挑战');
+  });
+
+  it('updateWordDisplay：span 无 data-pos → 仅释义（pos 缺失省略前缀，不得合成词性）', () => {
+    const textNode = makeTextNode('challenge is here');
+    const ann = makeAnnotation(0, 9, { word: 'challenge', surfaceForm: 'challenge', decision: 'light', translation: '挑战' });
+    annotateTextNode(textNode, [ann], () => {});
+
+    updateWordDisplay('challenge', 'strong', '挑战', true);
+    const span = document.querySelector<HTMLSpanElement>('.avr-word[data-word="challenge"]');
+    expect(span?.dataset.pos).toBe('');
+    expect(span?.dataset.translation).toBe('挑战');
+  });
+
+  it('updateWordDisplay：translation 为 null → 移除 data-translation（行内释义省略）', () => {
+    const textNode = makeTextNode('challenge is here');
+    const ann = { ...makeAnnotation(0, 9, { word: 'challenge', surfaceForm: 'challenge', decision: 'strong', showInlineTranslation: true, translation: '挑战' }), pos: 'n.' };
+    annotateTextNode(textNode, [ann], () => {});
+    expect(document.querySelector<HTMLSpanElement>('.avr-word[data-word="challenge"]')?.dataset.translation).toBe('n. 挑战');
+
+    updateWordDisplay('challenge', 'none', null, false);
+    const span = document.querySelector<HTMLSpanElement>('.avr-word[data-word="challenge"]');
+    expect(span?.hasAttribute('data-translation')).toBe(false);
+  });
+});
+
+// ============================================================
+// D-4 / D-6 · 样式常量：宿主排版隔离 + DEC-1 琥珀视觉族
+// （以导出样式常量字符串断言，不改生产行为；真实 computed style 由 E2E AC-4/AC-8 覆盖）
+// ============================================================
+
+/** 从样式模板提取指定 selector 块的声明文本 */
+function styleBlock(styles: string, selector: string): string {
+  const start = styles.indexOf(selector);
+  if (start < 0) throw new Error(`样式模板缺少 selector：${selector}`);
+  const open = styles.indexOf('{', start);
+  const close = styles.indexOf('}', open);
+  if (open < 0 || close < 0) throw new Error(`样式块未闭合：${selector}`);
+  return styles.slice(open + 1, close);
+}
+
+/** 解析 rgb/rgba 颜色的色相（0-360） */
+function hueOf(color: string): number {
+  const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(color);
+  if (!m) throw new Error(`非 rgb/rgba 颜色值：${color}`);
+  const [r, g, b] = [Number(m[1]) / 255, Number(m[2]) / 255, Number(m[3]) / 255];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max === min) return 0;
+  const d = max - min;
+  let h: number;
+  if (max === r) h = ((g - b) / d + 6) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+
+describe('样式常量（D-4 / D-6）', () => {
+  it('不含旧红色系与旧灰色 hex（#e74c3c / #c0392b / #7f8c8d 全部移除）', () => {
+    expect(ANNOTATOR_STYLES).not.toMatch(/#e74c3c|#c0392b|#7f8c8d/i);
+  });
+
+  it('light 为琥珀点线、strong/strong-first 为琥珀实线（DEC-1 强度区分保持）', () => {
+    const light = styleBlock(ANNOTATOR_STYLES, '.avr-light {');
+    expect(light).toContain('text-decoration-style: dotted');
+    const lightHue = hueOf(/text-decoration-color:\s*([^;]+);/.exec(light)![1]!);
+    expect(lightHue).toBeGreaterThanOrEqual(20);
+    expect(lightHue).toBeLessThanOrEqual(50);
+
+    for (const selector of ['.avr-strong {', '.avr-strong-first {']) {
+      const block = styleBlock(ANNOTATOR_STYLES, selector);
+      expect(block).toContain('text-decoration: underline');
+      expect(block).not.toContain('dotted');
+      const hue = hueOf(/text-decoration-color:\s*([^;]+);/.exec(block)![1]!);
+      expect(hue).toBeGreaterThanOrEqual(20);
+      expect(hue).toBeLessThanOrEqual(50);
+    }
+  });
+
+  it('.avr-word 声明宿主排版隔离 inherit !important 族，且保留 text-decoration 下划线机制', () => {
+    const block = styleBlock(ANNOTATOR_STYLES, '.avr-word {');
+    for (const prop of ['font-family', 'font-size', 'font-weight', 'color', 'line-height', 'letter-spacing']) {
+      expect(block).toContain(`${prop}: inherit !important`);
+    }
+    // P-5：下划线仍由 text-decoration 机制承载（零布局位移），不得改为其他机制
+    expect(block).toContain('text-decoration: none');
+    // 下划线承载属性未被破坏：变体块仍用 text-decoration-color/thickness 表达
+    expect(ANNOTATOR_STYLES).toContain('text-decoration-thickness');
+  });
+
+  it('行内释义样式：琥珀棕斜体、11-12px、line-height:1、0.35em 间距、user-select:none', () => {
+    const block = styleBlock(ANNOTATOR_STYLES, '.avr-strong-first::after');
+    expect(block).toContain('content: attr(data-translation)');
+    expect(block).toContain('font-style: italic');
+    expect(block).toContain('line-height: 1');
+    expect(block).toContain('margin-left: 0.35em');
+    expect(block).toContain('user-select: none');
+    const size = /font-size:\s*([\d.]+)px/.exec(block)!;
+    expect(Number(size[1])).toBeGreaterThanOrEqual(11);
+    expect(Number(size[1])).toBeLessThanOrEqual(12);
+    const hue = hueOf(/(?<!text-decoration-)color:\s*([^;]+);/.exec(block)![1]!);
+    expect(hue).toBeGreaterThanOrEqual(20);
+    expect(hue).toBeLessThanOrEqual(50);
+  });
+
+  it('.avr-strong（重复出现）无 ::after 行内释义规则（P-4 首现契约）', () => {
+    // .avr-strong 块自身不带 ::after content 规则；仅 .avr-strong-first::after 消费 data-translation
+    expect(ANNOTATOR_STYLES.match(/\.avr-strong\s*\{[^}]*::after/)).toBeNull();
+    expect(styleBlock(ANNOTATOR_STYLES, '.avr-strong-first::after')).toContain('content: attr(data-translation)');
   });
 });

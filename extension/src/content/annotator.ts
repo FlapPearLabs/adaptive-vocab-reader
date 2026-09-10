@@ -10,6 +10,14 @@ import type { DisplayResult, DisplayDecision } from '../shared/types';
 
 const EXTENSION_CLASS = 'avr-word';
 
+/**
+ * METADATA_RESOLUTION_FAILURE（元数据解析失败）兜底文案（DEC-3 中文优先）。
+ * 领域术语：词条身份可解析，但其展示元数据（音标 / 词性 / 中文释义）缺失或不可用。
+ * 它不是词汇状态，与 known / learning / unknown 正交：不改写 WordState，
+ * 唯一可见后果是省略行内释义并在 tooltip 内给出本固定文案，不合成占位释义。
+ */
+export const METADATA_RESOLUTION_FAILURE_TEXT = '释义暂不可用';
+
 /** 单个词的标注信息：策略决策 + 在文本节点中的精确位置 */
 export interface WordAnnotation {
   /** 策略模块的展示决策 */
@@ -47,44 +55,67 @@ export interface UpdateResult {
 /** CSS 样式注入（仅注入一次） */
 let styleRoots = new WeakSet<Document | ShadowRoot>();
 
-function injectStyles(root: Document | ShadowRoot = document): void {
-  if (styleRoots.has(root)) return;
-  styleRoots.add(root);
-
-  const style = document.createElement('style');
-  style.textContent = `
+/**
+ * 注入样式模板（导出仅供样式常量断言测试使用；hex 只允许出现在本样式模板内，
+ * 不得写进 types.ts 或领域层）。DEC-1 暖琥珀视觉族：light＝淡琥珀点线、
+ * learning＝淡琥珀实线；无红色或刺眼警示色。
+ */
+export const ANNOTATOR_STYLES = `
     .avr-word {
       border: 0;
       background: transparent;
       text-decoration: none;
-      color: inherit;
+      color: inherit !important;
+      font-family: inherit !important;
+      font-size: inherit !important;
+      font-weight: inherit !important;
+      line-height: inherit !important;
+      letter-spacing: inherit !important;
     }
     .avr-strong {
       text-decoration: underline;
-      text-decoration-color: #e74c3c;
+      text-decoration-color: rgba(217, 119, 6, 0.6);
       text-decoration-thickness: 2px;
       cursor: pointer;
+      font-family: inherit !important;
+      font-size: inherit !important;
+      font-weight: inherit !important;
+      line-height: inherit !important;
+      letter-spacing: inherit !important;
     }
     .avr-strong-first {
       text-decoration: underline;
-      text-decoration-color: #e74c3c;
+      text-decoration-color: rgba(217, 119, 6, 0.6);
       text-decoration-thickness: 2px;
       cursor: pointer;
+      font-family: inherit !important;
+      font-size: inherit !important;
+      font-weight: inherit !important;
+      line-height: inherit !important;
+      letter-spacing: inherit !important;
     }
     .avr-strong-first::after {
       content: attr(data-translation);
       display: inline;
-      color: #c0392b;
-      font-size: 0.85em;
-      margin-left: 2px;
+      color: rgba(120, 53, 15, 0.6);
+      font-size: 12px;
+      font-style: italic;
+      line-height: 1;
+      margin-left: 0.35em;
       vertical-align: super;
+      user-select: none;
     }
     .avr-light {
       text-decoration: underline;
       text-decoration-style: dotted;
-      text-decoration-color: #7f8c8d;
+      text-decoration-color: rgba(245, 158, 11, 0.55);
       text-decoration-thickness: 1px;
       cursor: pointer;
+      font-family: inherit !important;
+      font-size: inherit !important;
+      font-weight: inherit !important;
+      line-height: inherit !important;
+      letter-spacing: inherit !important;
     }
     .avr-tooltip {
       position: fixed;
@@ -129,6 +160,13 @@ function injectStyles(root: Document | ShadowRoot = document): void {
       box-shadow: 0 2px 8px rgba(0,0,0,0.25);
     }
   `;
+
+function injectStyles(root: Document | ShadowRoot = document): void {
+  if (styleRoots.has(root)) return;
+  styleRoots.add(root);
+
+  const style = document.createElement('style');
+  style.textContent = ANNOTATOR_STYLES;
   const styleParent = (root as Document).head ?? root;
   styleParent.appendChild(style);
 }
@@ -190,6 +228,23 @@ function showTooltip(surfaceForm: string, phonetic: string, pos: string, transla
   const tip = getTooltip();
   tip.replaceChildren(
     ...[surfaceForm, phonetic, pos, translation].map((line) => {
+      const row = document.createElement('div');
+      row.textContent = line;
+      return row;
+    }),
+  );
+  positionTooltip(tip, target);
+}
+
+/**
+ * METADATA_RESOLUTION_FAILURE 兜底 tooltip（D-1）：元数据缺失时显示词头行
+ * （surfaceForm）与固定兜底文案，不合成占位释义；复用现有 tooltip 元素与定位。
+ */
+function showMetadataFailureTooltip(surfaceForm: string, target: DOMRect): void {
+  const tip = getTooltip();
+  const lines = surfaceForm ? [surfaceForm, METADATA_RESOLUTION_FAILURE_TEXT] : [METADATA_RESOLUTION_FAILURE_TEXT];
+  tip.replaceChildren(
+    ...lines.map((line) => {
       const row = document.createElement('div');
       row.textContent = line;
       return row;
@@ -276,7 +331,12 @@ function installDelegatedHandlers(onAction: (word: string, newStatus: 'known' | 
     const translation = wordEl.dataset.tooltipTranslation;
     const phonetic = wordEl.dataset.phonetic;
     const pos = wordEl.dataset.pos;
-    if (!translation || !phonetic || !pos) return;
+    // METADATA_RESOLUTION_FAILURE（D-1）：任一展示元数据缺失 → 固定兜底 tooltip，
+    // 不静默返回、不合成占位释义；与未收录路径（当前词典未收录）互不混淆。
+    if (!translation || !phonetic || !pos) {
+      showMetadataFailureTooltip(wordEl.textContent || '', rect);
+      return;
+    }
     showTooltip(wordEl.textContent || '', phonetic, pos, translation, rect);
   }, listenerOptions);
 
@@ -300,6 +360,15 @@ function classForDecision(decision: DisplayDecision, showInlineTranslation: bool
     return showInlineTranslation ? 'avr-strong-first' : 'avr-strong';
   }
   return decision === 'light' ? 'avr-light' : '';
+}
+
+/**
+ * D-5 行内释义格式：`{posPrefix}{translation}`（例 `v. 去走`）。
+ * pos 缺失时省略前缀、只显示释义（不得合成词性）；pos 前缀直接取自
+ * DictEntry.pos（ECDICT 词性自带句点，如 `n.` / `n./vt./vi.`）。
+ */
+function formatInlineGloss(pos: string | undefined | null, translation: string): string {
+  return pos ? `${pos} ${translation}` : translation;
 }
 
 /**
@@ -370,7 +439,7 @@ export function annotateTextNode(
       span.className = [EXTENSION_CLASS, classForDecision(frag.result.decision, frag.result.showInlineTranslation)].filter(Boolean).join(' ');
       span.textContent = frag.rawText; // 保留原文大小写
       if (frag.result.translation) {
-        span.setAttribute('data-translation', `【${frag.result.translation}】`);
+        span.setAttribute('data-translation', formatInlineGloss(frag.pos, frag.result.translation));
         span.setAttribute('data-tooltip-translation', frag.result.translation);
       }
       span.setAttribute('data-phonetic', frag.phonetic ?? '');
@@ -429,7 +498,8 @@ export function updateWordDisplay(
       span.classList.add('avr-light');
     }
     if (translation) {
-      span.setAttribute('data-translation', `【${translation}】`);
+      // D-5：pos 前缀取自 span 自身 data-pos（annotateTextNode 已写入）；缺失则省略前缀。
+      span.setAttribute('data-translation', formatInlineGloss(span.dataset.pos, translation));
     } else {
       span.removeAttribute('data-translation');
     }
