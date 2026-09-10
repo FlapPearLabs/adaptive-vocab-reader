@@ -704,6 +704,101 @@ async function main() {
     await uxPage.click('.avr-action-menu button[data-avr-status="learning"]');
     await uxPage.waitForFunction(() => document.querySelector('#hint-light-word .avr-word')?.classList.contains('avr-strong-first'), { timeout: 5_000 });
 
+    // ============================================================
+    // D-7（T-VUX-3）：拖选恢复胶囊几何与文案 —— 居中于选区上方 / 贴顶下翻 /
+    // 左右夹取 / 文案无中英混排 / 零布局位移。
+    // 复用 #ability-word（此刻仍无显式状态，可弹胶囊）；每个场景后还原其内联样式，
+    // 不影响后续 T-SEL-5 / R-UX-S* 断言。
+    // ============================================================
+    const pillPerfBaseline = await uxPage.evaluate(() => {
+      const p = JSON.parse(document.documentElement.dataset.avrPerf || '{}');
+      return { layoutShiftScore: p.layoutShiftScore, layoutShiftSupported: p.layoutShiftSupported };
+    });
+    if (pillPerfBaseline.layoutShiftSupported !== true || pillPerfBaseline.layoutShiftScore !== 0) {
+      throw new Error(`AC-10 失败：初始扫描布局位移基线非 0：${JSON.stringify(pillPerfBaseline)}`);
+    }
+    // 页面内独立 Layout Instability 观测（最严口径：不计 hadRecentInput 豁免）；
+    // 每次拖选场景前重置观测窗口，断言胶囊出现期间布局位移增量为 0。
+    await uxPage.evaluate(() => {
+      window.__avrPillShift = 0;
+      const pillShiftObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) window.__avrPillShift += entry.value;
+      });
+      pillShiftObserver.observe({ type: 'layout-shift' });
+    });
+    const movePillHostTo = (top, left) => uxPage.evaluate(({ targetTop, targetLeft }) => {
+      const host = document.getElementById('ability-word');
+      if (!host) throw new Error('缺少胶囊几何目标 #ability-word');
+      Object.assign(host.style, { position: 'absolute', top: `${targetTop}px`, left: `${targetLeft}px` });
+    }, { targetTop: top, targetLeft: left });
+    const pillGeometryAt = async (top, left) => {
+      await movePillHostTo(top, left);
+      await wait(80); // 等挪位引起的布局位移条目到齐，再重置观测窗口
+      await uxPage.evaluate(() => { window.__avrPillShift = 0; });
+      await selectElementText(uxPage, '#ability-word .avr-word');
+      await uxPage.waitForSelector('.avr-selection-action[data-word="ability"]', { visible: true, timeout: 5_000 });
+      const geo = await uxPage.evaluate(() => {
+        const pill = document.querySelector('.avr-selection-action');
+        if (!pill) throw new Error('AC-1 前置失败：拖选后胶囊不存在');
+        const p = pill.getBoundingClientRect();
+        const sel = window.getSelection().getRangeAt(0).getBoundingClientRect();
+        return {
+          pill: { left: p.left, right: p.right, top: p.top, bottom: p.bottom, width: p.width },
+          sel: { left: sel.left, right: sel.right, top: sel.top, bottom: sel.bottom },
+          text: pill.textContent || '',
+          position: getComputedStyle(pill).position,
+          viewportWidth: window.innerWidth,
+          shift: window.__avrPillShift,
+        };
+      });
+      await uxPage.evaluate(() => {
+        const host = document.getElementById('ability-word');
+        if (host) host.style.cssText = '';
+        window.scrollTo(0, 0);
+      });
+      await uxPage.evaluate(() => document.body.click());
+      await uxPage.waitForFunction(() => document.querySelectorAll('.avr-selection-action').length === 0, { timeout: 5_000 });
+      return geo;
+    };
+
+    // AC-1 / AC-4 / AC-10：正常位置 → 水平居中于选区上方（中心差 ≤ 8px，容差 ±8px）、
+    // 胶囊为 fixed 定位、文案纯中文、出现期间布局位移为 0。
+    const centerGeo = await pillGeometryAt(260, 120);
+    if (centerGeo.position !== 'fixed') {
+      throw new Error(`AC-10 失败：胶囊非 fixed 定位（无法保证零布局位移）：${centerGeo.position}`);
+    }
+    const pillCenterX = centerGeo.pill.left + centerGeo.pill.width / 2;
+    const selCenterX = (centerGeo.sel.left + centerGeo.sel.right) / 2;
+    if (Math.abs(pillCenterX - selCenterX) > 8) {
+      throw new Error(`AC-1 失败：胶囊未水平居中于选区上方：${JSON.stringify(centerGeo)}`);
+    }
+    if (centerGeo.pill.bottom > centerGeo.sel.top) {
+      throw new Error(`AC-1 失败：胶囊不在选区上方：${JSON.stringify(centerGeo)}`);
+    }
+    if (!/^\p{Script=Han}+$/u.test(centerGeo.text)) {
+      throw new Error(`AC-4 失败：胶囊文案非纯中文（存在中英混排或含图标文本）：${JSON.stringify(centerGeo.text)}`);
+    }
+    if (centerGeo.shift !== 0) {
+      throw new Error(`AC-10 失败：胶囊出现产生布局位移：${JSON.stringify(centerGeo)}`);
+    }
+
+    // AC-2：选区贴视口顶部 → 胶囊下移到选区下方，且不越视口顶部（top ≥ 8px 安全边距）。
+    const topGeo = await pillGeometryAt(2, 120);
+    if (topGeo.pill.top < topGeo.sel.bottom || topGeo.pill.top < 8) {
+      throw new Error(`AC-2 失败：贴顶选区未下翻到选区下方或越视口顶部：${JSON.stringify(topGeo)}`);
+    }
+
+    // AC-3：选区贴左右边缘 → 胶囊不越左右视口（左右各 ≥ 8px 边距）。
+    const leftEdgeGeo = await pillGeometryAt(260, 0);
+    if (leftEdgeGeo.pill.left < 8) {
+      throw new Error(`AC-3 失败：贴左缘选区的胶囊越左视口：${JSON.stringify(leftEdgeGeo)}`);
+    }
+    const rightEdgeGeo = await pillGeometryAt(260, await uxPage.evaluate(() => window.innerWidth - 2));
+    if (rightEdgeGeo.pill.right > rightEdgeGeo.viewportWidth - 8) {
+      throw new Error(`AC-3 失败：贴右缘选区的胶囊越右视口：${JSON.stringify(rightEdgeGeo)}`);
+    }
+    console.log(`E2E D7 PILL PASS: center_dx=${Math.abs(pillCenterX - selCenterX).toFixed(1)}, above=true, top_flip_bottom=${topGeo.pill.top >= topGeo.sel.bottom}, top_margin=${topGeo.pill.top.toFixed(1)}, left_margin=${leftEdgeGeo.pill.left.toFixed(1)}, right_margin=${(rightEdgeGeo.viewportWidth - rightEdgeGeo.pill.right).toFixed(1)}, text_han_only=true, pill_layout_shift=0`);
+
     // T-SEL-5 / AC-9：真实拖选后的浏览器 click 不得抢先关闭浮条；包外 query identity 可写 learning。
     const realSelectionBefore = await workerUx1.evaluate(async () => (await chrome.storage.local.get('avr_vocab_snapshot')).avr_vocab_snapshot);
     const evidenceBeforeRealSelection = realSelectionBefore.assessmentEvidence;
