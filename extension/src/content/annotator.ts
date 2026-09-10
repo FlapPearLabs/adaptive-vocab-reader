@@ -126,6 +126,7 @@ function injectStyles(root: Document | ShadowRoot = document): void {
       cursor: pointer;
       padding: 5px 8px;
       font-size: 13px;
+      white-space: nowrap;
       box-shadow: 0 2px 8px rgba(0,0,0,0.25);
     }
   `;

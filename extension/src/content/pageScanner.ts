@@ -87,6 +87,42 @@ export interface PageScanner {
   getPerfReport(): PerfReport;
 }
 
+/** 拖选恢复胶囊（D-7）使用的选区矩形最小字段。 */
+export interface SelectionRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * 拖选恢复胶囊的**局部**定位（D-7）：水平居中于选区上方；上方空间不足时下移到选区下方；
+ * 左右夹取在视口安全边距内。仅供 `.avr-selection-action` 使用——禁止抽象为
+ * tooltip / 浮层 / 胶囊共用的通用几何工具（负向断言 7），也不复制 calculateTooltipPosition 函数体。
+ */
+export function calculateSelectionPillPosition(
+  selectionRect: SelectionRect,
+  pill: Pick<DOMRect, 'width' | 'height'>,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeTop = 8,
+): { left: number; top: number } {
+  const margin = 8;
+  const gap = 6;
+  // 水平：选区中心 x 对齐胶囊中心，再夹取到 [margin, viewportWidth - pill.width - margin]。
+  const left = Math.max(margin, Math.min(
+    (selectionRect.left + selectionRect.right) / 2 - pill.width / 2,
+    viewportWidth - pill.width - margin,
+  ));
+  // 垂直：上方优先（顶 = 选区顶 - 胶囊高 - 间距）；不足 safeTop 时下移到选区下方，
+  // 下翻值同样不越视口底部；两种取值都不得低于 safeTop（不越视口顶部 / 顶部安全区）。
+  const above = selectionRect.top - pill.height - gap;
+  const top = above >= safeTop
+    ? above
+    : Math.min(viewportHeight - pill.height - margin, selectionRect.bottom + gap);
+  return { left, top: Math.max(safeTop, top) };
+}
+
 export function createPageScanner(deps: PageScannerDeps): PageScanner {
   let vocabState: Record<string, WordState> = deps.getState();
   const hintThreshold = deps.hintThreshold === undefined
@@ -147,7 +183,7 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     return normalized;
   }
 
-  function showSelectionAction(word: string, x: number, y: number): void {
+  function showSelectionAction(word: string, selectionRect: SelectionRect): void {
     hideSelectionAction();
     hideAnnotationActionMenu();
 
@@ -156,8 +192,6 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
     button.className = 'avr-selection-action';
     button.textContent = '加入生词本';
     button.dataset.word = word;
-    button.style.left = `${x}px`;
-    button.style.top = `${y + 6}px`;
     button.addEventListener('mousedown', (event) => event.preventDefault());
     button.addEventListener('click', (event) => {
       event.preventDefault();
@@ -167,6 +201,16 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
       if (selectedWord) handleUserAction(selectedWord, 'learning');
     });
     document.body.appendChild(button);
+    // D-7 胶囊局部定位：入 DOM 后测量实际尺寸，按「居中于选区上方 / 不足下移 / 左右夹取」计算。
+    const pillRect = button.getBoundingClientRect();
+    const position = calculateSelectionPillPosition(
+      selectionRect,
+      { width: pillRect.width, height: pillRect.height },
+      window.innerWidth,
+      window.innerHeight,
+    );
+    button.style.left = `${position.left}px`;
+    button.style.top = `${position.top}px`;
     selectionActionEl = button;
   }
 
@@ -184,7 +228,12 @@ export function createPageScanner(deps: PageScannerDeps): PageScanner {
 
     const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
     const rect = range?.getBoundingClientRect();
-    showSelectionAction(lookup.wordKey, rect?.left ?? event.clientX, rect?.bottom ?? event.clientY);
+    // 最小传参调整（非机制改动）：把选区完整 rect 传入，缺选区 rect 时回退为
+    // 鼠标点的塌缩矩形（与旧 `rect?.left ?? event.clientX` 语义一致）。
+    showSelectionAction(
+      lookup.wordKey,
+      rect ?? { left: event.clientX, top: event.clientY, right: event.clientX, bottom: event.clientY },
+    );
     pendingSelectionGestureTarget = event.target;
   });
 
