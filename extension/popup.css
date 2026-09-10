@@ -23,7 +23,7 @@ body {
 }
 
 .app {
-  width: 380px;
+  width: 320px;
   max-height: 600px;
   overflow-y: auto;
   padding: 14px 16px 20px;
@@ -236,4 +236,21 @@ button.primary {
   align-self: flex-start;
   color: var(--muted);
   border-style: dashed;
+}
+
+/* ---- 生词本搜索（D-9：纯展示层筛选，仅会话内存活） ---- */
+
+.notebook-search {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.notebook-search:focus {
+  outline: none;
+  border-color: var(--primary);
 }

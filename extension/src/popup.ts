@@ -27,7 +27,12 @@ import {
 import type { VocabStrategy } from './shared/types';
 import type { VocabularyEstimateResult } from './strategy/index';
 import { loadDictionaryFromJSON, type Dictionary } from './content/dictionary';
-import { selectNotebookEntries } from './popupNotebook';
+import {
+  filterNotebookEntries,
+  NOTEBOOK_EMPTY_TEXT,
+  NOTEBOOK_NO_MATCH_TEXT,
+  selectNotebookEntries,
+} from './popupNotebook';
 
 interface Profile {
   installSeed: string;
@@ -103,6 +108,8 @@ async function main(): Promise<void> {
   let activeTab: 'main' | 'notebook' = 'main';
   /** 当前是否处于每日答题视图（进行中且未跳过）；其余视图由首测状态决定。 */
   let dailyView = false;
+  /** D-9：生词本搜索词，只在 popup 会话内存活，不持久化（隐私边界）。 */
+  let notebookQuery = '';
 
   /** 本地日期（YYYY-MM-DD）；date seam 的最小生产来源，不建设时间服务。 */
   function todayLocalDate(): string {
@@ -136,7 +143,7 @@ async function main(): Promise<void> {
 
   function renderTabs(): void {
     const tabs = el('div', 'popup-tabs');
-    const mainTab = el('button', activeTab === 'main' ? 'popup-tab active' : 'popup-tab', '测评') as HTMLButtonElement;
+    const mainTab = el('button', activeTab === 'main' ? 'popup-tab active' : 'popup-tab', '水平测评') as HTMLButtonElement;
     mainTab.type = 'button';
     mainTab.onclick = () => {
       activeTab = 'main';
@@ -159,28 +166,47 @@ async function main(): Promise<void> {
     screen.append(el('h1', 'title', '生词本'));
     const learningWords = selectNotebookEntries(words, queryDictionary);
     if (learningWords.length === 0) {
-      screen.append(el('p', 'notebook-empty', '暂无生词。'));
+      screen.append(el('p', 'notebook-empty', NOTEBOOK_EMPTY_TEXT));
       app!.append(screen);
       return;
     }
 
+    // D-9：搜索框为纯展示层筛选——输入只重建下方行列表，不改数据源、不写任何状态。
+    const search = document.createElement('input');
+    search.className = 'notebook-search';
+    search.type = 'search';
+    search.placeholder = '搜索单词或释义';
+    search.value = notebookQuery;
     const list = el('div', 'notebook-list');
-    for (const entry of learningWords) {
-      const row = el('div', 'notebook-row');
-      row.dataset.word = entry.word;
-      row.append(
-        el('div', 'notebook-word', entry.word),
-        el('div', 'notebook-phonetic', entry.phonetic),
-        el('div', 'notebook-pos', entry.pos),
-        el('div', 'notebook-translation', entry.translation),
-      );
-      const known = el('button', 'notebook-known', '已掌握') as HTMLButtonElement;
-      known.type = 'button';
-      known.onclick = () => void markNotebookWordKnown(entry.word);
-      row.append(known);
-      list.append(row);
-    }
-    screen.append(list);
+    const renderRows = (): void => {
+      list.innerHTML = '';
+      const visibleWords = filterNotebookEntries(learningWords, notebookQuery);
+      if (visibleWords.length === 0) {
+        list.append(el('p', 'notebook-empty', NOTEBOOK_NO_MATCH_TEXT));
+        return;
+      }
+      for (const entry of visibleWords) {
+        const row = el('div', 'notebook-row');
+        row.dataset.word = entry.word;
+        row.append(
+          el('div', 'notebook-word', entry.word),
+          el('div', 'notebook-phonetic', entry.phonetic),
+          el('div', 'notebook-pos', entry.pos),
+          el('div', 'notebook-translation', entry.translation),
+        );
+        const known = el('button', 'notebook-known', '已掌握') as HTMLButtonElement;
+        known.type = 'button';
+        known.onclick = () => void markNotebookWordKnown(entry.word);
+        row.append(known);
+        list.append(row);
+      }
+    };
+    search.addEventListener('input', () => {
+      notebookQuery = search.value;
+      renderRows();
+    });
+    renderRows();
+    screen.append(search, list);
     app!.append(screen);
   }
 

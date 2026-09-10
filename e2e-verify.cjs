@@ -1197,8 +1197,39 @@ async function main() {
 
     let popupUx2 = await openPopupUx2();
     await popupUx2.waitForSelector('button.primary', { timeout: 10_000 });
+    // T-VUX-4 AC-1：popup .app 计算宽度必须为 320px（经 dist/popup.css 真实产物 + 真实 Chrome 的 getComputedStyle）。
+    const appWidthUx2 = await popupUx2.evaluate(() => getComputedStyle(document.getElementById('app')).width);
+    if (appWidthUx2 !== '320px') throw new Error(`T-VUX-4 AC-1 失败：popup .app 计算宽度应为 320px，实际 ${appWidthUx2}`);
+    // T-VUX-4 AC-2：页签恰好两个（水平测评 / 生词本，DEC-3 中文）；无 Settings（DEC-2）、无本页（DEC-4）。
+    const tabTextsUx2 = await popupUx2.$$eval('.popup-tab', (tabs) => tabs.map((t) => (t.textContent || '').trim()));
+    if (JSON.stringify(tabTextsUx2) !== JSON.stringify(['水平测评', '生词本'])) {
+      throw new Error(`T-VUX-4 AC-2 失败：页签应为 ["水平测评", "生词本"]，实际 ${JSON.stringify(tabTextsUx2)}`);
+    }
+    const forbiddenTabTextsUx2 = ['settings', '设置', '本页', 'this page'];
+    for (const forbidden of forbiddenTabTextsUx2) {
+      if (tabTextsUx2.some((t) => t.toLowerCase().includes(forbidden))) {
+        throw new Error(`T-VUX-4 AC-2 失败：出现禁用页签文案（DEC-2/DEC-4）：${forbidden}`);
+      }
+    }
     await popupUx2.click('button.primary');
     await popupUx2.waitForSelector('.question', { timeout: 10_000 });
+    // T-VUX-4 AC-4 补强：QuizQuestion 四要素（目标词 / 四个候选项 / 独立「不确定」/ 测评中 current/total）显式断言。
+    const quizProbeUx2 = await popupUx2.$eval('.question', (card) => ({
+      word: card.querySelector('.q-word')?.textContent || '',
+      optionCount: card.querySelectorAll('.option').length,
+      unsureCount: card.querySelectorAll('.option.unsure').length,
+      unsureText: card.querySelector('.option.unsure')?.textContent || '',
+    }));
+    const quizHeaderTextUx2 = await popupUx2.$eval('.test-header .title', (t) => t.textContent || '');
+    if (
+      !quizProbeUx2.word ||
+      quizProbeUx2.optionCount !== 5 ||
+      quizProbeUx2.unsureCount !== 1 ||
+      quizProbeUx2.unsureText !== '不确定' ||
+      !/测评中 \d+ \/ \d+/.test(quizHeaderTextUx2)
+    ) {
+      throw new Error(`T-VUX-4 AC-4 失败：QuizQuestion 四要素渲染异常：${JSON.stringify({ ...quizProbeUx2, quizHeaderTextUx2 })}`);
+    }
     const ux2Plan = (await readSnapshotUx2()).initialTest.plan;
     for (let i = 0; i < ux2Plan.questions.length; i++) {
       const question = ux2Plan.questions[i];
@@ -1336,6 +1367,50 @@ async function main() {
       throw new Error(`R-UX-N1 失败：生词本元数据不匹配：${JSON.stringify(firstMetadata)}`);
     }
 
+    // T-VUX-4 AC-9：搜索无匹配 → 中文空状态、零生词行、无英文串（D-10 / DEC-3）。
+    await popupUx2.evaluate(() => {
+      const search = document.querySelector('.notebook-search');
+      if (!search) throw new Error('T-VUX-4 AC-8 前置失败：生词本未渲染搜索框');
+      search.value = 'zzz-t-vux4-no-match';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await popupUx2.waitForSelector('.notebook-empty', { timeout: 5_000 });
+    const noMatchEmptyTextUx2 = await popupUx2.$eval('.notebook-empty', (node) => node.textContent || '');
+    if (!noMatchEmptyTextUx2.trim() || /[A-Za-z]/.test(noMatchEmptyTextUx2)) {
+      throw new Error(`T-VUX-4 AC-9 失败：搜索无匹配空状态必须是中文文案，实际：${noMatchEmptyTextUx2}`);
+    }
+    if (await popupUx2.$$eval('.notebook-row', (rows) => rows.length)) {
+      throw new Error('T-VUX-4 AC-9 失败：搜索无匹配时仍显示生词行');
+    }
+    // T-VUX-4 AC-8：搜索即时筛选（wordKey 与可见释义文本）、行数变化；清空恢复全量且顺序与数据源一致。
+    const filterQueryUx2 = 'serendipity';
+    await popupUx2.evaluate((query) => {
+      const search = document.querySelector('.notebook-search');
+      search.value = query;
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    }, filterQueryUx2);
+    const filteredRowsUx2 = await popupUx2.$$eval('.notebook-row', (rows) => rows.map((row) => row.getAttribute('data-word')));
+    const expectedFilteredUx2 = expectedNotebookWords.filter((word) => {
+      const [phonetic, pos, translation] = queryDictionary[word];
+      return word.includes(filterQueryUx2) || `${phonetic}${pos}${translation}`.toLowerCase().includes(filterQueryUx2);
+    });
+    if (
+      JSON.stringify(filteredRowsUx2) !== JSON.stringify(expectedFilteredUx2) ||
+      filteredRowsUx2.length === 0 ||
+      filteredRowsUx2.length >= expectedNotebookWords.length
+    ) {
+      throw new Error(`T-VUX-4 AC-8 失败：搜索筛选结果或行数变化错误：filtered=${JSON.stringify(filteredRowsUx2)} expected=${JSON.stringify(expectedFilteredUx2)} total=${expectedNotebookWords.length}`);
+    }
+    await popupUx2.evaluate(() => {
+      const search = document.querySelector('.notebook-search');
+      search.value = '';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const restoredRowsUx2 = await popupUx2.$$eval('.notebook-row', (rows) => rows.map((row) => row.getAttribute('data-word')));
+    if (JSON.stringify(restoredRowsUx2) !== JSON.stringify(expectedNotebookWords)) {
+      throw new Error(`T-VUX-4 AC-8 失败：清空搜索未恢复全量原序（数据源排序被改变）：${JSON.stringify(restoredRowsUx2)}`);
+    }
+
     // R-UX-N5：页签切回仍保留首测、每日和估计入口。
     await popupUx2.click('.popup-tab:not(.notebook-tab)');
     await popupUx2.waitForSelector('.summary', { timeout: 10_000 });
@@ -1366,7 +1441,7 @@ async function main() {
     await popupAfterKnown.waitForSelector('.estimate-point', { timeout: 10_000 });
     const estimateAfterKnown = await popupAfterKnown.$eval('.estimate', (el) => el.textContent || '');
     if (estimateAfterKnown !== estimateBeforeNotebook) throw new Error('R-UX-N3 失败：popup manual known 改变了点估计或保守范围');
-    console.log('E2E UX2 PASS: R-UX-N1~N5=true, manual_learning_known_evidence_unchanged=true, estimate_unchanged=true, state_updated_broadcast=true, unmappable_key_kept_hidden=true');
+    console.log('E2E UX2 PASS: R-UX-N1~N5=true, manual_learning_known_evidence_unchanged=true, estimate_unchanged=true, state_updated_broadcast=true, unmappable_key_kept_hidden=true, ac1_width_320px=true, ac2_tabs_exact_two_no_settings_no_thispage=true, ac4_quiz_contract=true, ac8_search_filter_datasource_order_stable=true, ac9_chinese_empty_no_english=true');
   } finally {
     if (browserUx2) browserUx2.disconnect();
     await killChrome(chromeUx2);
